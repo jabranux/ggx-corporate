@@ -157,7 +157,7 @@ export function Transactions() {
         title="Transactions"
         subtitle="Track all your bookings and deliveries"
         action={!showStoreOrders && (
-          <div className="flex items-center gap-2">
+          <div className="flex flex-wrap items-center gap-2">
             {/* View mode toggle */}
             <SegmentedControl
               segments={[
@@ -271,7 +271,9 @@ export function Transactions() {
             </div>
           </CardHeader>
           <CardContent>
-            <Table>
+            {/* Cells stay single-line so the wide table scrolls cleanly on mobile
+                instead of wrapping identifiers; desktop has room so it's unchanged. */}
+            <Table className="[&_td]:whitespace-nowrap [&_th]:whitespace-nowrap">
               <TableHeader>
                 <TableRow>
                   <TableHead>Tracking Number</TableHead>
@@ -456,7 +458,7 @@ export function Transactions() {
                 {/* Expanded transaction list */}
                 {isExpanded && (
                   <div className="border-t border-gray-100">
-                    <Table>
+                    <Table className="[&_td]:whitespace-nowrap [&_th]:whitespace-nowrap">
                       <TableHeader>
                         <TableRow>
                           <TableHead>Tracking Number</TableHead>
