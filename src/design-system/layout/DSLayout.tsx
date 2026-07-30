@@ -326,6 +326,7 @@ function DSLayoutInner() {
 
   // Active section for header nav highlight
   const activeSection = (() => {
+    if (pathname === '/design-system/brand-guidelines') return 'Brand';
     if (pathname.startsWith('/design-system/foundations/') || pathname === '/design-system/icons') return 'Foundations';
     if (pathname.startsWith('/design-system/components/') || pathname.startsWith('/design-system/ggx-components/') || pathname === '/design-system/patterns/payment-options') return 'Components';
     if (pathname.startsWith('/design-system/patterns/')) return 'Patterns';
@@ -334,6 +335,7 @@ function DSLayoutInner() {
   })();
 
   const headerNavLinks = [
+    { label: 'Brand', href: '/design-system/brand-guidelines' },
     { label: 'Foundations', href: '/design-system/foundations/overview' },
     { label: 'Components', href: '/design-system/components/overview' },
     { label: 'Patterns', href: '/design-system/patterns/overview' },

@@ -3,6 +3,29 @@
 > Lightweight resume/checkpoint file. Detailed June 2026 history was archived to
 > `docs/archive/session_log_2026-06.md`.
 
+## Most Recent Work — Brand Guidelines page in the Design System (2026-07-30)
+
+New top-level **Brand** section in the DS reference with a single page,
+`/design-system/brand-guidelines`.
+
+- **Assets** now ship as static files under `public/brand/` so downloads work on
+  any Vercel deployment with no backend: `public/brand/logos/*` (five variants —
+  `full-color`, `full-color-border`, `black`, `white`, `grayscale` — each as
+  `.svg` + `.png`, renamed to kebab-case from the "GGX Logos" pack) and
+  `public/brand/usage/*` (clear-space diagram + six improper-usage crops
+  extracted at 300 dpi from pages 3 and 7 of the GoGo Xpress Brand Guidelines
+  PDF). Reference JPGs are deliberately **not** distributed.
+- **New files:** `src/design-system/data/brandAssets.ts` (asset manifest +
+  provenance comment) and `src/design-system/pages/brand/BrandGuidelinesPage.tsx`
+  (hero, Logos grid with per-format download buttons, Logo usage docs).
+- **Wiring:** `DSNavConfig.ts` gains a `Brand` group before Foundations,
+  `DSAppShell.tsx` gains the `brand-guidelines` route, `DSLayout.tsx` gains the
+  `Brand` header link + active-section mapping. DS `ChangelogPage` entry added.
+- Download buttons are driven off optional `svg`/`png` fields — a missing format
+  disables only its own button. No ZIP, search, filtering, or modal previews.
+- Validated: `npm run build` green; Playwright pass at 375/1440 in light + dark
+  with 0 px horizontal overflow and no failed/4xx asset requests.
+
 ## Most Recent Work — Multi-transaction reports across Business+ + HeyQ (2026-07-17)
 
 "Submit a Ticket" (Support Tickets) now opens the **existing Report an Issue

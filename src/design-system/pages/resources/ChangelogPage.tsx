@@ -10,6 +10,17 @@ interface ChangeEntry {
 
 const CHANGELOG: ChangeEntry[] = [
   {
+    date: '2026-07-30',
+    title: 'Brand Guidelines page',
+    type: 'minor',
+    changes: [
+      'Added a top-level Brand section with a Brand Guidelines page at /design-system/brand-guidelines.',
+      'Published the five official logo variants (Full Color, Full Color Border, Black, White, Grayscale) with SVG and PNG downloads served from public/brand/logos.',
+      'Documented approved logo versions, clear space, and incorrect usage using the illustrations from the GoGo Xpress Brand Guidelines document (public/brand/usage).',
+      'Reference JPGs from the asset pack are intentionally not distributed — SVG and PNG only.',
+    ],
+  },
+  {
     date: '2026-06-30',
     title: 'IA correction: flat component nav, right sidebar on detail pages',
     type: 'minor',

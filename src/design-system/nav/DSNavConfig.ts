@@ -29,6 +29,12 @@ export const DS_NAV_GROUPS: DSNavGroup[] = [
     ],
   },
   {
+    label: 'Brand',
+    items: [
+      { label: 'Brand Guidelines', path: 'brand-guidelines' },
+    ],
+  },
+  {
     label: 'Foundations',
     items: [
       { label: 'Overview', path: 'foundations/overview' },

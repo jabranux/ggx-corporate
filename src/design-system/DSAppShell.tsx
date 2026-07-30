@@ -5,6 +5,9 @@ import { DSLayout } from './layout/DSLayout';
 import { DSOverviewPage } from './pages/DSOverviewPage';
 import { HowThisWorksPage } from './pages/getting-started/HowThisWorksPage';
 
+// Brand
+import { BrandGuidelinesPage } from './pages/brand/BrandGuidelinesPage';
+
 // Foundations
 import { FoundationsOverviewPage } from './pages/foundations/FoundationsOverviewPage';
 import { ColorsPage } from './pages/foundations/ColorsPage';
@@ -92,6 +95,9 @@ export function DSAppShell() {
         {/* Getting Started */}
         <Route index element={<DSOverviewPage />} />
         <Route path="getting-started/how-this-works" element={<HowThisWorksPage />} />
+
+        {/* Brand */}
+        <Route path="brand-guidelines" element={<BrandGuidelinesPage />} />
 
         {/* Foundations */}
         <Route path="foundations/overview" element={<FoundationsOverviewPage />} />
