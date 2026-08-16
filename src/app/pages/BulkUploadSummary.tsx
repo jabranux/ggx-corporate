@@ -623,12 +623,18 @@ export function BulkUploadSummary() {
   const [paymentMode, setPaymentMode] = useState(false);
   const [validBaseCount, setValidBaseCount] = useState(TOTAL_VALID_INITIAL);
   const [spreadsheetRows, setSpreadsheetRows] = useState<SpreadsheetBatchRow[]>([]);
+  // The batch's OWN account scope (captured at upload time) — not the account
+  // currently selected in the switcher, which can differ if the user changes
+  // scope while this page is open or deep-links directly into a batch. Payout
+  // eligibility must follow the batch owner, not whatever's active right now.
+  const [batchAccountId, setBatchAccountId] = useState<string | null>(null);
   useEffect(() => {
     let active = true;
     getBulkUploadById(id ?? '')
       .then((record) => {
         if (!active || !record) return;
         setBatchDate(record.uploadedAt);
+        setBatchAccountId(record.accountId);
         if (record.status === 'awaiting-payment') {
           setPaymentMode(true);
           setValidBaseCount(record.validRows);
@@ -642,6 +648,8 @@ export function BulkUploadSummary() {
       .catch(() => { /* keep fallback date */ });
     return () => { active = false; };
   }, [id]);
+  // Falls back to the active scope only until the batch record has loaded.
+  const payoutAccountId = batchAccountId ?? getCurrentAccountId();
 
   // ── Review-row state ──────────────────────────────────────────────────────
   const [rows, setRows] = useState<ReviewRowData[]>(INITIAL_REVIEW_ROWS);
@@ -811,7 +819,9 @@ export function BulkUploadSummary() {
    * fix/needs-review rows' current edits (the parsed data available on this
    * page). Rows already booked as valid don't carry payment fields here.
    */
-  const hasCodInBatch = rows.some((r) => (edits[r.row]?.cod ?? r.cod) === 'Yes');
+  const hasCodInBatch = isSpreadsheet
+    ? spreadsheetRows.some((r) => r.cod === 'Yes')
+    : rows.some((r) => (edits[r.row]?.cod ?? r.cod) === 'Yes');
 
   /**
    * Final-submission CTA for a fresh batch. COD content requires an eligible
@@ -819,7 +829,7 @@ export function BulkUploadSummary() {
    * point the batch's COD content is fully known and right before submission.
    */
   const handleCompleteBooking = async () => {
-    if (hasCodInBatch && !(await hasEligiblePayoutBank(getCurrentAccountId()))) {
+    if (hasCodInBatch && !(await hasEligiblePayoutBank(payoutAccountId))) {
       setShowPayoutBankModal(true);
       return;
     }
@@ -1341,7 +1351,7 @@ export function BulkUploadSummary() {
       {/* ── COD payout-account guard — opened in place of booking success ── */}
       <PayoutBankModal
         open={showPayoutBankModal}
-        accountId={getCurrentAccountId()}
+        accountId={payoutAccountId}
         onClose={() => setShowPayoutBankModal(false)}
         onEnrolled={() => { setShowPayoutBankModal(false); setShowSuccess(true); }}
         title="Add a payout bank account"

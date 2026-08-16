@@ -80,6 +80,8 @@ export interface SpreadsheetBatchRow {
   /** Raw declared value string (formatted for display by the summary). */
   declaredValue: string;
   parcelSize: string;
+  /** 'Yes' | 'No' — drives the COD payout-account guard on the summary page. */
+  cod: string;
 }
 
 // Session-only map of batchId → captured spreadsheet rows (not persisted).

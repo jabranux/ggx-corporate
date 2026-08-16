@@ -12,10 +12,12 @@ import { Input } from '../components/ui/Input';
 import { AddressBook, type Address } from '../components/AddressBook';
 import { PaymentMethodTabs, type SelectedPaymentMethod } from '../components/PaymentMethodTabs';
 import { SpreadsheetBookingGrid, type GridValidationState } from '../components/SpreadsheetBookingGrid';
+import { PayoutBankModal } from '../components/PayoutBankModal';
 import { estimateFees } from '../lib/bookingFees';
 import { attachmentSubtotal } from '../lib/bookingValidation';
 import { isBillingAccount } from '../services/paymentService';
 import { getInventoryProducts, type InventoryProduct } from '../services/inventoryService';
+import { hasEligiblePayoutBank } from '../services/payoutBankService';
 import {
   addUpload, generateUploadId, createUploadRecord, setSpreadsheetBatchRows,
   type SpreadsheetBatchRow,
@@ -114,14 +116,18 @@ export function BulkSpreadsheet() {
   const merchandiseSubtotal = grid.validRows.reduce((sum, r) => sum + attachmentSubtotal(r.products ?? []), 0);
 
   const [showSuccess, setShowSuccess] = useState(false);
+  const [showPayoutBankModal, setShowPayoutBankModal] = useState(false);
 
   const formatDate = (iso: string) => {
     if (!iso) return 'Tomorrow';
     return new Date(iso).toLocaleDateString('en-PH', { month: 'short', day: 'numeric', year: 'numeric' });
   };
 
-  const handleComplete = () => {
-    if (validCount === 0) return;
+  /** Whether any valid row in the current grid is COD. */
+  const hasCodInBatch = grid.validRows.some((r) => r.cod === 'Yes');
+
+  /** Creates the upload record/snapshot and shows the success dialog. */
+  const completeBooking = () => {
     const id = generateUploadId();
     const snapshotRows: SpreadsheetBatchRow[] = grid.validRows.map((r) => {
       const product = r.products?.length
@@ -136,6 +142,7 @@ export function BulkSpreadsheet() {
         quantity: r.quantity.trim(),
         declaredValue: r.declaredValue.trim(),
         parcelSize: r.parcelSize.trim(),
+        cod: r.cod,
       };
     });
     setSpreadsheetBatchRows(id, snapshotRows);
@@ -149,6 +156,20 @@ export function BulkSpreadsheet() {
       errorRows: 0,
     });
     setShowSuccess(true);
+  };
+
+  /**
+   * Final-submission CTA. COD content requires an eligible payout bank
+   * account before booking can complete — checked here, the latest point
+   * the batch's COD content is fully known and right before submission.
+   */
+  const handleComplete = async () => {
+    if (validCount === 0) return;
+    if (hasCodInBatch && !(await hasEligiblePayoutBank(uploadAccount.accountId))) {
+      setShowPayoutBankModal(true);
+      return;
+    }
+    completeBooking();
   };
 
   if (showAddressBook) {
@@ -473,6 +494,16 @@ export function BulkSpreadsheet() {
           </div>
         </Dialog>
       )}
+
+      {/* COD payout-account guard — opened in place of booking success */}
+      <PayoutBankModal
+        open={showPayoutBankModal}
+        accountId={uploadAccount.accountId}
+        onClose={() => setShowPayoutBankModal(false)}
+        onEnrolled={() => { setShowPayoutBankModal(false); completeBooking(); }}
+        title="Add a payout bank account"
+        description="Your upload contains COD transactions. Add a payout bank account so we have somewhere to send your COD collections."
+      />
     </div>
   );
 }

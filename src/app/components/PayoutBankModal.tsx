@@ -73,6 +73,9 @@ export function PayoutBankModal({
           />
         </div>
       </div>
+      <p className="text-xs text-gray-500 mt-4">
+        Your details are used only for payouts. Verification may take 1–2 business days.
+      </p>
       <div className="flex gap-2.5 justify-end pt-5">
         <Button variant="outline" size="sm" onClick={onClose}>Cancel</Button>
         <Button size="sm" disabled={!canSubmit || submitting} onClick={handleSubmit}>
