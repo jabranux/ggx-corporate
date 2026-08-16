@@ -10,10 +10,11 @@ import { Button } from '../components/ui/Button';
 import { Badge } from '../components/ui/Badge';
 import { Input } from '../components/ui/Input';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '../components/ui/Table';
-import { Dialog } from '../components/ui/Dialog';
+import { Dialog, ConfirmDialog } from '../components/ui/Dialog';
 import { AddressBook, type Address } from '../components/AddressBook';
 import { PaymentPreferenceCard } from '../components/PaymentPreferenceCard';
 import { BulkColumnMapper } from '../components/BulkColumnMapper';
+import { useUploadExitGuard } from '../hooks/useUploadExitGuard';
 import { downloadBulkTemplate, downloadBulkTemplateXls, BULK_TEMPLATE_COLUMNS } from '../data/bulkTemplate';
 import { DROPOFF_LOCATIONS } from '../data/dropoffLocations';
 // Bulk upload reads/writes go through the bulkUploadService facade (not the
@@ -121,11 +122,36 @@ export function BulkUploader() {
     otherDetails: '5th Floor, ABC Building, Ayala Avenue', isPreferred: true,
   });
 
+  // Exit protection — armed once the user has meaningfully started an upload
+  // (file/URL selected, mapping reached/confirmed, or any uploader field
+  // touched) and released once the upload is handed off (background ack) or
+  // successfully completed (fast-processing redirect). A ref (not state) so
+  // handlers below can disarm it synchronously right before a programmatic
+  // redirect, without waiting on a re-render.
+  const uploadTouchedRef = useRef(false);
+  const markTouched = () => { uploadTouchedRef.current = true; };
+  const exitGuard = useUploadExitGuard(uploadTouchedRef);
+  // Rendered into every return branch below (mapping step and address book
+  // both return early), since the blocker can trip on any of them.
+  const exitGuardDialog = exitGuard.state === 'blocked' ? (
+    <ConfirmDialog
+      open
+      onClose={() => exitGuard.reset()}
+      onConfirm={() => exitGuard.proceed()}
+      title="Leave bulk upload?"
+      description="Your current upload progress will be lost if you leave this page."
+      cancelLabel="Continue upload"
+      confirmLabel="Leave uploader"
+      variant="destructive"
+    />
+  ) : null;
+
   // Dismiss the fast-processing modal if the navigate fires before unmount.
   useEffect(() => {
     if (step !== 'fast-processing') return;
     const timer = setTimeout(() => {
       if (pendingUploadId) {
+        uploadTouchedRef.current = false;
         navigate(`/dashboard/bulk-uploader/summary/${pendingUploadId}`);
       }
     }, 2500);
@@ -141,6 +167,7 @@ export function BulkUploader() {
   const captureFile = (file: File | undefined) => {
     if (!file) return;
     setSelectedFile({ name: file.name, size: formatSize(file.size) });
+    markTouched();
   };
 
   const handleDrop = (e: React.DragEvent) => {
@@ -160,7 +187,9 @@ export function BulkUploader() {
     setPendingUploadId(id);
 
     if (!isGgxTemplate(name) && !uploadUrl.trim()) {
-      // Non-template file via drag/browse → show mapping step
+      // Non-template file via drag/browse → show mapping step, with parsed
+      // headers/sample data for review.
+      markTouched();
       setStep('mapping');
       return;
     }
@@ -186,11 +215,16 @@ export function BulkUploader() {
     const id = pendingUploadId ?? generateUploadId();
     const fileName = selectedFile?.name ?? 'upload.csv';
     setPendingUploadId(id);
+    markTouched();
     proceedToProcessing(id, fileName);
   };
 
 
   const handleBackgroundAck = () => {
+    // Acknowledging hands the batch off to background processing — the
+    // session state on this page is cleared, so there is nothing left here to
+    // warn about losing.
+    uploadTouchedRef.current = false;
     setStep('form');
     setSelectedFile(null);
     setUploadUrl('');
@@ -206,6 +240,7 @@ export function BulkUploader() {
   const handleSelectAddress = (address: Address) => {
     setSelectedAddress(address);
     setShowAddressBook(false);
+    markTouched();
   };
 
   // Recent uploads — loaded via the service (session records merged with seed).
@@ -232,6 +267,7 @@ export function BulkUploader() {
           onDownloadTemplate={downloadBulkTemplate}
           scopeAccountId={uploadAccount.accountId}
         />
+        {exitGuardDialog}
       </div>
     );
   }
@@ -240,6 +276,7 @@ export function BulkUploader() {
     return (
       <div className="p-6">
         <AddressBook mode="select" onSelectAddress={handleSelectAddress} onClose={() => setShowAddressBook(false)} />
+        {exitGuardDialog}
       </div>
     );
   }
@@ -378,14 +415,14 @@ export function BulkUploader() {
                 <label className="block text-sm font-medium text-gray-700 mb-1.5">Pick-up or Drop-off</label>
                 <div className="grid grid-cols-2 gap-2">
                   <button
-                    onClick={() => setFirstMile('pickup')}
+                    onClick={() => { setFirstMile('pickup'); markTouched(); }}
                     className={`flex items-center gap-2 px-3 py-2.5 rounded-lg border text-sm font-medium transition-colors ${firstMile === 'pickup' ? 'border-blue-500 bg-blue-50 text-blue-700' : 'border-gray-300 text-gray-700 hover:bg-gray-50'}`}
                   >
                     <IconTruckDelivery className="w-4 h-4 shrink-0" />
                     Pick-up
                   </button>
                   <button
-                    onClick={() => setFirstMile('dropoff')}
+                    onClick={() => { setFirstMile('dropoff'); markTouched(); }}
                     className={`flex items-center gap-2 px-3 py-2.5 rounded-lg border text-sm font-medium transition-colors ${firstMile === 'dropoff' ? 'border-blue-500 bg-blue-50 text-blue-700' : 'border-gray-300 text-gray-700 hover:bg-gray-50'}`}
                   >
                     <IconBuildingStore className="w-4 h-4 shrink-0" />
@@ -396,7 +433,7 @@ export function BulkUploader() {
               {firstMile === 'pickup' && (
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-1.5">Pick-up Date</label>
-                  <Input type="date" value={pickupDate} onChange={(e) => setPickupDate(e.target.value)} />
+                  <Input type="date" value={pickupDate} onChange={(e) => { setPickupDate(e.target.value); markTouched(); }} />
                   <p className="text-xs text-gray-500 mt-1.5">
                     {uploadMode === 'same-day'
                       ? 'Same-day cut-off is 10:00 AM. Orders booked after cut-off move to next day.'
@@ -440,7 +477,7 @@ export function BulkUploader() {
                     <input
                       type="url"
                       value={uploadUrl}
-                      onChange={(e) => setUploadUrl(e.target.value)}
+                      onChange={(e) => { setUploadUrl(e.target.value); markTouched(); }}
                       placeholder="Google Sheet, CSV, or XLS link"
                       className="w-full h-10 pl-9 pr-3 rounded-lg border border-gray-300 text-sm focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent"
                     />
@@ -657,6 +694,9 @@ export function BulkUploader() {
           </Button>
         </div>
       </Dialog>
+
+      {/* Exit protection — in-app navigation away from an in-progress upload */}
+      {exitGuardDialog}
     </div>
   );
 }

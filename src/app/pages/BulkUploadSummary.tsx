@@ -10,11 +10,13 @@ import { Card, CardContent } from '../components/ui/Card';
 import { Button } from '../components/ui/Button';
 import { Input } from '../components/ui/Input';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '../components/ui/Table';
-import { Dialog } from '../components/ui/Dialog';
+import { Dialog, ConfirmDialog } from '../components/ui/Dialog';
 import { PaymentMethodTabs, type SelectedPaymentMethod } from '../components/PaymentMethodTabs';
+import { PayoutBankModal } from '../components/PayoutBankModal';
 import { DROPOFF_LOCATIONS } from '../data/dropoffLocations';
 import { isBillingAccount } from '../services/paymentService';
 import { getBulkUploadById, getSpreadsheetBatchRows, updateUploadStatus, type SpreadsheetBatchRow } from '../services/bulkUploadService';
+import { hasEligiblePayoutBank } from '../services/payoutBankService';
 import { RECEPTACLE_SIZES, BULK_FIELD_LABELS as L } from '../data/bulkTemplate';
 import {
   COD_MAX, isPosNum, isCustomParcelSize, customParcelDimErrors, addressAdvisory,
@@ -22,6 +24,7 @@ import {
 } from '../lib/bookingValidation';
 import { LocationCascadeCells } from '../components/LocationCascadeCells';
 import { useSubAccounts } from '../contexts/SubAccountContext';
+import { useUploadExitGuard } from '../hooks/useUploadExitGuard';
 
 // ---------------------------------------------------------------------------
 // Shared field styles for the editable review grid.
@@ -596,7 +599,7 @@ function ReviewGridHead({ issueLabel, theme }: { issueLabel: string; theme: 'red
 export function BulkUploadSummary() {
   const navigate = useNavigate();
   const { id } = useParams();
-  const { getCurrentAccountName } = useSubAccounts();
+  const { getCurrentAccountName, getCurrentAccountId } = useSubAccounts();
 
   const activeAccountName = getCurrentAccountName();
 
@@ -696,6 +699,17 @@ export function BulkUploadSummary() {
   const [showDropoffs, setShowDropoffs] = useState(false);
   const [showSuccess, setShowSuccess] = useState(false);
 
+  // Exit protection — reaching this page means parsed upload data is already
+  // in review, so the guard is armed for the whole page lifetime and only
+  // released once the batch is successfully booked/paid.
+  const reviewActiveRef = useRef(true);
+  reviewActiveRef.current = !showSuccess;
+  const exitGuard = useUploadExitGuard(reviewActiveRef);
+
+  // COD payout-account guard — checked at final submission (Complete Booking),
+  // the latest point the batch's COD content is fully known.
+  const [showPayoutBankModal, setShowPayoutBankModal] = useState(false);
+
   // ── Live per-row info (messages) vs. snapshot section membership ──────────
   // The issue MESSAGES below are recomputed live from the current edits so they
   // update the instant a user edits a row. The SECTION a row sits in, however, is
@@ -789,6 +803,26 @@ export function BulkUploadSummary() {
   const handleContinueToPayment = () => {
     // Best-effort: mark the batch paid (session records only; seed rows are a no-op).
     if (id) updateUploadStatus(id, 'completed');
+    setShowSuccess(true);
+  };
+
+  /**
+   * Whether the batch being booked contains at least one COD row, from the
+   * fix/needs-review rows' current edits (the parsed data available on this
+   * page). Rows already booked as valid don't carry payment fields here.
+   */
+  const hasCodInBatch = rows.some((r) => (edits[r.row]?.cod ?? r.cod) === 'Yes');
+
+  /**
+   * Final-submission CTA for a fresh batch. COD content requires an eligible
+   * payout bank account before booking can complete — gated here, the latest
+   * point the batch's COD content is fully known and right before submission.
+   */
+  const handleCompleteBooking = async () => {
+    if (hasCodInBatch && !(await hasEligiblePayoutBank(getCurrentAccountId()))) {
+      setShowPayoutBankModal(true);
+      return;
+    }
     setShowSuccess(true);
   };
 
@@ -1192,7 +1226,7 @@ export function BulkUploadSummary() {
               </div>
               <p className="text-xs text-gray-500">{paymentCopy(selectedPayment, billingAvailable)}</p>
             </div>
-            <Button className="w-full" disabled={!canBook} onClick={paymentMode ? handleContinueToPayment : () => setShowSuccess(true)}>
+            <Button className="w-full" disabled={!canBook} onClick={paymentMode ? handleContinueToPayment : handleCompleteBooking}>
               {paymentMode ? 'Continue to payment' : 'Complete Booking'}
             </Button>
             {!paymentMode && fixList.length > 0 ? (
@@ -1302,6 +1336,30 @@ export function BulkUploadSummary() {
             </button>
           </div>
         </div>
+      )}
+
+      {/* ── COD payout-account guard — opened in place of booking success ── */}
+      <PayoutBankModal
+        open={showPayoutBankModal}
+        accountId={getCurrentAccountId()}
+        onClose={() => setShowPayoutBankModal(false)}
+        onEnrolled={() => { setShowPayoutBankModal(false); setShowSuccess(true); }}
+        title="Add a payout bank account"
+        description="Your upload contains COD transactions. Add a payout bank account so we have somewhere to send your COD collections."
+      />
+
+      {/* ── Exit protection — in-app navigation away from this review page ── */}
+      {exitGuard.state === 'blocked' && (
+        <ConfirmDialog
+          open
+          onClose={() => exitGuard.reset()}
+          onConfirm={() => exitGuard.proceed()}
+          title="Leave bulk upload?"
+          description="Your current upload progress will be lost if you leave this page."
+          cancelLabel="Continue upload"
+          confirmLabel="Leave uploader"
+          variant="destructive"
+        />
       )}
     </div>
   );
