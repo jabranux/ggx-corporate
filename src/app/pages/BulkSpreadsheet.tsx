@@ -12,7 +12,7 @@ import { Input } from '../components/ui/Input';
 import { AddressBook, type Address } from '../components/AddressBook';
 import { PaymentMethodTabs, type SelectedPaymentMethod } from '../components/PaymentMethodTabs';
 import { SpreadsheetBookingGrid, type GridValidationState } from '../components/SpreadsheetBookingGrid';
-import { PayoutBankModal } from '../components/PayoutBankModal';
+import { PayoutSetupRequiredDialog } from '../components/PayoutSetupRequiredDialog';
 import { estimateFees } from '../lib/bookingFees';
 import { attachmentSubtotal } from '../lib/bookingValidation';
 import { isBillingAccount } from '../services/paymentService';
@@ -47,7 +47,7 @@ const MODE_LABELS: Record<'standard' | 'same-day' | 'on-demand', string> = {
  */
 export function BulkSpreadsheet() {
   const navigate = useNavigate();
-  const { getCurrentAccountName, getCurrentAccountId, currentAccount } = useSubAccounts();
+  const { getCurrentAccountName, getCurrentAccountId, currentAccount, subAccountsEnabled, isMainAccountView } = useSubAccounts();
   const { user } = useAuth();
   const isManager = user?.role === 'manager';
   const activeAccountName = isManager ? user!.accountName : getCurrentAccountName();
@@ -68,6 +68,9 @@ export function BulkSpreadsheet() {
         accountName: activeAccountName,
         accountType: (currentAccount === 'main' ? 'main' : 'subaccount') as 'main' | 'subaccount',
       };
+  const canManagePayout = user?.role === 'admin'
+    && uploadAccount.accountId === 'main'
+    && (!subAccountsEnabled || isMainAccountView());
 
   const [uploadMode, setUploadMode]   = useState<'standard' | 'same-day' | 'on-demand'>('standard');
   const [firstMile, setFirstMile]     = useState<'pickup' | 'dropoff'>('pickup');
@@ -116,7 +119,7 @@ export function BulkSpreadsheet() {
   const merchandiseSubtotal = grid.validRows.reduce((sum, r) => sum + attachmentSubtotal(r.products ?? []), 0);
 
   const [showSuccess, setShowSuccess] = useState(false);
-  const [showPayoutBankModal, setShowPayoutBankModal] = useState(false);
+  const [showPayoutSetup, setShowPayoutSetup] = useState(false);
 
   const formatDate = (iso: string) => {
     if (!iso) return 'Tomorrow';
@@ -166,7 +169,7 @@ export function BulkSpreadsheet() {
   const handleComplete = async () => {
     if (validCount === 0) return;
     if (hasCodInBatch && !(await hasEligiblePayoutBank(uploadAccount.accountId))) {
-      setShowPayoutBankModal(true);
+      setShowPayoutSetup(true);
       return;
     }
     completeBooking();
@@ -495,14 +498,12 @@ export function BulkSpreadsheet() {
         </Dialog>
       )}
 
-      {/* COD payout-account guard — opened in place of booking success */}
-      <PayoutBankModal
-        open={showPayoutBankModal}
-        accountId={uploadAccount.accountId}
-        onClose={() => setShowPayoutBankModal(false)}
-        onEnrolled={() => { setShowPayoutBankModal(false); completeBooking(); }}
-        title="Add a payout bank account"
-        description="Your upload contains COD transactions. Add a payout bank account so we have somewhere to send your COD collections."
+      {/* COD payout-account guard — payout details are Main Account-owned. */}
+      <PayoutSetupRequiredDialog
+        open={showPayoutSetup}
+        canManagePayout={canManagePayout}
+        onClose={() => setShowPayoutSetup(false)}
+        onManagePayout={() => navigate('/dashboard/payment-settings')}
       />
     </div>
   );

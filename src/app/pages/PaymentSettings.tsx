@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { IconPlus, IconCheck, IconBuilding, IconCreditCard, IconShield, IconShieldLock, IconTrash, IconAlertTriangle } from '@tabler/icons-react';
 import { Card, CardContent } from '../components/ui/Card';
 import { Button } from '../components/ui/Button';
@@ -8,6 +8,14 @@ import { Select } from '../components/ui/Select';
 import { Dialog, ConfirmDialog } from '../components/ui/Dialog';
 import { OtpDialog } from '../components/ui/OtpDialog';
 import { recordFinancialChange } from '../services/financialSecurityService';
+import {
+  addPayoutBankAccount,
+  getPayoutBankAccounts,
+  removePayoutBankAccount,
+  setPrimaryPayoutBankAccount,
+  updatePayoutBankAccount,
+  type PayoutBankAccount,
+} from '../services/payoutBankService';
 import { useSubAccounts } from '../contexts/SubAccountContext';
 import { useAuth } from '../contexts/AuthContext';
 
@@ -21,23 +29,9 @@ interface PaymentMethod {
   verified: boolean;
 }
 
-interface BankAccount {
-  id: string;
-  bank: string;
-  accountMasked: string;
-  accountName: string;
-  isPrimary: boolean;
-  status: 'verified' | 'pending';
-}
-
 const initialMethods: PaymentMethod[] = [
   { id: 'pm1', brand: 'Visa', last4: '4242', expiry: '12/2027', holder: 'Acme Corporation', isDefault: true, verified: true },
   { id: 'pm2', brand: 'Mastercard', last4: '8888', expiry: '08/2028', holder: 'Acme Corporation', isDefault: false, verified: true },
-];
-
-const initialBanks: BankAccount[] = [
-  { id: 'ba1', bank: 'BDO Unibank', accountMasked: '•••• •••• ••34 5678', accountName: 'Acme Corporation', isPrimary: true, status: 'verified' },
-  { id: 'ba2', bank: 'BPI', accountMasked: '•••• •••• ••12 3456', accountName: 'Acme Corporation', isPrimary: false, status: 'pending' },
 ];
 
 type EditState =
@@ -64,7 +58,7 @@ export function PaymentSettings() {
   const financialAccessAllowed = user?.role === 'admin' && (!subAccountsEnabled || isMainAccountView());
 
   const [methods, setMethods] = useState<PaymentMethod[]>(initialMethods);
-  const [banks, setBanks] = useState<BankAccount[]>(initialBanks);
+  const [banks, setBanks] = useState<PayoutBankAccount[]>([]);
   const [edit, setEdit] = useState<EditState>(null);
   const [remove, setRemove] = useState<RemoveState>(null);
   const [otp, setOtp] = useState<OtpAction>(null);
@@ -72,6 +66,16 @@ export function PaymentSettings() {
   // Add forms
   const [addMethod, setAddMethod] = useState<{ brand: string; last4: string; holder: string; expiry: string } | null>(null);
   const [addBank, setAddBank] = useState<{ bank: string; accountName: string; accountNumber: string } | null>(null);
+
+  // Payout banks are shared with COD eligibility through the service layer.
+  // Payment Settings remains the only UI allowed to mutate them.
+  useEffect(() => {
+    let active = true;
+    getPayoutBankAccounts('main')
+      .then((accounts) => { if (active) setBanks(accounts); })
+      .catch(() => { if (active) setBanks([]); });
+    return () => { active = false; };
+  }, []);
 
   // Open the OTP gate for a sensitive action. `run` executes only after verify.
   const requireOtp = (action: string, run: () => void) =>
@@ -95,7 +99,7 @@ export function PaymentSettings() {
       if (e.type === 'method') {
         setMethods((prev) => prev.map((m) => (m.id === e.id ? { ...m, holder: e.holder, expiry: e.expiry } : m)));
       } else {
-        setBanks((prev) => prev.map((b) => (b.id === e.id ? { ...b, accountName: e.accountName } : b)));
+        void updatePayoutBankAccount('main', e.id, { accountName: e.accountName }).then(setBanks);
       }
     });
   };
@@ -107,7 +111,7 @@ export function PaymentSettings() {
     setRemove(null);
     requireOtp(r.type === 'method' ? 'Payment method removed' : 'Bank account removed', () => {
       if (r.type === 'method') setMethods((prev) => prev.filter((m) => m.id !== r.id));
-      else setBanks((prev) => prev.filter((b) => b.id !== r.id));
+      else void removePayoutBankAccount('main', r.id).then(setBanks);
     });
   };
 
@@ -119,7 +123,7 @@ export function PaymentSettings() {
 
   const setPrimaryBank = (id: string) =>
     requireOtp('Primary payout account changed', () =>
-      setBanks((prev) => prev.map((b) => ({ ...b, isPrimary: b.id === id }))),
+      void setPrimaryPayoutBankAccount('main', id).then(setBanks),
     );
 
   // --- Add (form → OTP → add) ---
@@ -140,10 +144,7 @@ export function PaymentSettings() {
     const a = addBank;
     setAddBank(null);
     requireOtp('Bank account added', () => {
-      setBanks((prev) => [
-        ...prev,
-        { id: `ba${Date.now()}`, bank: a.bank, accountMasked: `•••• •••• •••• ${a.accountNumber.slice(-4)}`, accountName: a.accountName, isPrimary: false, status: 'pending' },
-      ]);
+      void addPayoutBankAccount('main', a).then(setBanks);
     });
   };
 

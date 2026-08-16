@@ -12,7 +12,7 @@ import { Input } from '../components/ui/Input';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '../components/ui/Table';
 import { Dialog, ConfirmDialog } from '../components/ui/Dialog';
 import { PaymentMethodTabs, type SelectedPaymentMethod } from '../components/PaymentMethodTabs';
-import { PayoutBankModal } from '../components/PayoutBankModal';
+import { PayoutSetupRequiredDialog } from '../components/PayoutSetupRequiredDialog';
 import { DROPOFF_LOCATIONS } from '../data/dropoffLocations';
 import { isBillingAccount } from '../services/paymentService';
 import { getBulkUploadById, getSpreadsheetBatchRows, updateUploadStatus, type SpreadsheetBatchRow } from '../services/bulkUploadService';
@@ -24,6 +24,7 @@ import {
 } from '../lib/bookingValidation';
 import { LocationCascadeCells } from '../components/LocationCascadeCells';
 import { useSubAccounts } from '../contexts/SubAccountContext';
+import { useAuth } from '../contexts/AuthContext';
 import { useUploadExitGuard } from '../hooks/useUploadExitGuard';
 
 // ---------------------------------------------------------------------------
@@ -599,7 +600,8 @@ function ReviewGridHead({ issueLabel, theme }: { issueLabel: string; theme: 'red
 export function BulkUploadSummary() {
   const navigate = useNavigate();
   const { id } = useParams();
-  const { getCurrentAccountName, getCurrentAccountId } = useSubAccounts();
+  const { getCurrentAccountName, getCurrentAccountId, subAccountsEnabled, isMainAccountView } = useSubAccounts();
+  const { user } = useAuth();
 
   const activeAccountName = getCurrentAccountName();
 
@@ -650,6 +652,9 @@ export function BulkUploadSummary() {
   }, [id]);
   // Falls back to the active scope only until the batch record has loaded.
   const payoutAccountId = batchAccountId ?? getCurrentAccountId();
+  const canManagePayout = user?.role === 'admin'
+    && payoutAccountId === 'main'
+    && (!subAccountsEnabled || isMainAccountView());
 
   // ── Review-row state ──────────────────────────────────────────────────────
   const [rows, setRows] = useState<ReviewRowData[]>(INITIAL_REVIEW_ROWS);
@@ -716,7 +721,7 @@ export function BulkUploadSummary() {
 
   // COD payout-account guard — checked at final submission (Complete Booking),
   // the latest point the batch's COD content is fully known.
-  const [showPayoutBankModal, setShowPayoutBankModal] = useState(false);
+  const [showPayoutSetup, setShowPayoutSetup] = useState(false);
 
   // ── Live per-row info (messages) vs. snapshot section membership ──────────
   // The issue MESSAGES below are recomputed live from the current edits so they
@@ -830,7 +835,7 @@ export function BulkUploadSummary() {
    */
   const handleCompleteBooking = async () => {
     if (hasCodInBatch && !(await hasEligiblePayoutBank(payoutAccountId))) {
-      setShowPayoutBankModal(true);
+      setShowPayoutSetup(true);
       return;
     }
     setShowSuccess(true);
@@ -1348,14 +1353,16 @@ export function BulkUploadSummary() {
         </div>
       )}
 
-      {/* ── COD payout-account guard — opened in place of booking success ── */}
-      <PayoutBankModal
-        open={showPayoutBankModal}
-        accountId={payoutAccountId}
-        onClose={() => setShowPayoutBankModal(false)}
-        onEnrolled={() => { setShowPayoutBankModal(false); setShowSuccess(true); }}
-        title="Add a payout bank account"
-        description="Your upload contains COD transactions. Add a payout bank account so we have somewhere to send your COD collections."
+      {/* ── COD payout-account guard — payout details are Main Account-owned. ── */}
+      <PayoutSetupRequiredDialog
+        open={showPayoutSetup}
+        canManagePayout={canManagePayout}
+        onClose={() => setShowPayoutSetup(false)}
+        onManagePayout={() => {
+          // Finance setup is an intentional handoff, not an abandoned upload.
+          reviewActiveRef.current = false;
+          navigate('/dashboard/payment-settings');
+        }}
       />
 
       {/* ── Exit protection — in-app navigation away from this review page ── */}

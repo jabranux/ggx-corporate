@@ -3,6 +3,22 @@
 > Lightweight resume/checkpoint file. Detailed June 2026 history was archived to
 > `docs/archive/session_log_2026-06.md`.
 
+## Most Recent Work — Centralized COD payout eligibility (2026-08-16)
+
+- Payout bank accounts are now **Main Account-owned**. `payoutBankService` is
+  the shared finance/BFF seam used by Payment Settings and both Bulk Booking
+  paths; it resolves a batch/subaccount scope to its Main Account payout owner.
+- Only OTP-gated Payment Settings mutates payout bank details. New accounts are
+  `pending` and cannot satisfy COD eligibility until the finance verification
+  state becomes `verified`.
+- File-upload review and in-app spreadsheet COD guards now block with a shared
+  `PayoutSetupRequiredDialog`. Main Account admins in Main Account view can go
+  to Payment Settings; Subaccount users see guidance to contact their Main
+  Account admin. Neither flow collects payout details or auto-completes a COD
+  booking after enrollment.
+- Validated with `npm run typecheck` and `npm run build`; the repository's test
+  script remains HeyQ-integration-only and does not cover these pages.
+
 ## Most Recent Work — Brand Guidelines page in the Design System (2026-07-30)
 
 New top-level **Brand** section in the DS reference with a single page,
