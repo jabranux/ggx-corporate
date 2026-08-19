@@ -86,18 +86,16 @@ export function PaymentSettings() {
     return () => { active = false; };
   }, [isJourneyP1]);
 
-  // Journey-only payout bank list: starts empty ("no eligible payout bank"),
-  // becomes one pending (never verified) entry after Add Bank Account + OTP.
-  const journeyBanks: PayoutBankAccount[] = journey.codPayout.status === 'pending'
-    ? [{
-        id: 'journey-bank',
-        bank: journey.codPayout.bank ?? '',
-        accountMasked: journey.codPayout.accountMasked ?? '',
-        accountName: journey.codPayout.accountName ?? '',
-        isPrimary: true,
-        status: 'pending',
-      }]
-    : [];
+  // Journey-only payout bank list: starts empty ("no payout account"), and any
+  // account added is immediately usable — no Pending/verification state.
+  const journeyBanks: PayoutBankAccount[] = journey.payoutAccounts.map((a) => ({
+    id: a.id,
+    bank: a.bank,
+    accountMasked: `•••• •••• •••• ${a.accountNumber.slice(-4)}`,
+    accountName: a.accountName,
+    isPrimary: a.isDefault,
+    status: 'verified',
+  }));
   const displayBanks = isJourneyP1 ? journeyBanks : banks;
 
   // Open the OTP gate for a sensitive action. `run` executes only after verify.
@@ -122,7 +120,7 @@ export function PaymentSettings() {
       if (e.type === 'method') {
         setMethods((prev) => prev.map((m) => (m.id === e.id ? { ...m, holder: e.holder, expiry: e.expiry } : m)));
       } else if (isJourneyP1) {
-        journey.updateCodPayoutAccountName(e.accountName);
+        journey.updatePayoutAccountName(e.id, e.accountName);
       } else {
         void updatePayoutBankAccount('main', e.id, { accountName: e.accountName }).then(setBanks);
       }
@@ -136,7 +134,7 @@ export function PaymentSettings() {
     setRemove(null);
     requireOtp(r.type === 'method' ? 'Payment method removed' : 'Bank account removed', () => {
       if (r.type === 'method') setMethods((prev) => prev.filter((m) => m.id !== r.id));
-      else if (isJourneyP1) journey.clearCodPayoutBank();
+      else if (isJourneyP1) journey.removePayoutAccount(r.id);
       else void removePayoutBankAccount('main', r.id).then(setBanks);
     });
   };
@@ -171,9 +169,9 @@ export function PaymentSettings() {
     setAddBank(null);
     requireOtp('Bank account added', () => {
       if (isJourneyP1) {
-        // Journey fixture only supports None → Pending; a new bank never
-        // starts verified, matching real payout verification rules.
-        journey.setCodPayoutPending(a);
+        // Journey accounts are added and immediately usable — no Pending
+        // state. The first one added becomes the default automatically.
+        journey.addPayoutAccount(a);
       } else {
         void addPayoutBankAccount('main', a).then(setBanks);
       }
@@ -298,7 +296,7 @@ export function PaymentSettings() {
           <h2 className="text-xl font-semibold text-gray-900 mb-1">Payout Bank Accounts</h2>
           <p className="text-sm text-gray-600 mb-4">For receiving COD earnings and online payment settlements</p>
 
-          {isJourneyP1 && journey.codPayout.status === 'none' && (
+          {isJourneyP1 && journey.payoutAccounts.length === 0 && (
             <div className="mb-4 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
               No payout bank on file yet — this UX Journey preview starts from a clean Main Account with COD blocked.
             </div>

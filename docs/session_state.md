@@ -3,6 +3,51 @@
 > Lightweight resume/checkpoint file. Detailed June 2026 history was archived to
 > `docs/archive/session_log_2026-06.md`.
 
+## Most Recent Work — P1 payout account rules corrected: no Pending state (2026-08-19)
+
+Second correction pass on the COD Main Account Payout Setup UX Journey (P1) —
+removes an incorrectly-introduced Pending/verification state.
+
+- **Product rule change:** a successfully added payout account is immediately
+  usable. There is no Pending state, no separate verification step, no fake
+  external verification, and no delayed COD activation. `JourneyContext`'s
+  `codPayout: { status: 'none' | 'pending' }` slot is replaced by
+  `payoutAccounts: JourneyPayoutAccount[]` (`id`, `bank`, `accountName`,
+  `accountNumber`, `isDefault`) with `addPayoutAccount` / `updatePayoutAccountName`
+  / `removePayoutAccount`. The array shape is deliberate: it leaves room for a
+  future multi-account/default-selection UI without building one now — the
+  first account added always becomes `isDefault: true` automatically.
+- **Account-number validation (new):** `lib/journeyPayoutValidation.ts` —
+  `isValidPayoutAccountNumber(bank, accountNumber)` requires exactly 13
+  characters for this POC (bank-agnostic on purpose; `bank` stays in the
+  signature so a future per-bank backend rule is a body-only change).
+  `PayoutSetupDrawer` shows an inline error and disables Continue until valid,
+  matching the app's existing disabled-until-valid form pattern — scoped to
+  the journey drawer only; Payment Settings' real Add Bank Account dialog is
+  unchanged.
+- **Success state:** `PayoutSetupDrawer`'s success panel is now an account
+  preview card (bank icon, bank name, masked number via the same
+  `•••• •••• •••• 1234` format `payoutBankService` already uses, account
+  holder name) with **Default** + **Added** badges — no Pending badge, no
+  Pending copy. Values come from the submitted form state, not hardcoded.
+  Closing the drawer returns to Bulk Upload without auto-completing the
+  booking (unchanged from the prior correction).
+- **COD eligibility (`BulkUploadSummary.handleCompleteBooking`):** for P1,
+  `eligible = journey.payoutAccounts.some((a) => a.isDefault)` — no payout
+  account → blocked; first account added → default → COD proceeds. No
+  `pending`/`verified` transition exists to model.
+- **PaymentSettings** journey-bank mapping updated to the new shape (`status`
+  is always `'verified'` for journey accounts — there's no other state to
+  represent); edit/remove/add handlers renamed to the new context API.
+  Non-journey Payment Settings behavior is unchanged.
+- **Tests:** `tests/journey-mode.test.mjs` — new `journeyPayoutValidation`
+  logic suite, and the P1 DOM test rewritten to assert: invalid length blocks
+  Continue with an inline error, exactly-13 succeeds, the success card shows
+  bank/masked-number/account-name/Default/Added with zero "Pending" text
+  anywhere, closing the drawer does NOT auto-complete the booking, and a
+  second Complete Booking click now succeeds with no re-prompt. **70/70**
+  full suite, typecheck + build green.
+
 ## Most Recent Work — UX Journey Showcase Mode corrections (2026-08-19)
 
 Two stakeholder-driven corrections on top of the initial Journey Showcase Mode

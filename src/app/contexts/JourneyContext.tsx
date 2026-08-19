@@ -19,11 +19,19 @@ import type { JourneyEditDeliveryDraft } from '../data/journeyTransactionFixture
  * for the intended usage pattern.
  */
 
-export interface JourneyPayoutBankState {
-  status: 'none' | 'pending';
-  bank?: string;
-  accountName?: string;
-  accountMasked?: string;
+export interface JourneyPayoutAccount {
+  id: string;
+  bank: string;
+  accountName: string;
+  /** Raw (mock) account number — masking is derived at render time. */
+  accountNumber: string;
+  /**
+   * Exactly one account is default at a time. The first successfully added
+   * account becomes it automatically; this array shape (rather than a single
+   * bank slot) exists so a future multi-account/default-selection UI has
+   * somewhere to plug in — none is built now, per product guidance.
+   */
+  isDefault: boolean;
 }
 
 export interface JourneySddCutoffState {
@@ -56,10 +64,12 @@ interface JourneyContextValue {
   exitJourney: () => void;
   scenarioCapabilities: JourneyScenarioCapabilities;
 
-  codPayout: JourneyPayoutBankState;
-  setCodPayoutPending: (details: { bank: string; accountName: string; accountNumber: string }) => void;
-  updateCodPayoutAccountName: (accountName: string) => void;
-  clearCodPayoutBank: () => void;
+  /** No Pending/verification state: an account is either absent or added-and-usable. */
+  payoutAccounts: JourneyPayoutAccount[];
+  /** Adds a payout account; the first one added becomes the default automatically. */
+  addPayoutAccount: (details: { bank: string; accountName: string; accountNumber: string }) => void;
+  updatePayoutAccountName: (id: string, accountName: string) => void;
+  removePayoutAccount: (id: string) => void;
 
   sddCutoff: JourneySddCutoffState;
   acknowledgeSddCutoff: () => void;
@@ -71,7 +81,7 @@ interface JourneyContextValue {
 
 const JourneyContext = createContext<JourneyContextValue | undefined>(undefined);
 
-const initialCodPayout = (): JourneyPayoutBankState => ({ status: 'none' });
+const initialPayoutAccounts = (): JourneyPayoutAccount[] => [];
 
 const initialSddCutoff = (): JourneySddCutoffState => ({
   simulatedNowLabel: 'Tuesday · 10:47 AM (Asia/Manila)',
@@ -91,14 +101,14 @@ export function JourneyProvider({ children }: { children: ReactNode }) {
   const [isDrawerOpen, setIsDrawerOpen] = useState(false);
   const returnRouteRef = useRef<string | null>(null);
 
-  const [codPayout, setCodPayout] = useState<JourneyPayoutBankState>(initialCodPayout);
+  const [payoutAccounts, setPayoutAccounts] = useState<JourneyPayoutAccount[]>(initialPayoutAccounts);
   const [sddCutoff, setSddCutoff] = useState<JourneySddCutoffState>(initialSddCutoff);
   const [editDelivery, setEditDelivery] = useState<JourneyEditDeliveryState>(initialEditDelivery);
 
   const activeJourney = getJourneyDefinition(activeJourneyId);
 
   const resetAllScenarioState = () => {
-    setCodPayout(initialCodPayout());
+    setPayoutAccounts(initialPayoutAccounts());
     setSddCutoff(initialSddCutoff());
     setEditDelivery(initialEditDelivery());
   };
@@ -131,19 +141,33 @@ export function JourneyProvider({ children }: { children: ReactNode }) {
     [activeJourneyId],
   );
 
-  const setCodPayoutPending: JourneyContextValue['setCodPayoutPending'] = (details) => {
-    setCodPayout({
-      status: 'pending',
-      bank: details.bank,
-      accountName: details.accountName,
-      accountMasked: `•••• •••• •••• ${details.accountNumber.slice(-4)}`,
-    });
+  const addPayoutAccount: JourneyContextValue['addPayoutAccount'] = (details) => {
+    setPayoutAccounts((prev) => [
+      ...prev,
+      {
+        id: `journey-bank-${prev.length + 1}-${Date.now()}`,
+        bank: details.bank,
+        accountName: details.accountName,
+        accountNumber: details.accountNumber,
+        // The Main Account's first payout account becomes the default
+        // automatically — no separate action required.
+        isDefault: prev.length === 0,
+      },
+    ]);
   };
 
-  const updateCodPayoutAccountName = (accountName: string) =>
-    setCodPayout((prev) => (prev.status === 'pending' ? { ...prev, accountName } : prev));
+  const updatePayoutAccountName = (id: string, accountName: string) =>
+    setPayoutAccounts((prev) => prev.map((a) => (a.id === id ? { ...a, accountName } : a)));
 
-  const clearCodPayoutBank = () => setCodPayout(initialCodPayout());
+  const removePayoutAccount = (id: string) =>
+    setPayoutAccounts((prev) => {
+      const next = prev.filter((a) => a.id !== id);
+      // Keep exactly one default when one remains and the removed account was it.
+      if (next.length > 0 && !next.some((a) => a.isDefault)) {
+        return next.map((a, i) => (i === 0 ? { ...a, isDefault: true } : a));
+      }
+      return next;
+    });
 
   const acknowledgeSddCutoff = () => setSddCutoff((prev) => ({ ...prev, acknowledged: true }));
 
@@ -162,10 +186,10 @@ export function JourneyProvider({ children }: { children: ReactNode }) {
     enterJourney,
     exitJourney,
     scenarioCapabilities,
-    codPayout,
-    setCodPayoutPending,
-    updateCodPayoutAccountName,
-    clearCodPayoutBank,
+    payoutAccounts,
+    addPayoutAccount,
+    updatePayoutAccountName,
+    removePayoutAccount,
     sddCutoff,
     acknowledgeSddCutoff,
     editDelivery,

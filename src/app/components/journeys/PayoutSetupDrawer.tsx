@@ -3,41 +3,62 @@ import { IconX, IconBuilding, IconShieldLock, IconCircleCheck } from '@tabler/ic
 import { Button } from '../ui/Button';
 import { Select } from '../ui/Select';
 import { Input } from '../ui/Input';
+import { Badge } from '../ui/Badge';
 import { OtpDialog } from '../ui/OtpDialog';
+import { isValidPayoutAccountNumber, PAYOUT_ACCOUNT_NUMBER_LENGTH } from '../../lib/journeyPayoutValidation';
 
 const BANKS = ['BDO Unibank', 'BPI', 'Metrobank', 'UnionBank', 'Landbank', 'PNB', 'Security Bank'];
+
+interface SubmittedAccount {
+  bank: string;
+  accountName: string;
+  accountNumber: string;
+  /** Whether this was the Main Account's first payout account (and so became the default). */
+  isDefault: boolean;
+}
 
 interface PayoutSetupDrawerProps {
   open: boolean;
   onClose: () => void;
   /** Submits the new bank account into journey scenario state only — never the real payoutBankService. */
   onSubmit: (details: { bank: string; accountName: string; accountNumber: string }) => void;
+  /** Whether this will be the Main Account's first payout account (drives the "Default" preview). */
+  willBeDefault: boolean;
 }
+
+const maskAccountNumber = (accountNumber: string) => `•••• •••• •••• ${accountNumber.slice(-4)}`;
 
 /**
  * P1 UX Journey — inline Main Account payout bank setup, presented as a
- * right-side drawer WITHIN Bulk Upload. Reuses the same fields, validation
- * shape, and OTP gate (`OtpDialog`) as Payment Settings' Add Bank Account
- * flow, but never navigates away — Bulk Upload stays the underlying task
- * context throughout, per the correction in this task.
+ * right-side drawer WITHIN Bulk Upload. Reuses the same fields and OTP gate
+ * (`OtpDialog`) as Payment Settings' Add Bank Account flow, but never
+ * navigates away — Bulk Upload stays the underlying task context throughout.
+ *
+ * A successfully added account is immediately usable: there is no Pending/
+ * verification state or delayed activation in this journey.
  */
-export function PayoutSetupDrawer({ open, onClose, onSubmit }: PayoutSetupDrawerProps) {
+export function PayoutSetupDrawer({ open, onClose, onSubmit, willBeDefault }: PayoutSetupDrawerProps) {
   const [bank, setBank] = useState('');
   const [accountName, setAccountName] = useState('Acme Corporation');
   const [accountNumber, setAccountNumber] = useState('');
   const [showOtp, setShowOtp] = useState(false);
-  const [submittedBank, setSubmittedBank] = useState<string | null>(null);
+  const [submitted, setSubmitted] = useState<SubmittedAccount | null>(null);
 
   if (!open) return null;
 
-  const canSubmit = bank.trim().length > 0 && accountNumber.trim().length > 0;
+  const accountNumberValid = isValidPayoutAccountNumber(bank, accountNumber);
+  // Live feedback once the field has content — matches the existing
+  // review-grid pattern of showing inline errors as the user edits, without
+  // an initial red state on a still-empty field.
+  const showAccountNumberError = accountNumber.length > 0 && !accountNumberValid;
+  const canSubmit = bank.trim().length > 0 && accountNumberValid;
 
   const reset = () => {
     setBank('');
     setAccountName('Acme Corporation');
     setAccountNumber('');
     setShowOtp(false);
-    setSubmittedBank(null);
+    setSubmitted(null);
   };
 
   const close = () => {
@@ -46,14 +67,14 @@ export function PayoutSetupDrawer({ open, onClose, onSubmit }: PayoutSetupDrawer
   };
 
   const handleContinue = () => {
-    if (!canSubmit) return;
+    if (!canSubmit) return; // the Continue button is disabled until valid
     setShowOtp(true);
   };
 
   const handleVerified = () => {
     setShowOtp(false);
     onSubmit({ bank, accountName, accountNumber });
-    setSubmittedBank(bank);
+    setSubmitted({ bank, accountName, accountNumber, isDefault: willBeDefault });
   };
 
   return (
@@ -75,16 +96,34 @@ export function PayoutSetupDrawer({ open, onClose, onSubmit }: PayoutSetupDrawer
           </button>
         </div>
 
-        {submittedBank ? (
+        {submitted ? (
           <div className="flex-1 flex flex-col items-center justify-center text-center p-8">
-            <div className="w-14 h-14 rounded-full bg-amber-50 flex items-center justify-center mb-4">
-              <IconCircleCheck className="w-8 h-8 text-amber-600" />
+            <div className="w-14 h-14 rounded-full bg-emerald-50 flex items-center justify-center mb-4">
+              <IconCircleCheck className="w-8 h-8 text-emerald-600" />
             </div>
-            <h3 className="text-lg font-semibold text-gray-900">Bank account submitted</h3>
+            <h3 className="text-lg font-semibold text-gray-900">Payout account added</h3>
             <p className="text-sm text-gray-500 mt-1 max-w-xs">
-              {submittedBank} is now <span className="font-medium text-gray-700">Pending</span> verification. COD
-              bookings stay unavailable until it&apos;s verified — this preview does not fake verification.
+              This account is added and ready to receive COD payouts — no further verification needed.
             </p>
+
+            {/* Account preview card */}
+            <div className="mt-5 w-full max-w-xs text-left rounded-xl border border-green-200 bg-green-50/60 p-4">
+              <div className="flex items-start gap-3">
+                <div className="w-10 h-10 rounded-lg bg-green-600 flex items-center justify-center flex-shrink-0">
+                  <IconBuilding className="w-5 h-5 text-white" />
+                </div>
+                <div className="min-w-0 flex-1">
+                  <p className="font-semibold text-gray-900 text-sm leading-snug">{submitted.bank}</p>
+                  <p className="text-xs text-gray-500 mt-0.5 font-mono">{maskAccountNumber(submitted.accountNumber)}</p>
+                  <p className="text-xs text-gray-500 truncate">{submitted.accountName}</p>
+                </div>
+              </div>
+              <div className="flex flex-wrap gap-1.5 mt-3">
+                {submitted.isDefault && <Badge variant="info">Default</Badge>}
+                <Badge variant="success">Added</Badge>
+              </div>
+            </div>
+
             <Button className="mt-6" onClick={close}>Back to Bulk Upload</Button>
           </div>
         ) : (
@@ -103,7 +142,18 @@ export function PayoutSetupDrawer({ open, onClose, onSubmit }: PayoutSetupDrawer
               </div>
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1.5">Account Number</label>
-                <Input value={accountNumber} onChange={(e) => setAccountNumber(e.target.value)} placeholder="Account number" />
+                <Input
+                  value={accountNumber}
+                  onChange={(e) => setAccountNumber(e.target.value)}
+                  placeholder="Account number"
+                  className={showAccountNumberError ? 'border-red-500 focus-visible:ring-red-500 bg-red-50' : ''}
+                  aria-invalid={showAccountNumberError}
+                />
+                {showAccountNumberError && (
+                  <p className="text-xs text-red-600 mt-1.5">
+                    Account number must be exactly {PAYOUT_ACCOUNT_NUMBER_LENGTH} characters (currently {accountNumber.trim().length}).
+                  </p>
+                )}
               </div>
               <p className="text-xs text-gray-500 flex items-center gap-1.5">
                 <IconShieldLock className="w-3.5 h-3.5" />

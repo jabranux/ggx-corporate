@@ -881,10 +881,13 @@ export function BulkUploadSummary() {
    */
   const handleCompleteBooking = async () => {
     // The P1 journey's payout eligibility is journey-fixture-only (never the
-    // real payoutBankService) and the fixture only ever reaches "pending" —
-    // matching the real rule that a pending bank never satisfies COD
-    // eligibility, so `eligible` stays false throughout the journey.
-    const eligible = isJourneyP1 ? false : await hasEligiblePayoutBank(payoutAccountId);
+    // real payoutBankService): no payout account → blocked; once the Main
+    // Account has a default payout account (the first one added, added and
+    // immediately usable — no Pending/verification step) the requirement is
+    // satisfied.
+    const eligible = isJourneyP1
+      ? journey.payoutAccounts.some((a) => a.isDefault)
+      : await hasEligiblePayoutBank(payoutAccountId);
     if (hasCodInBatch && !eligible) {
       setShowPayoutSetup(true);
       return;
@@ -1426,13 +1429,15 @@ export function BulkUploadSummary() {
 
       {/* P1 UX Journey — inline payout setup, reusing the same OTP-gated bank
           fields as Payment Settings, presented within Bulk Upload. Submission
-          only updates journey scenario state (never payoutBankService), so
-          the batch's COD remains blocked (Pending, not Verified). */}
+          only updates journey scenario state (never payoutBankService); a
+          successfully added account is immediately usable — no Pending or
+          verification step. */}
       {isJourneyP1 && (
         <PayoutSetupDrawer
           open={showJourneyPayoutDrawer}
           onClose={() => setShowJourneyPayoutDrawer(false)}
-          onSubmit={(details) => journey.setCodPayoutPending(details)}
+          onSubmit={(details) => journey.addPayoutAccount(details)}
+          willBeDefault={journey.payoutAccounts.length === 0}
         />
       )}
 

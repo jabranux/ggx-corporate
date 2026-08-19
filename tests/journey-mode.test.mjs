@@ -102,6 +102,26 @@ describe('journeyPricing (P3 revised-amount preview)', () => {
   });
 });
 
+describe('journeyPayoutValidation (P1 account-number rule)', () => {
+  it('requires exactly 13 characters, regardless of bank', async () => {
+    const results = await page.evaluate(async () => {
+      const mod = await import('/src/app/lib/journeyPayoutValidation.ts');
+      return {
+        tooShort: mod.isValidPayoutAccountNumber('PNB', '12345'),
+        tooLong: mod.isValidPayoutAccountNumber('PNB', '12345678901234'),
+        exact: mod.isValidPayoutAccountNumber('PNB', '1234567890654'),
+        exactDifferentBank: mod.isValidPayoutAccountNumber('BDO Unibank', '1234567890654'),
+        length: mod.PAYOUT_ACCOUNT_NUMBER_LENGTH,
+      };
+    });
+    assert.equal(results.tooShort, false);
+    assert.equal(results.tooLong, false);
+    assert.equal(results.exact, true);
+    assert.equal(results.exactDifferentBank, true, 'the POC rule is bank-agnostic (13 chars for every bank)');
+    assert.equal(results.length, 13);
+  });
+});
+
 describe('journey registry', () => {
   it('lists exactly the finished journeys, grouped by category/subcategory', async () => {
     const groups = await page.evaluate(async () => {
@@ -159,7 +179,7 @@ describe('P1 — COD Main Account Payout Setup', () => {
     }
   });
 
-  it('sets up a Pending payout bank inline within Bulk Upload — never navigating to Payment Settings', async () => {
+  it('adds a payout account inline within Bulk Upload — no Pending state, immediately usable, default, COD unblocked', async () => {
     const mgr = await signIn(server.base, 'manager');
     try {
       // Launch the journey from an arbitrary starting route.
@@ -184,26 +204,48 @@ describe('P1 — COD Main Account Payout Setup', () => {
         'must stay on Bulk Upload — no navigation to Payment Settings',
       );
 
-      // Same bank fields + OTP behavior as Payment Settings' Add Bank Account.
-      await drawer.locator('select').selectOption('BDO Unibank');
-      await drawer.locator('input[placeholder="Account number"]').fill('1234567890');
+      await drawer.locator('select').selectOption('PNB');
+
+      // Invalid account-number length is rejected before OTP.
+      await drawer.locator('input[placeholder="Account number"]').fill('12345');
+      await drawer.getByText(/must be exactly 13 characters/i).waitFor({ timeout: 10_000 });
+      const continueDisabled = await drawer.getByRole('button', { name: /^continue$/i }).isDisabled();
+      assert.equal(continueDisabled, true, 'Continue must stay disabled for an invalid account-number length');
+
+      // Exactly 13 characters — same OTP behavior as Payment Settings' Add Bank Account.
+      await drawer.locator('input[placeholder="Account number"]').fill('1234567890654');
+      await drawer.getByText(/must be exactly 13 characters/i).waitFor({ state: 'hidden', timeout: 10_000 });
       await drawer.getByRole('button', { name: /^continue$/i }).click();
 
       await mgr.page.getByPlaceholder('------').fill('123456');
       await mgr.page.getByRole('button', { name: /verify & continue/i }).click();
 
-      await drawer.getByText(/bank account submitted/i).waitFor({ timeout: 10_000 });
-      await drawer.getByText(/pending/i).first().waitFor();
-      await drawer.getByRole('button', { name: /back to bulk upload/i }).click();
+      // Success state — account preview, no Pending anywhere, first account is Default.
+      await drawer.getByText(/payout account added/i).waitFor({ timeout: 10_000 });
+      await drawer.getByText('PNB').waitFor();
+      await drawer.getByText('•••• •••• •••• 0654').waitFor();
+      await drawer.getByText('Acme Corporation').waitFor();
+      await drawer.getByText('Default', { exact: true }).waitFor();
+      await drawer.getByText('Added', { exact: true }).waitFor();
+      assert.equal(await drawer.getByText(/pending/i).count(), 0, 'no Pending state/messaging must remain');
 
-      // Still on Bulk Upload; COD stays blocked — Pending never satisfies eligibility.
+      // Closing the drawer does NOT auto-complete the booking — control returns to the user.
+      await drawer.getByRole('button', { name: /back to bulk upload/i }).click();
       assert.match(mgr.page.url(), /\/dashboard\/bulk-uploader\/summary\/journey-cod-payout$/);
+      const stillBooking = await mgr.page.getByText(/your booking is complete/i).count();
+      assert.equal(stillBooking, 0, 'adding the bank must not auto-complete the booking');
+
+      // Complete Booking again — payout requirement is now satisfied, no re-prompt.
       await mgr.page.getByRole('button', { name: /complete booking/i }).click();
-      await mgr.page.getByRole('heading', { name: /set up a payout account/i })
-        .waitFor({ state: 'visible', timeout: 10_000 });
-      await mgr.page.getByRole('button', { name: /^cancel$/i }).click();
+      await mgr.page.getByText(/your booking is complete/i).waitFor({ timeout: 10_000 });
+      assert.equal(
+        await mgr.page.getByRole('heading', { name: /set up a payout account/i }).count(), 0,
+        'the payout requirement must be satisfied — no re-prompt',
+      );
+      await mgr.page.getByRole('link', { name: /go to home/i }).click();
 
       // Exit journey mode — scenario state clears, normal guard behavior returns.
+      await mgr.page.waitForURL('**/dashboard', { timeout: 10_000 });
       await mgr.page.getByRole('button', { name: /^exit journey$/i }).click();
       await mgr.page.waitForURL('**/dashboard', { timeout: 10_000 });
       await mgr.page.goto(`${server.base}/dashboard/payment-settings`, { waitUntil: 'networkidle' });
