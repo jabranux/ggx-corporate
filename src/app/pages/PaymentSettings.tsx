@@ -18,6 +18,7 @@ import {
 } from '../services/payoutBankService';
 import { useSubAccounts } from '../contexts/SubAccountContext';
 import { useAuth } from '../contexts/AuthContext';
+import { useJourney } from '../contexts/JourneyContext';
 
 interface PaymentMethod {
   id: string;
@@ -52,10 +53,15 @@ const BANKS = ['BDO Unibank', 'BPI', 'Metrobank', 'UnionBank', 'Landbank', 'PNB'
 export function PaymentSettings() {
   const { subAccountsEnabled, isMainAccountView } = useSubAccounts();
   const { user } = useAuth();
+  const journey = useJourney();
+  // P1 UX Journey: an in-memory, presentation-only Main Account admin capability
+  // for this page while the journey is active — never a real permission change
+  // (see JourneyContext / AdminRoute's `allowJourneyOverride`).
+  const isJourneyP1 = journey.activeJourney?.id === 'cod-main-account-payout';
   // Financial actions are parent/main-account level only and Admin-only. The
   // route is already AdminRoute-guarded; this also gates the action controls
   // (defense-in-depth) and when an Admin is drilled into a specific subaccount.
-  const financialAccessAllowed = user?.role === 'admin' && (!subAccountsEnabled || isMainAccountView());
+  const financialAccessAllowed = (user?.role === 'admin' && (!subAccountsEnabled || isMainAccountView())) || isJourneyP1;
 
   const [methods, setMethods] = useState<PaymentMethod[]>(initialMethods);
   const [banks, setBanks] = useState<PayoutBankAccount[]>([]);
@@ -68,14 +74,31 @@ export function PaymentSettings() {
   const [addBank, setAddBank] = useState<{ bank: string; accountName: string; accountNumber: string } | null>(null);
 
   // Payout banks are shared with COD eligibility through the service layer.
-  // Payment Settings remains the only UI allowed to mutate them.
+  // Payment Settings remains the only UI allowed to mutate them. During the P1
+  // UX Journey, the payout bank list is sourced from journey scenario state
+  // instead (never the real service) — see `journeyBanks` below.
   useEffect(() => {
+    if (isJourneyP1) return;
     let active = true;
     getPayoutBankAccounts('main')
       .then((accounts) => { if (active) setBanks(accounts); })
       .catch(() => { if (active) setBanks([]); });
     return () => { active = false; };
-  }, []);
+  }, [isJourneyP1]);
+
+  // Journey-only payout bank list: starts empty ("no eligible payout bank"),
+  // becomes one pending (never verified) entry after Add Bank Account + OTP.
+  const journeyBanks: PayoutBankAccount[] = journey.codPayout.status === 'pending'
+    ? [{
+        id: 'journey-bank',
+        bank: journey.codPayout.bank ?? '',
+        accountMasked: journey.codPayout.accountMasked ?? '',
+        accountName: journey.codPayout.accountName ?? '',
+        isPrimary: true,
+        status: 'pending',
+      }]
+    : [];
+  const displayBanks = isJourneyP1 ? journeyBanks : banks;
 
   // Open the OTP gate for a sensitive action. `run` executes only after verify.
   const requireOtp = (action: string, run: () => void) =>
@@ -98,6 +121,8 @@ export function PaymentSettings() {
     requireOtp(e.type === 'method' ? 'Payment method updated' : 'Bank account updated', () => {
       if (e.type === 'method') {
         setMethods((prev) => prev.map((m) => (m.id === e.id ? { ...m, holder: e.holder, expiry: e.expiry } : m)));
+      } else if (isJourneyP1) {
+        journey.updateCodPayoutAccountName(e.accountName);
       } else {
         void updatePayoutBankAccount('main', e.id, { accountName: e.accountName }).then(setBanks);
       }
@@ -111,6 +136,7 @@ export function PaymentSettings() {
     setRemove(null);
     requireOtp(r.type === 'method' ? 'Payment method removed' : 'Bank account removed', () => {
       if (r.type === 'method') setMethods((prev) => prev.filter((m) => m.id !== r.id));
+      else if (isJourneyP1) journey.clearCodPayoutBank();
       else void removePayoutBankAccount('main', r.id).then(setBanks);
     });
   };
@@ -144,7 +170,13 @@ export function PaymentSettings() {
     const a = addBank;
     setAddBank(null);
     requireOtp('Bank account added', () => {
-      void addPayoutBankAccount('main', a).then(setBanks);
+      if (isJourneyP1) {
+        // Journey fixture only supports None → Pending; a new bank never
+        // starts verified, matching real payout verification rules.
+        journey.setCodPayoutPending(a);
+      } else {
+        void addPayoutBankAccount('main', a).then(setBanks);
+      }
     });
   };
 
@@ -266,8 +298,13 @@ export function PaymentSettings() {
           <h2 className="text-xl font-semibold text-gray-900 mb-1">Payout Bank Accounts</h2>
           <p className="text-sm text-gray-600 mb-4">For receiving COD earnings and online payment settlements</p>
 
+          {isJourneyP1 && journey.codPayout.status === 'none' && (
+            <div className="mb-4 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
+              No payout bank on file yet — this UX Journey preview starts from a clean Main Account with COD blocked.
+            </div>
+          )}
           <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4">
-            {banks.map((b) => (
+            {displayBanks.map((b) => (
               <Card key={b.id} className={`flex flex-col ${b.isPrimary ? 'border-green-300 bg-green-50/50' : ''}`}>
                 <CardContent className="p-5 flex flex-col gap-3 flex-1">
                   {/* Icon + bank info */}

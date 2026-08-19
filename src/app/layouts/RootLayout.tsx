@@ -40,6 +40,8 @@ import { Avatar } from '../components/ui/Avatar';
 import { Dialog, ConfirmDialog } from '../components/ui/Dialog';
 import { useSubAccounts } from '../contexts/SubAccountContext';
 import { useAuth } from '../contexts/AuthContext';
+import { JourneyProvider } from '../contexts/JourneyContext';
+import { JourneyShell } from '../components/journeys/JourneyShell';
 import { useModuleAccessContext } from '../hooks/useModuleAccess';
 import { getFeatureStateSync } from '../services/featureEnablementService';
 import {
@@ -392,6 +394,7 @@ export function RootLayout() {
     .toUpperCase();
 
   return (
+    <JourneyProvider>
     <div className="flex h-screen bg-gray-50 overflow-hidden">
       {/* Sidebar */}
       <aside
@@ -950,6 +953,9 @@ export function RootLayout() {
         variant="destructive"
         confirmIcon={<IconLogout className="w-3.5 h-3.5 mr-1.5" />}
       />
+
+      <JourneyShell />
     </div>
+    </JourneyProvider>
   );
 }

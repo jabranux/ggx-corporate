@@ -237,7 +237,7 @@ export const router = createBrowserRouter([
       { path: 'earnings',                        element: <AdminRoute><Earnings /></AdminRoute> },
       { path: 'earnings/:settlementId',          element: <AdminRoute><EarningsSettlementDetail /></AdminRoute> },
       { path: 'billing',           element: <AdminRoute><BillingStatement /></AdminRoute> },
-      { path: 'payment-settings',  element: <AdminRoute><PaymentSettings /></AdminRoute> },
+      { path: 'payment-settings',  element: <AdminRoute allowJourneyOverride="cod-main-account-payout"><PaymentSettings /></AdminRoute> },
       { path: 'subaccounts',       element: <AdminRoute><SubAccounts /></AdminRoute> },
       { path: 'subaccounts/enable',       element: <AdminRoute><EnableSubAccountsIntro /></AdminRoute> },
       { path: 'subaccounts/enable/setup', element: <AdminRoute><EnableSubAccountsSetup /></AdminRoute> },

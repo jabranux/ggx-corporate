@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { useNavigate, useParams, Link } from 'react-router';
-import { IconArrowLeft, IconStar, IconFileText, IconShare, IconMessage, IconPackage, IconPackageOff, IconUpload, IconArrowRight, IconReceiptRefund, IconX, IconCircleCheck, IconCheck, IconPhoto, IconExternalLink, IconBolt, IconMapPin, IconHeadset, IconBuildingStore } from '@tabler/icons-react';
+import { IconArrowLeft, IconStar, IconFileText, IconShare, IconMessage, IconPackage, IconPackageOff, IconUpload, IconArrowRight, IconReceiptRefund, IconX, IconCircleCheck, IconCheck, IconPhoto, IconExternalLink, IconBolt, IconMapPin, IconHeadset, IconBuildingStore, IconEdit } from '@tabler/icons-react';
 import { Card, CardContent, CardHeader, CardTitle } from '../components/ui/Card';
 import { Button } from '../components/ui/Button';
 import { Badge } from '../components/ui/Badge';
@@ -32,10 +32,21 @@ import {
 // ticket DIRECTLY to HeyQ's customer API with the order attached — the user stays
 // on this page and is never redirected to HeyQ's Contact Us form.
 import { ReportIssueDrawer } from '../components/ReportIssueDrawer';
+import { useJourney } from '../contexts/JourneyContext';
+import { JOURNEY_P3_TRACKING_NUMBER } from '../data/journeyRegistry';
+import { buildJourneyEditFixtureTransaction, applyJourneyEditDraft } from '../data/journeyTransactionFixture';
+import { getEditEligibility } from '../lib/transactionEditEligibility';
+import { EditDeliveryDrawer } from '../components/journeys/EditDeliveryDrawer';
 
 export function TransactionDetails() {
   const navigate = useNavigate();
   const { id } = useParams();
+  const journey = useJourney();
+  // P3 UX Journey: only active for the journey's own fixture tracking number,
+  // so a real transaction id is never affected even while the journey is
+  // active elsewhere. Deep-linking this id without the journey active falls
+  // through to the normal (not-found) lookup below — no fixture leakage.
+  const isJourneyP3 = journey.activeJourney?.id === 'edit-delivery-details' && id === JOURNEY_P3_TRACKING_NUMBER;
   const [rating, setRating] = useState(0);
   const [ratingSubmitted, setRatingSubmitted] = useState(false);
   const [shareCopied, setShareCopied] = useState(false);
@@ -46,6 +57,8 @@ export function TransactionDetails() {
 
   // In-app "Report an issue" drawer (submits to HeyQ's customer API in place).
   const [reportOpen, setReportOpen] = useState(false);
+  // Journey-only "Edit Delivery Details" drawer (P3). Never touches transactionService.
+  const [editDrawerOpen, setEditDrawerOpen] = useState(false);
 
   // Claims & cancellation (frontend/mock) — local view state, loaded via the
   // claimsService facade keyed off the id route param.
@@ -56,13 +69,19 @@ export function TransactionDetails() {
   const [cancelled, setCancelled] = useState(false);
 
   useEffect(() => {
+    if (isJourneyP3) {
+      // Journey-local fixture, merged with any confirmed edit-drawer draft.
+      // Never calls transactionService / touches the real transactions seed.
+      setTransaction(applyJourneyEditDraft(buildJourneyEditFixtureTransaction(), journey.editDelivery.confirmed));
+      return;
+    }
     let cancelledLoad = false;
     setTransaction(undefined);
     getTransactionById(id ?? '')
       .then((tx) => { if (!cancelledLoad) setTransaction(tx); })
       .catch(() => { if (!cancelledLoad) setTransaction(null); });
     return () => { cancelledLoad = true; };
-  }, [id]);
+  }, [id, isJourneyP3, journey.editDelivery.confirmed]);
 
   useEffect(() => {
     let cancelledLoad = false;
@@ -119,6 +138,9 @@ export function TransactionDetails() {
   const status = statusConfig[transaction.status];
   // Sample backend-provided totals (FTX/BFF own these in production).
   const { itemsTotal, feesTotal: totalFees } = getTransactionTotals(transaction);
+  // P3 UX Journey — the fixture is always COD-payable-on-delivery; eligibility
+  // still runs through the same narrow, testable helper used by its tests.
+  const editEligibility = getEditEligibility({ status: transaction.status, paymentKind: 'cod' });
 
   const canFileClaim = claimEligible(transaction.status) && !claim;
   const canCancel = cancelEligible(transaction.status) && !cancelled;
@@ -171,6 +193,15 @@ export function TransactionDetails() {
             Service Type: <span className="font-medium text-gray-600">{serviceTypeLabel(transaction.serviceType)}</span>
           </p>
         </div>
+
+        {/* P3 UX Journey — Edit Delivery Details. Journey-only surface: hidden
+            entirely outside the active journey's own fixture transaction. */}
+        {isJourneyP3 && editEligibility.editable && (
+          <Button onClick={() => setEditDrawerOpen(true)}>
+            <IconEdit className="w-4 h-4 mr-2" />
+            Edit Delivery Details
+          </Button>
+        )}
       </div>
 
       <div className="grid lg:grid-cols-3 gap-6">
@@ -692,6 +723,17 @@ export function TransactionDetails() {
           <Button size="sm" disabled={!claimForm.reason} onClick={handleSubmitClaim}>Submit Claim</Button>
         </div>
       </Dialog>
+
+      {/* P3 UX Journey — Edit Delivery Details drawer. Saves into journey state
+          only (via JourneyContext.confirmEditDelivery); never calls transactionService. */}
+      {isJourneyP3 && (
+        <EditDeliveryDrawer
+          open={editDrawerOpen}
+          onClose={() => setEditDrawerOpen(false)}
+          transaction={transaction}
+          onConfirm={(draft) => journey.confirmEditDelivery(draft)}
+        />
+      )}
 
       {/* In-app report drawer — submits an order-linked ticket to HeyQ's customer
           API without leaving this page. HeyQ still owns the ticket lifecycle. */}

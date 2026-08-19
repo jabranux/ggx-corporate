@@ -25,6 +25,8 @@ import {
 import { LocationCascadeCells } from '../components/LocationCascadeCells';
 import { useSubAccounts } from '../contexts/SubAccountContext';
 import { useAuth } from '../contexts/AuthContext';
+import { useJourney } from '../contexts/JourneyContext';
+import { JOURNEY_P1_BATCH_ID } from '../data/journeyRegistry';
 import { useUploadExitGuard } from '../hooks/useUploadExitGuard';
 
 // ---------------------------------------------------------------------------
@@ -213,6 +215,31 @@ const INITIAL_REVIEW_ROWS: ReviewRowData[] = [
     province: 'Metro Manila', cityMunicipality: 'Marikina City', barangay: 'Concepcion Uno', landmarks: '',
     itemName: 'Desk Organizer Set', pouchSize: 'BOX', lengthCm: '', widthCm: '', heightCm: '', weightKg: '',
     cod: 'No', codAmount: '', declaredValue: '900', insureFull: 'No', recipientPaysFees: 'No', referenceId: 'REF-012',
+  },
+];
+
+// ---------------------------------------------------------------------------
+// UX Journey P1 fixture — a clean, all-valid COD batch so "Complete Booking"
+// is reachable immediately (no unrelated validation errors to resolve). Only
+// used when the P1 journey is active for the journey's fixture batch id; see
+// `isJourneyP1` in the component below.
+// ---------------------------------------------------------------------------
+const JOURNEY_P1_ROWS: ReviewRowData[] = [
+  {
+    row: 1,
+    seedErrors: [],
+    recipientName: 'Liza Fernandez', mobileNumber: '+639175552211', streetAddress: 'Blk 12 Lot 4, Visayas Ave.',
+    province: 'Metro Manila', cityMunicipality: 'Quezon City', barangay: 'Bagong Pag-asa', landmarks: '',
+    itemName: 'Gift Hamper Set', pouchSize: 'MEDIUM', lengthCm: '', widthCm: '', heightCm: '', weightKg: '',
+    cod: 'Yes', codAmount: '1800', declaredValue: '1800', insureFull: 'Yes', recipientPaysFees: 'No', referenceId: 'JRN-P1-001',
+  },
+  {
+    row: 2,
+    seedErrors: [],
+    recipientName: 'Marco Villanueva', mobileNumber: '+639183304455', streetAddress: 'Unit 802, Salcedo Park Twr.',
+    province: 'Metro Manila', cityMunicipality: 'Makati City', barangay: 'Bel-Air', landmarks: '',
+    itemName: 'UNO FLIP! Double Sided Card', pouchSize: 'SMALL', lengthCm: '', widthCm: '', heightCm: '', weightKg: '',
+    cod: 'No', codAmount: '', declaredValue: '600', insureFull: 'No', recipientPaysFees: 'No', referenceId: 'JRN-P1-002',
   },
 ];
 
@@ -602,6 +629,11 @@ export function BulkUploadSummary() {
   const { id } = useParams();
   const { getCurrentAccountName, getCurrentAccountId, subAccountsEnabled, isMainAccountView } = useSubAccounts();
   const { user } = useAuth();
+  const journey = useJourney();
+  // P1 UX Journey: only active for the journey's own fixture batch id, so a
+  // real batch id is never affected even while the journey is active.
+  const isJourneyP1 = journey.activeJourney?.id === 'cod-main-account-payout' && id === JOURNEY_P1_BATCH_ID;
+  const initialRows = isJourneyP1 ? JOURNEY_P1_ROWS : INITIAL_REVIEW_ROWS;
 
   const activeAccountName = getCurrentAccountName();
 
@@ -651,16 +683,23 @@ export function BulkUploadSummary() {
     return () => { active = false; };
   }, [id]);
   // Falls back to the active scope only until the batch record has loaded.
-  const payoutAccountId = batchAccountId ?? getCurrentAccountId();
-  const canManagePayout = user?.role === 'admin'
+  // The P1 journey always presents as the Main Account owner with Main
+  // Account admin capability — an in-memory presentation override, never a
+  // real account/role change (see JourneyContext).
+  const payoutAccountId = isJourneyP1 ? 'main' : (batchAccountId ?? getCurrentAccountId());
+  const canManagePayout = isJourneyP1 || (
+    user?.role === 'admin'
     && payoutAccountId === 'main'
-    && (!subAccountsEnabled || isMainAccountView());
+    && (!subAccountsEnabled || isMainAccountView())
+  );
 
   // ── Review-row state ──────────────────────────────────────────────────────
-  const [rows, setRows] = useState<ReviewRowData[]>(INITIAL_REVIEW_ROWS);
+  // (Sourced from `initialRows` — the P1 journey fixture when active for this
+  // batch id, otherwise the normal demo review rows.)
+  const [rows, setRows] = useState<ReviewRowData[]>(initialRows);
   const [edits, setEdits] = useState<Record<number, RowEdits>>(() => {
     const init: Record<number, RowEdits> = {};
-    INITIAL_REVIEW_ROWS.forEach((r) => { init[r.row] = rowToEdits(r); });
+    initialRows.forEach((r) => { init[r.row] = rowToEdits(r); });
     return init;
   });
   // Always-current view of `edits` so an on-blur commit validates the latest typed
@@ -669,20 +708,20 @@ export function BulkUploadSummary() {
   editsRef.current = edits;
   const [validation, setValidation] = useState<Record<number, RowValidationState>>(() => {
     const init: Record<number, RowValidationState> = {};
-    INITIAL_REVIEW_ROWS.forEach((r) => { init[r.row] = validateRowState(r, rowToEdits(r)); });
+    initialRows.forEach((r) => { init[r.row] = validateRowState(r, rowToEdits(r)); });
     return init;
   });
   const [dupRows, setDupRows] = useState<Set<number>>(() => {
     const initEdits: Record<number, RowEdits> = {};
-    INITIAL_REVIEW_ROWS.forEach((r) => { initEdits[r.row] = rowToEdits(r); });
-    return computeDupRows(INITIAL_REVIEW_ROWS, initEdits);
+    initialRows.forEach((r) => { initEdits[r.row] = rowToEdits(r); });
+    return computeDupRows(initialRows, initEdits);
   });
   // Snapshot of each row's section. Only Revalidate (and delete/undo) changes it,
   // so editing a row never moves it out of the section the user is working in.
   const [sectionAssignment, setSectionAssignment] = useState<Record<number, SectionKey>>(() => {
     const initEdits: Record<number, RowEdits> = {};
-    INITIAL_REVIEW_ROWS.forEach((r) => { initEdits[r.row] = rowToEdits(r); });
-    return computeSections(INITIAL_REVIEW_ROWS, initEdits);
+    initialRows.forEach((r) => { initEdits[r.row] = rowToEdits(r); });
+    return computeSections(initialRows, initEdits);
   });
 
   // Spreadsheet batches arrive pre-validated, and already-processed (payment)
@@ -834,7 +873,12 @@ export function BulkUploadSummary() {
    * point the batch's COD content is fully known and right before submission.
    */
   const handleCompleteBooking = async () => {
-    if (hasCodInBatch && !(await hasEligiblePayoutBank(payoutAccountId))) {
+    // The P1 journey's payout eligibility is journey-fixture-only (never the
+    // real payoutBankService) and the fixture only ever reaches "pending" —
+    // matching the real rule that a pending bank never satisfies COD
+    // eligibility, so `eligible` stays false throughout the journey.
+    const eligible = isJourneyP1 ? false : await hasEligiblePayoutBank(payoutAccountId);
+    if (hasCodInBatch && !eligible) {
       setShowPayoutSetup(true);
       return;
     }

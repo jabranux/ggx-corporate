@@ -8,7 +8,7 @@
     "build": "tsc -b && vite build",
     "preview": "vite preview",
     "typecheck": "tsc -b --noEmit",
-    "test": "node --test --test-concurrency=1 tests/heyq-adapter.test.mjs tests/heyq-lifecycle.test.mjs tests/heyq-realtime.test.mjs tests/heyq-attachments.test.mjs",
+    "test": "node --test --test-concurrency=1 tests/heyq-adapter.test.mjs tests/heyq-lifecycle.test.mjs tests/heyq-realtime.test.mjs tests/heyq-attachments.test.mjs tests/journey-mode.test.mjs",
     "tokens": "node scripts/build-tokens.mjs",
     "tokens:figma": "node scripts/sync-figma-variables.mjs",
     "cc:parse": "figma connect parse",

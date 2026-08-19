@@ -27,6 +27,7 @@ import {
 } from '../services/bulkUploadService';
 import { useSubAccounts } from '../contexts/SubAccountContext';
 import { useAuth } from '../contexts/AuthContext';
+import { useJourney } from '../contexts/JourneyContext';
 import { useModuleAccessContext } from '../hooks/useModuleAccess';
 import { getFeatureStateSync } from '../services/featureEnablementService';
 
@@ -93,6 +94,10 @@ export function BulkUploader() {
         accountType: (currentAccount === 'main' ? 'main' : 'subaccount') as 'main' | 'subaccount',
       };
 
+  const journey = useJourney();
+  const isJourneyP2 = journey.activeJourney?.id === 'sdd-cutoff-handling';
+  const [journeySimResult, setJourneySimResult] = useState(false);
+
   const [step, setStep]             = useState<Step>('form');
   const [uploadMode, setUploadMode] = useState<'standard' | 'same-day' | 'on-demand'>('standard');
 
@@ -107,6 +112,17 @@ export function BulkUploader() {
   const [pickupDate, setPickupDate] = useState('');
   const [showDropoffs, setShowDropoffs] = useState(false);
   const [uploadUrl, setUploadUrl]   = useState('');
+
+  // P2 UX Journey: establish the Same-Day / pickup / post-cutoff scenario
+  // automatically — no manual account/mode setup needed to see the proposed UX.
+  useEffect(() => {
+    if (!isJourneyP2) return;
+    setUploadMode('same-day');
+    setFirstMile('pickup');
+    setPickupDate(journey.sddCutoff.nextPickupDateValue);
+    setJourneySimResult(false);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isJourneyP2]);
 
   const [selectedFile, setSelectedFile] = useState<{ name: string; size: string } | null>(null);
   const [pendingUploadId, setPendingUploadId] = useState<string | null>(null);
@@ -209,6 +225,16 @@ export function BulkUploader() {
       addUpload(record);
       setStep('fast-processing');
     }
+  };
+
+  /**
+   * P2 UX Journey — a journey-local simulated outcome for the post-cutoff
+   * Same-Day upload. Deliberately does NOT call `addUpload`/`createUploadRecord`
+   * or navigate to a real batch: nothing here touches normal upload history.
+   */
+  const handleJourneySimulatedUpload = () => {
+    journey.acknowledgeSddCutoff();
+    setJourneySimResult(true);
   };
 
   const handleMappingConfirm = () => {
@@ -434,11 +460,24 @@ export function BulkUploader() {
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-1.5">Pick-up Date</label>
                   <Input type="date" value={pickupDate} onChange={(e) => { setPickupDate(e.target.value); markTouched(); }} />
-                  <p className="text-xs text-gray-500 mt-1.5">
-                    {uploadMode === 'same-day'
-                      ? 'Same-day cut-off is 10:00 AM. Orders booked after cut-off move to next day.'
-                      : 'Pick-ups are scheduled the next business day by default.'}
-                  </p>
+                  {isJourneyP2 && uploadMode === 'same-day' ? (
+                    <div className="mt-2 rounded-lg border border-orange-200 bg-orange-50 px-3 py-2.5">
+                      <p className="text-xs font-medium text-orange-800">
+                        Same-Day cutoff has passed. This batch will be scheduled for the next available pickup date.
+                      </p>
+                      <p className="text-xs text-orange-700 mt-1">
+                        Simulated time: {journey.sddCutoff.simulatedNowLabel} · Cutoff: {journey.sddCutoff.cutoffLabel}
+                        <span className="mx-1.5 text-orange-300">·</span>
+                        Next pickup: <span className="font-medium">{journey.sddCutoff.nextPickupDateLabel}</span>
+                      </p>
+                    </div>
+                  ) : (
+                    <p className="text-xs text-gray-500 mt-1.5">
+                      {uploadMode === 'same-day'
+                        ? 'Same-day cut-off is 10:00 AM. Orders booked after cut-off move to next day.'
+                        : 'Pick-ups are scheduled the next business day by default.'}
+                    </p>
+                  )}
                 </div>
               )}
               {firstMile === 'dropoff' && (
@@ -484,7 +523,7 @@ export function BulkUploader() {
                   </div>
                   <Button
                     disabled={!uploadUrl.trim() || step !== 'form'}
-                    onClick={() => startUpload('import-from-url.csv')}
+                    onClick={() => (isJourneyP2 ? handleJourneySimulatedUpload() : startUpload('import-from-url.csv'))}
                   >
                     Import
                   </Button>
@@ -540,7 +579,11 @@ export function BulkUploader() {
                       </button>
                     )}
                   </div>
-                  <Button className="w-full mt-4" disabled={step !== 'form'} onClick={() => startUpload()}>
+                  <Button
+                    className="w-full mt-4"
+                    disabled={step !== 'form'}
+                    onClick={() => (isJourneyP2 ? handleJourneySimulatedUpload() : startUpload())}
+                  >
                     <IconFileSpreadsheet className="w-4 h-4 mr-2" />
                     Upload &amp; Validate
                   </Button>
@@ -662,6 +705,31 @@ export function BulkUploader() {
         </div>
         <div className="flex justify-end pt-4">
           <Button variant="outline" size="sm" onClick={() => setShowDropoffs(false)}>Close</Button>
+        </div>
+      </Dialog>
+
+      {/* P2 UX Journey — simulated outcome. Journey-local only: no upload record
+          is created and nothing is added to Recent Uploads. */}
+      <Dialog
+        open={journeySimResult}
+        onClose={() => setJourneySimResult(false)}
+        size="sm"
+        title="Batch scheduled (UX Journey preview)"
+      >
+        <p className="text-sm text-gray-600">
+          {journey.sddCutoff.simulatedNowLabel} is past the Same-Day cutoff ({journey.sddCutoff.cutoffLabel}), so this
+          batch is scheduled for the next available pickup date instead of today.
+        </p>
+        <div className="mt-3 rounded-lg border border-orange-200 bg-orange-50 px-3 py-2.5">
+          <p className="text-sm font-medium text-orange-900">
+            Next pickup: {journey.sddCutoff.nextPickupDateLabel}
+          </p>
+        </div>
+        <p className="text-xs text-gray-400 mt-3">
+          This is a proposed UX preview — no orders were created and nothing was added to Recent Uploads.
+        </p>
+        <div className="flex justify-end pt-4">
+          <Button size="sm" onClick={() => setJourneySimResult(false)}>Done</Button>
         </div>
       </Dialog>
 

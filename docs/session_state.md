@@ -3,6 +3,60 @@
 > Lightweight resume/checkpoint file. Detailed June 2026 history was archived to
 > `docs/archive/session_log_2026-06.md`.
 
+## Most Recent Work — UX Journey Showcase Mode (2026-08-19)
+
+Lightweight, dashboard-scoped, **in-memory** stakeholder-review layer. Reuses
+existing pages/routes with fixture ids; never persists, never mutates
+AuthContext/SubAccountContext/localStorage/normal mock data. Removable by
+deleting `src/app/contexts/JourneyContext.tsx`, `src/app/components/journeys/`,
+`src/app/data/journeyRegistry.ts`, `src/app/data/journeyTransactionFixture.ts`,
+`src/app/lib/transactionEditEligibility.ts`, `src/app/lib/journeyPricing.ts`,
+`tests/journey-mode.test.mjs`, and reverting the small hooks added to
+`RootLayout`, `RouteGuards`, `routes.tsx`, `PaymentSettings`,
+`BulkUploadSummary`, `BulkUploader`, `TransactionDetails`.
+
+- **Shell:** `JourneyContext` (registry + enter/exit + per-journey scenario
+  state/capabilities) mounted inside `RootLayout` (dashboard-scoped only).
+  `JourneyShell` renders the floating "UX Journeys" CTA, the launch drawer
+  (`docs/context` — Bulk Upload → COD Booking / SDD, Transactions), and the
+  active-journey indicator with Exit. Entering a journey navigates to an
+  **existing route** with a fixture id (no new routes) and snapshots the
+  pre-journey route for Exit to restore.
+- **P1 — COD · Main Account Payout Setup:** launches
+  `/dashboard/bulk-uploader/summary/journey-cod-payout` with a clean, all-COD
+  fixture batch (`JOURNEY_P1_ROWS` in `BulkUploadSummary.tsx`). `AdminRoute`
+  gained an opt-in `allowJourneyOverride` prop (wired ONLY on the
+  `payment-settings` route) so this journey's `mainAccountAdmin` scenario
+  capability can reach Payment Settings as any signed-in role, in-memory only
+  — every other `AdminRoute` usage and normal-mode behavior is untouched.
+  Payout bank state lives in `JourneyContext.codPayout` (None → Pending only,
+  no fake Verify), never in `payoutBankService`.
+- **P2 — SDD · Cutoff Handling:** launches `/dashboard/bulk-uploader`, forces
+  Same-Day/pickup and a deterministic (non-clock) post-cutoff fixture time +
+  next pickup date, and shows a proposed cutoff banner. Upload/Import buttons
+  branch to a journey-local simulated outcome dialog instead of calling
+  `addUpload`/`createUploadRecord` — Recent Uploads is never touched.
+- **P3 — Transactions · Edit Delivery Details:** launches
+  `/dashboard/transactions/GGX-JOURNEY-EDIT-001`, a fixture transaction
+  (`data/journeyTransactionFixture.ts`) outside the real seed. Edit eligibility
+  is a narrow, pure, unit-tested helper (`lib/transactionEditEligibility.ts`:
+  blocked at Picked Up+ or already-paid). `EditDeliveryDrawer` edits pickup
+  address/date, item name, pouch size, COD amount, and item protection, with a
+  revised-amount preview (`lib/journeyPricing.ts` — flat per-size fee + the
+  existing Item Protection formula; not a new pricing engine). Confirm saves
+  only into `JourneyContext.editDelivery`; Exit discards it.
+- **Isolation:** every journey is gated on BOTH the active journey id AND its
+  own fixture id/route, so deep-linking a fixture id with no active journey
+  falls through to normal behavior (default review rows / "not found") —
+  covered by tests. Fixed a real z-index bug found by testing: the floating
+  CTA (z-40) was briefly above normal `Dialog`s (z-50), which could have
+  blocked buttons in any modal app-wide; lowered before shipping.
+- **Tests:** `tests/journey-mode.test.mjs` (new, 14 tests) — eligibility/pricing/
+  registry logic, shell open/launch/exit-returns-route, P1 admin-override +
+  isolation, P2 simulated-outcome + no-persistence, P3 edit/preview/confirm/
+  discard-on-exit + isolation. Full suite **68/68** (`npm test`), typecheck +
+  production build green.
+
 ## Most Recent Work — Centralized COD payout eligibility (2026-08-16)
 
 - Payout bank accounts are now **Main Account-owned**. `payoutBankService` is
