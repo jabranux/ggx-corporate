@@ -13,6 +13,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '.
 import { Dialog, ConfirmDialog } from '../components/ui/Dialog';
 import { PaymentMethodTabs, type SelectedPaymentMethod } from '../components/PaymentMethodTabs';
 import { PayoutSetupRequiredDialog } from '../components/PayoutSetupRequiredDialog';
+import { PayoutSetupDrawer } from '../components/journeys/PayoutSetupDrawer';
 import { DROPOFF_LOCATIONS } from '../data/dropoffLocations';
 import { isBillingAccount } from '../services/paymentService';
 import { getBulkUploadById, getSpreadsheetBatchRows, updateUploadStatus, type SpreadsheetBatchRow } from '../services/bulkUploadService';
@@ -753,14 +754,20 @@ export function BulkUploadSummary() {
 
   // Exit protection — reaching this page means parsed upload data is already
   // in review, so the guard is armed for the whole page lifetime and only
-  // released once the batch is successfully booked/paid.
+  // released once the batch is successfully booked/paid. The P1 UX Journey's
+  // batch is fixture-only (nothing real to lose), and its inline payout setup
+  // deliberately keeps the presenter on this page — so "Exit Journey" must
+  // navigate away immediately, not be intercepted by this unsaved-work prompt.
   const reviewActiveRef = useRef(true);
-  reviewActiveRef.current = !showSuccess;
+  reviewActiveRef.current = !showSuccess && !isJourneyP1;
   const exitGuard = useUploadExitGuard(reviewActiveRef);
 
   // COD payout-account guard — checked at final submission (Complete Booking),
   // the latest point the batch's COD content is fully known.
   const [showPayoutSetup, setShowPayoutSetup] = useState(false);
+  // P1 UX Journey — inline payout setup drawer. Bank setup happens WITHIN
+  // Bulk Upload for this journey; it never navigates to Payment Settings.
+  const [showJourneyPayoutDrawer, setShowJourneyPayoutDrawer] = useState(false);
 
   // ── Live per-row info (messages) vs. snapshot section membership ──────────
   // The issue MESSAGES below are recomputed live from the current edits so they
@@ -1401,13 +1408,33 @@ export function BulkUploadSummary() {
       <PayoutSetupRequiredDialog
         open={showPayoutSetup}
         canManagePayout={canManagePayout}
+        manageLabel={isJourneyP1 ? 'Set Up Payout Account' : undefined}
         onClose={() => setShowPayoutSetup(false)}
         onManagePayout={() => {
+          if (isJourneyP1) {
+            // P1 UX Journey — bank setup happens inline, WITHOUT leaving
+            // Bulk Upload. Never navigate to Payment Settings from here.
+            setShowPayoutSetup(false);
+            setShowJourneyPayoutDrawer(true);
+            return;
+          }
           // Finance setup is an intentional handoff, not an abandoned upload.
           reviewActiveRef.current = false;
           navigate('/dashboard/payment-settings');
         }}
       />
+
+      {/* P1 UX Journey — inline payout setup, reusing the same OTP-gated bank
+          fields as Payment Settings, presented within Bulk Upload. Submission
+          only updates journey scenario state (never payoutBankService), so
+          the batch's COD remains blocked (Pending, not Verified). */}
+      {isJourneyP1 && (
+        <PayoutSetupDrawer
+          open={showJourneyPayoutDrawer}
+          onClose={() => setShowJourneyPayoutDrawer(false)}
+          onSubmit={(details) => journey.setCodPayoutPending(details)}
+        />
+      )}
 
       {/* ── Exit protection — in-app navigation away from this review page ── */}
       {exitGuard.state === 'blocked' && (

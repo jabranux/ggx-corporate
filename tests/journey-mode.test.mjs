@@ -138,7 +138,7 @@ describe('Journey Showcase shell', () => {
     await page.waitForURL('**/dashboard/bulk-uploader', { timeout: 10_000 });
     await page.getByText(/UX Journey: SDD · Cutoff Handling/).waitFor({ timeout: 10_000 });
 
-    await page.getByRole('button', { name: /^exit$/i }).click();
+    await page.getByRole('button', { name: /^exit journey$/i }).click();
     await page.waitForURL('**/dashboard/transactions', { timeout: 10_000 });
     assert.equal(await page.getByText(/UX Journey:/).count(), 0, 'indicator clears on exit');
   });
@@ -149,13 +149,19 @@ describe('Journey Showcase shell', () => {
 // ---------------------------------------------------------------------------
 
 describe('P1 — COD Main Account Payout Setup', () => {
-  it('grants Payment Settings only while the journey is active for a Manager, and blocks it otherwise', async () => {
+  it('normal mode: Payment Settings stays Admin-only for a Manager (no journey active)', async () => {
     const mgr = await signIn(server.base, 'manager');
     try {
-      // Normal mode: a Manager cannot reach Payment Settings.
       await mgr.page.goto(`${server.base}/dashboard/payment-settings`, { waitUntil: 'networkidle' });
       await mgr.page.getByText(/access restricted/i).waitFor({ timeout: 10_000 });
+    } finally {
+      await mgr.browser.close();
+    }
+  });
 
+  it('sets up a Pending payout bank inline within Bulk Upload — never navigating to Payment Settings', async () => {
+    const mgr = await signIn(server.base, 'manager');
+    try {
       // Launch the journey from an arbitrary starting route.
       await mgr.page.goto(`${server.base}/dashboard`, { waitUntil: 'networkidle' });
       await mgr.page.getByRole('button', { name: /^ux journeys$/i }).click();
@@ -168,34 +174,37 @@ describe('P1 — COD Main Account Payout Setup', () => {
       const payoutDialogHeading = mgr.page.getByRole('heading', { name: /set up a payout account/i });
       await payoutDialogHeading.waitFor({ state: 'visible', timeout: 10_000 });
 
-      // Open Payment Settings — journey-only admin capability grants the route.
+      // Setup Account — opens INLINE within Bulk Upload, no route change.
       const payoutPanel = payoutDialogHeading.locator('xpath=..');
-      await payoutPanel.getByRole('button', { name: /open payment settings/i }).click();
-      await mgr.page.waitForURL('**/dashboard/payment-settings', { timeout: 10_000 });
-      await mgr.page.getByRole('heading', { name: /^payment settings$/i }).waitFor({ timeout: 10_000 });
-      const restricted = await mgr.page.getByText(/access restricted/i).count();
-      assert.equal(restricted, 0, 'journey capability must bypass the admin-only guard here');
+      await payoutPanel.getByRole('button', { name: /set up payout account/i }).click();
+      const drawer = mgr.page.getByRole('dialog', { name: /set up payout account/i });
+      await drawer.waitFor({ state: 'visible', timeout: 10_000 });
+      assert.match(
+        mgr.page.url(), /\/dashboard\/bulk-uploader\/summary\/journey-cod-payout$/,
+        'must stay on Bulk Upload — no navigation to Payment Settings',
+      );
 
-      // No payout bank yet — fixture starts clean.
-      await mgr.page.getByText(/no payout bank on file yet/i).waitFor({ timeout: 10_000 });
-
-      // Add Bank Account → OTP → Pending (never auto-verified).
-      await mgr.page.getByRole('button', { name: /add bank account/i }).click();
-      const addBankHeading = mgr.page.getByRole('heading', { name: /^add bank account$/i });
-      await addBankHeading.waitFor({ state: 'visible', timeout: 10_000 });
-      const addBankPanel = addBankHeading.locator('xpath=..');
-      await addBankPanel.locator('select').selectOption('BDO Unibank');
-      await addBankPanel.locator('input[placeholder="Account number"]').fill('1234567890');
-      await addBankPanel.getByRole('button', { name: /^continue$/i }).click();
+      // Same bank fields + OTP behavior as Payment Settings' Add Bank Account.
+      await drawer.locator('select').selectOption('BDO Unibank');
+      await drawer.locator('input[placeholder="Account number"]').fill('1234567890');
+      await drawer.getByRole('button', { name: /^continue$/i }).click();
 
       await mgr.page.getByPlaceholder('------').fill('123456');
       await mgr.page.getByRole('button', { name: /verify & continue/i }).click();
 
-      await mgr.page.getByText('BDO Unibank').waitFor({ timeout: 10_000 });
-      await mgr.page.getByText('Pending', { exact: true }).first().waitFor({ timeout: 10_000 });
+      await drawer.getByText(/bank account submitted/i).waitFor({ timeout: 10_000 });
+      await drawer.getByText(/pending/i).first().waitFor();
+      await drawer.getByRole('button', { name: /back to bulk upload/i }).click();
+
+      // Still on Bulk Upload; COD stays blocked — Pending never satisfies eligibility.
+      assert.match(mgr.page.url(), /\/dashboard\/bulk-uploader\/summary\/journey-cod-payout$/);
+      await mgr.page.getByRole('button', { name: /complete booking/i }).click();
+      await mgr.page.getByRole('heading', { name: /set up a payout account/i })
+        .waitFor({ state: 'visible', timeout: 10_000 });
+      await mgr.page.getByRole('button', { name: /^cancel$/i }).click();
 
       // Exit journey mode — scenario state clears, normal guard behavior returns.
-      await mgr.page.getByRole('button', { name: /^exit$/i }).click();
+      await mgr.page.getByRole('button', { name: /^exit journey$/i }).click();
       await mgr.page.waitForURL('**/dashboard', { timeout: 10_000 });
       await mgr.page.goto(`${server.base}/dashboard/payment-settings`, { waitUntil: 'networkidle' });
       await mgr.page.getByText(/access restricted/i).waitFor({ timeout: 10_000 });
@@ -241,7 +250,7 @@ describe('P2 — SDD Cutoff Handling', () => {
     const afterRows = await page.locator('table tbody tr').count();
     assert.equal(afterRows, beforeRows, 'the simulated outcome must not add a row to Recent Uploads');
 
-    await page.getByRole('button', { name: /^exit$/i }).click();
+    await page.getByRole('button', { name: /^exit journey$/i }).click();
   });
 });
 
@@ -276,14 +285,14 @@ describe('P3 — Edit Delivery Details', () => {
     await page.getByText('LARGE').first().waitFor({ timeout: 10_000 });
 
     // Exit discards journey state — re-launching starts clean again.
-    await page.getByRole('button', { name: /^exit$/i }).click();
+    await page.getByRole('button', { name: /^exit journey$/i }).click();
     await page.getByRole('button', { name: /^ux journeys$/i }).click();
     await page.getByText('Edit Delivery Details').click();
     await page.waitForURL('**/dashboard/transactions/GGX-JOURNEY-EDIT-001', { timeout: 10_000 });
     await page.getByText('Gift Hamper Set').waitFor({ timeout: 10_000 });
     const stale = await page.getByText('Journey Edited Item Name').count();
     assert.equal(stale, 0, 'exiting must discard journey-local edits');
-    await page.getByRole('button', { name: /^exit$/i }).click();
+    await page.getByRole('button', { name: /^exit journey$/i }).click();
   });
 
   it('is isolated from a direct deep link to the fixture tracking number without an active journey', async () => {

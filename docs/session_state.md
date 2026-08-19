@@ -3,6 +3,43 @@
 > Lightweight resume/checkpoint file. Detailed June 2026 history was archived to
 > `docs/archive/session_log_2026-06.md`.
 
+## Most Recent Work — UX Journey Showcase Mode corrections (2026-08-19)
+
+Two stakeholder-driven corrections on top of the initial Journey Showcase Mode
+build below.
+
+- **P1 payout setup is now inline, never leaves Bulk Upload.** The COD Main
+  Account Payout Setup journey's "Setup Account" CTA no longer navigates to
+  `/dashboard/payment-settings`. New `components/journeys/PayoutSetupDrawer.tsx`
+  is a right-side drawer reusing the same bank fields and the existing
+  `OtpDialog` (Bank / Account Name / Account Number → OTP → Pending), rendered
+  directly on `BulkUploadSummary`. Submission still only writes to
+  `JourneyContext.codPayout` (never `payoutBankService`) and COD stays blocked
+  after Pending — unchanged rule, just a different presentation.
+  `PayoutSetupRequiredDialog` gained an optional `manageLabel` prop (default
+  unchanged, "Open Payment Settings") so the journey can say "Set Up Payout
+  Account" without affecting its other caller (`BulkSpreadsheet.tsx`). Also
+  fixed a real bug this surfaced: the Bulk Upload exit-guard (unsaved-progress
+  prompt) was intercepting "Exit Journey" clicks since the presenter now never
+  leaves the review page mid-journey; the guard is now disarmed while the P1
+  journey is active (its batch is fixture-only, nothing real to lose).
+  `payment-settings`'s `AdminRoute allowJourneyOverride` capability grant is
+  left in place (unused by this flow now, but still correct — a Main Account
+  admin capability reasonably extends to that route too) and Payment Settings
+  itself is fully unchanged outside Journey Mode.
+- **Floating Journey controls regrouped bottom-right.** The active-journey
+  indicator no longer sits bottom-LEFT (where it could sit under the sidebar);
+  `JourneyShell` now renders a single bottom-right control group: a small
+  "UX Journey: …" label pill stacked above `[Exit Journey] [UX Journeys]`.
+  Both remain visible above normal content; stacking (drawer z-60, floating
+  controls z-40, under normal `Dialog`s at z-50 as intended) is unchanged.
+- **Tests:** `tests/journey-mode.test.mjs` updated in place (15 tests now) —
+  P1's flow rewritten to assert the inline drawer and same-route assertion
+  (`must stay on Bulk Upload — no navigation to Payment Settings`), a new
+  standalone "Payment Settings stays Admin-only, no journey active" isolation
+  check, and all `Exit`-button locators renamed to `Exit Journey`. Full suite
+  **69/69**, typecheck + build green.
+
 ## Most Recent Work — UX Journey Showcase Mode (2026-08-19)
 
 Lightweight, dashboard-scoped, **in-memory** stakeholder-review layer. Reuses

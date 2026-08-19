@@ -7,15 +7,22 @@ interface PayoutSetupRequiredDialogProps {
   canManagePayout: boolean;
   onClose: () => void;
   onManagePayout: () => void;
+  /**
+   * Overrides the manage-payout CTA label. Defaults to "Open Payment
+   * Settings" (the normal handoff). The COD Main Account Payout Setup UX
+   * Journey passes "Set Up Payout Account" since it opens bank setup inline
+   * within Bulk Upload instead of navigating away.
+   */
+  manageLabel?: string;
 }
 
 /**
- * Reusable COD block for bulk-booking surfaces. Payout setup stays in the
- * Main Account's OTP-gated Payment Settings flow; this dialog never collects
- * or changes financial details itself.
+ * Reusable COD block for bulk-booking surfaces. Payout setup normally stays
+ * in the Main Account's OTP-gated Payment Settings flow; this dialog never
+ * collects or changes financial details itself.
  */
 export function PayoutSetupRequiredDialog({
-  open, canManagePayout, onClose, onManagePayout,
+  open, canManagePayout, onClose, onManagePayout, manageLabel = 'Open Payment Settings',
 }: PayoutSetupRequiredDialogProps) {
   const title = canManagePayout ? 'Set up a payout account' : 'Payout setup required';
   const description = canManagePayout
@@ -30,7 +37,7 @@ export function PayoutSetupRequiredDialog({
           {canManagePayout ? 'Cancel' : 'Close'}
         </Button>
         {canManagePayout && (
-          <Button size="sm" onClick={onManagePayout}>Open Payment Settings</Button>
+          <Button size="sm" onClick={onManagePayout}>{manageLabel}</Button>
         )}
       </div>
     </Dialog>

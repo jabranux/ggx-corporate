@@ -15,33 +15,42 @@ export function JourneyShell() {
 
   return (
     <>
-      {/* Active journey indicator */}
-      {activeJourney && (
-        <div className="fixed bottom-5 left-5 z-40 flex items-center gap-2 rounded-full bg-gray-900 text-white shadow-lg pl-3.5 pr-2 py-1.5 text-xs font-medium">
-          <IconSparkles className="w-3.5 h-3.5 text-amber-300 flex-shrink-0" />
-          <span className="whitespace-nowrap">
-            UX Journey: <span className="font-semibold">{activeJourney.indicatorLabel}</span>
-          </span>
-          <span className="mx-0.5 text-gray-500">·</span>
+      {/* Journey Showcase control group — always grouped in the lower-right so
+          it never sits under the sidebar. When a journey is active, a small
+          label pill sits above the [Exit Journey] [UX Journeys] button pair;
+          otherwise only the UX Journeys CTA shows. */}
+      <div className="fixed bottom-5 right-5 z-40 flex flex-col items-end gap-2">
+        {activeJourney && (
+          <div className="flex items-center gap-2 rounded-full bg-gray-900 text-white shadow-lg pl-3.5 pr-3 py-1.5 text-xs font-medium">
+            <IconSparkles className="w-3.5 h-3.5 text-amber-300 flex-shrink-0" />
+            <span className="whitespace-nowrap">
+              UX Journey: <span className="font-semibold">{activeJourney.indicatorLabel}</span>
+            </span>
+          </div>
+        )}
+
+        <div className="flex items-center gap-2.5">
+          {activeJourney && (
+            <button
+              onClick={exitJourney}
+              className="flex items-center gap-1.5 rounded-full bg-white border border-gray-300 text-gray-700 shadow-lg px-4 py-2.5 text-sm font-semibold hover:bg-gray-50 transition-colors cursor-pointer"
+            >
+              <IconX className="w-4 h-4 flex-shrink-0" />
+              Exit Journey
+            </button>
+          )}
+
           <button
-            onClick={exitJourney}
-            className="rounded-full px-2 py-0.5 text-amber-300 hover:bg-white/10 hover:text-amber-200 cursor-pointer transition-colors"
+            onClick={openDrawer}
+            className="flex items-center gap-2 rounded-full bg-gray-900 text-white shadow-lg pl-4 pr-4.5 py-2.5 text-sm font-semibold hover:bg-gray-800 transition-colors cursor-pointer"
+            aria-haspopup="dialog"
+            aria-expanded={isDrawerOpen}
           >
-            Exit
+            <IconRoute className="w-4 h-4 flex-shrink-0" />
+            UX Journeys
           </button>
         </div>
-      )}
-
-      {/* Floating CTA */}
-      <button
-        onClick={openDrawer}
-        className="fixed bottom-5 right-5 z-40 flex items-center gap-2 rounded-full bg-gray-900 text-white shadow-lg pl-4 pr-4.5 py-2.5 text-sm font-semibold hover:bg-gray-800 transition-colors cursor-pointer"
-        aria-haspopup="dialog"
-        aria-expanded={isDrawerOpen}
-      >
-        <IconRoute className="w-4 h-4 flex-shrink-0" />
-        UX Journeys
-      </button>
+      </div>
 
       {/* Drawer */}
       {isDrawerOpen && (
