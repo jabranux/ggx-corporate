@@ -133,9 +133,28 @@ function deriveBookingMethod(a: OmsOrderAttribution, sourceType: SourceType): Bo
   }
 }
 
+/**
+ * Resolve the coarse Business+ status for a raw OMS status. Unmapped statuses
+ * fail loudly here — at the adapter boundary — instead of silently defaulting
+ * to 'pending', which would misrepresent an unknown/unsupported status as
+ * "newly booked, not yet started" (incorrectly implying cancel-eligible/active
+ * to downstream consumers such as `claims.ts`'s `isCancelEligible`). Add new
+ * OMS statuses to `OMS_STATUS_TO_COARSE` explicitly rather than widening this
+ * fallback.
+ */
+function mapCoarseStatus(omsStatus: string): TransactionStatus {
+  const coarse = OMS_STATUS_TO_COARSE[omsStatus];
+  if (!coarse) {
+    throw new Error(
+      `omsOrderMapper: unmapped OMS status "${omsStatus}" — add it to OMS_STATUS_TO_COARSE in omsOrderMapper.ts instead of assuming a default status.`
+    );
+  }
+  return coarse;
+}
+
 /** Normalize one OMS-shaped sample order into the Business+ `Transaction` model. */
 export function mapOmsOrderToTransaction(order: OmsOrder, attribution: OmsOrderAttribution): Transaction {
-  const status = OMS_STATUS_TO_COARSE[order.status] ?? 'pending';
+  const status = mapCoarseStatus(order.status);
   const serviceType = SERVICE_NAME_TO_TYPE[order.service.name] ?? 'standard';
   const type: 'Express' | 'Standard' = serviceType === 'standard' ? 'Standard' : 'Express';
   const packaging = PACKAGING_BY_SHIPMENT[order.shipment] ?? PACKAGING_BY_SHIPMENT['medium-pouch'];
@@ -160,8 +179,13 @@ export function mapOmsOrderToTransaction(order: OmsOrder, attribution: OmsOrderA
       price: i.quantity > 0 ? money(i.amount) / i.quantity : money(i.amount),
     }));
 
+  // `order.breakdown.fee` and `order.fees.transaction_fee` are the same OMS
+  // transaction fee surfaced in two response sections (mirrors the reference
+  // OMS payload's own duplication) — represent it exactly once, as
+  // `processingFee`. There is no distinct OMS field for a separate "service
+  // fee", so it stays 0 rather than double-counting the transaction fee.
   const fees = {
-    serviceFee: money(order.breakdown.fee),
+    serviceFee: 0,
     shippingFee: money(order.fees.shipping_fee),
     protectionFee: money(order.fees.insurance_fee),
     discount: -Math.abs(money(order.breakdown.discount)),

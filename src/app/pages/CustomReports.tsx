@@ -51,6 +51,7 @@ const STATUS_OPTIONS: { value: StatusFilter; label: string }[] = [
   { value: 'pending',         label: 'Pending' },
   { value: 'failed',          label: 'Failed' },
   { value: 'returned',        label: 'Returned' },
+  { value: 'cancelled',       label: 'Cancelled' },
   { value: 'failed_returned', label: 'Failed & Returned' },
 ];
 

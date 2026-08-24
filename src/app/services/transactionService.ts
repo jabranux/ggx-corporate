@@ -466,11 +466,17 @@ function rollupStatusFromCounts(c: BatchCounts): { label: string; variant: Statu
   return { label: 'Partial', variant: 'warning' };
 }
 
-/** Sample roll-up status derived from member statuses (stands in for backend value). */
+/**
+ * Sample roll-up status derived from member statuses (stands in for backend value).
+ * `failed` groups every terminal, non-successful outcome (delivery failed and
+ * still moving through the return pipeline, fully returned, or cancelled) —
+ * this rollup only distinguishes delivered / in-progress / not-successful, so
+ * cancelled must land here rather than falling into `inProgress` by omission.
+ */
 function batchRollupStatus(items: Transaction[]): { label: string; variant: StatusVariant } {
   const total = items.length;
   const delivered = items.filter((t) => t.status === 'delivered').length;
-  const failed = items.filter((t) => t.status === 'failed' || t.status === 'returned').length;
+  const failed = items.filter((t) => t.status === 'failed' || t.status === 'returned' || t.status === 'cancelled').length;
   const inProgress = total - delivered - failed;
   return rollupStatusFromCounts({ total, delivered, inProgress, failed });
 }
@@ -511,7 +517,7 @@ export async function getTransactionBatches(
             inProgress: items.filter(
               (t) => t.status === 'in-transit' || t.status === 'picked-up' || t.status === 'pending'
             ).length,
-            failed: items.filter((t) => t.status === 'failed' || t.status === 'returned').length,
+            failed: items.filter((t) => t.status === 'failed' || t.status === 'returned' || t.status === 'cancelled').length,
           },
       status: rc ? rollupStatusFromCounts(rc) : batchRollupStatus(items),
       uploadedDate: batchUploadedDate(batch.batchId),

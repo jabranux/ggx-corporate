@@ -179,7 +179,7 @@ export function deliveryStageFromStatus(status: TransactionStatus): OnDemandDeli
     case 'delivered':  return 'delivered';
     case 'failed':     return 'en_route';
     case 'returned':   return 'delivered';
-    case 'cancelled':  return 'looking_for_driver';
+    case 'cancelled':  return 'cancelled';
   }
 }
 
@@ -195,7 +195,7 @@ export function statusFromDeliveryStage(stage: OnDemandDeliveryStage): Transacti
     case 'picked_up':  return 'picked-up';
     case 'en_route':   return 'in-transit';
     case 'delivered':  return 'delivered';
-    case 'cancelled':  return 'returned';
+    case 'cancelled':  return 'cancelled';
   }
 }
 

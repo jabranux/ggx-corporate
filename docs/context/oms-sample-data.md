@@ -3,6 +3,74 @@
 > Implementation notes for the OMS-patterned sample/mock order rework. Read
 > this before touching transaction/order mock data again.
 
+## Correction pass (2026-08-24) — Codex audit findings
+
+A follow-up audit (Codex) found 4 real bugs in the mapper/bridge introduced by
+the original rework below. All 4 are fixed; no architecture change, no
+dataset redesign, no new statuses/types beyond what already existed.
+
+1. **P1 — duplicate non-COD fee.** `omsOrderMapper.ts` mapped the *same* OMS
+   value into both `fees.serviceFee` (from `order.breakdown.fee`) and
+   `fees.processingFee` (from `order.fees.transaction_fee`) — those two OMS
+   fields are the same transaction fee surfaced in two response sections (the
+   sample data mirrors the reference payload's own duplication there).
+   `getTransactionTotals()` sums `Object.values(transaction.fees)`, so every
+   prepaid/wallet/bank-transfer order (`transaction_fee` = ₱15; COD orders are
+   ₱0 so the bug was invisible for them) displayed ₱15 more than
+   `order.grand_total`. **Fix:** `serviceFee` is now always `0` (OMS has no
+   distinct "service fee" field), `processingFee` remains the sole carrier of
+   `fees.transaction_fee`. Verified: `itemsTotal + feesTotal === grand_total`
+   for all 29 orders (see Validation below) — no sample order was touched.
+2. **P2 — unmapped OMS status silently became `pending`.** `order.status ??
+   'pending'` in the mapper meant any future/unknown OMS status would render
+   as "newly booked", making it look active and cancel-eligible
+   (`claims.ts`'s `isCancelEligible` allows cancel only on `pending`) even
+   though nothing is actually known about it. **Fix:** a new
+   `mapCoarseStatus()` helper throws a descriptive error naming the unmapped
+   status and pointing at `OMS_STATUS_TO_COARSE` when a status isn't in the
+   table, instead of guessing. This fails at the adapter boundary (the
+   mapper), before any UI ever sees a misrepresented status. No new
+   `TransactionStatus` value or type was added — every status the current
+   29-order dataset produces was already in the table (build/tests confirm
+   the throw never fires today).
+3. **P2 — cancelled OD deliveries mis-bridged.** `onDemandDelivery.ts`'s two
+   bridge functions had it backwards for `cancelled`:
+   `deliveryStageFromStatus('cancelled')` returned `'looking_for_driver'`
+   (an OMS-cancelled transaction would render "Looking for driver" instead of
+   "Cancelled"), and `statusFromDeliveryStage('cancelled')` returned
+   `'returned'` (a cancelled OD delivery would report back as a completed
+   return). **Fix:** both now map `cancelled ↔ cancelled` — the dedicated
+   `cancelled` stage (with its own "Cancelled" label/state) already existed
+   in `OD_STAGE_DEFS`/`getOnDemandProgress()` and was simply never reachable
+   from either direction. `storefrontOrders.ts`'s
+   `buildTransactionFromOrder()` needed no change — it already calls
+   `statusFromDeliveryStage()`, so the fix propagates automatically. No
+   on_demand order in the sample dataset is currently `cancelled` (the one
+   `cancelled` sample order is `next_day`/standard), so this was verified
+   directly against the two bridge functions rather than through a rendered
+   screen — see Validation below.
+4. **P2 — cancelled excluded from reporting/batch rollups.**
+   `CustomReports.tsx`'s status filter dropdown had no `Cancelled` option (so
+   cancelled transactions were only reachable via "All statuses" and could
+   never be filtered on their own, nor were they folded into "Failed &
+   Returned" — correct per the audit's no-conflation guidance, just
+   unreachable as their own filter). **Fix:** added a `Cancelled` option;
+   the existing generic `status === statusFilter` branch already handles it
+   correctly, no filtering-logic change needed. Separately,
+   `transactionService.ts`'s `batchRollupStatus()` computed
+   `inProgress = total - delivered - failed` with `failed` excluding
+   `cancelled` — so a cancelled transaction in a batch was counted as
+   in-progress purely by subtraction. The non-`reportedCounts` fallback path
+   in `getTransactionBatches()` had the same gap (`failed` filter excluded
+   `cancelled`, so cancelled orders were dropped from all three buckets
+   entirely). **Fix:** both `failed` filters now include `status ===
+   'cancelled'` — `BatchCounts` only has `{total, delivered, inProgress,
+   failed}` (no dedicated cancelled bucket), and this rollup already groups
+   multiple distinct terminal outcomes (`failed` delivery status *and*
+   `returned`) into one "not delivered, terminal" number, so folding
+   `cancelled` into the same existing bucket is consistent with what that
+   metric already means — not a new conflation.
+
 ## What changed
 
 The Transactions/order sample data was rebuilt so it is patterned after a real
@@ -217,6 +285,20 @@ scenarios above.
   `/track` page all read through the unchanged `Transaction`/
   `TransactionSummary` shape — no page needed a structural change beyond the
   additive items listed above.
+
+### Correction-pass validation (2026-08-24)
+
+- `npm run typecheck` / `npm run build` / `npm test` (70/70) — all clean
+  after the 4 fixes above.
+- Targeted script (`tsx`, ad hoc, not checked in): for every one of the 29
+  `omsOrders`, computed `getTransactionTotals(tx).itemsTotal +
+  getTransactionTotals(tx).feesTotal` and compared it to that order's
+  `grand_total` — **0 mismatches** (previously 7 non-COD orders were off by
+  ₱15 each). Also confirmed `deliveryStageFromStatus('cancelled') ===
+  'cancelled'`, `statusFromDeliveryStage('cancelled') === 'cancelled'`,
+  `getOnDemandProgress('cancelled').currentLabel === 'Cancelled'`, and that
+  `mapOmsOrderToTransaction()` throws (rather than defaulting) for a
+  deliberately-injected unmapped status string.
 
 ## Not done / explicitly out of scope
 
