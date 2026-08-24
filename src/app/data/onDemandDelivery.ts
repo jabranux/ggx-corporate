@@ -179,6 +179,7 @@ export function deliveryStageFromStatus(status: TransactionStatus): OnDemandDeli
     case 'delivered':  return 'delivered';
     case 'failed':     return 'en_route';
     case 'returned':   return 'delivered';
+    case 'cancelled':  return 'looking_for_driver';
   }
 }
 

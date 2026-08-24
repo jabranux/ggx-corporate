@@ -316,7 +316,7 @@ export async function getDashboardStats(subaccountId?: string): Promise<Dashboar
       )
     : transactions;
 
-  const byStatus = { delivered: 0, 'in-transit': 0, 'picked-up': 0, pending: 0, failed: 0, returned: 0 } as Record<TransactionStatus, number>;
+  const byStatus = { delivered: 0, 'in-transit': 0, 'picked-up': 0, pending: 0, failed: 0, returned: 0, cancelled: 0 } as Record<TransactionStatus, number>;
   let totalCod = 0;
   for (const t of subset) {
     byStatus[t.status] = (byStatus[t.status] ?? 0) + 1;
@@ -392,7 +392,7 @@ export async function getBasicAnalytics(
 
   const order: DeliveryServiceType[] = ['standard', 'same_day', 'on_demand'];
   const counts: Record<DeliveryServiceType, number> = { standard: 0, same_day: 0, on_demand: 0 };
-  const byStatus = { delivered: 0, 'in-transit': 0, 'picked-up': 0, pending: 0, failed: 0, returned: 0 } as Record<TransactionStatus, number>;
+  const byStatus = { delivered: 0, 'in-transit': 0, 'picked-up': 0, pending: 0, failed: 0, returned: 0, cancelled: 0 } as Record<TransactionStatus, number>;
   // Attribution breakdowns: source mix + granular booking-method mix.
   const sourceCounts = Object.fromEntries(SOURCE_TYPE_ORDER.map((k) => [k, 0])) as Record<SourceType, number>;
   const bmCounts = Object.fromEntries(BOOKING_METHOD_ORDER.map((k) => [k, 0])) as Record<BookingMethod, number>;

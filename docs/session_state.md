@@ -3,6 +3,35 @@
 > Lightweight resume/checkpoint file. Detailed June 2026 history was archived to
 > `docs/archive/session_log_2026-06.md`.
 
+## Most Recent Work — OMS-shaped sample order data (2026-08-24)
+
+Reworked the Transactions/order sample data to be patterned after a real OMS
+order payload instead of a flat row with a single current status. Full
+write-up, field-by-field mapping, and scenario coverage:
+`docs/context/oms-sample-data.md`.
+
+- **New adapter boundary:** `data/omsOrders.ts` (OMS-shaped mock: events[],
+  fees, breakdown, parcel, addresses, consignor/consignee, metadata incl.
+  `pricing_type`/`service_fees_payor`/`transaction_scenario`) →
+  `lib/omsOrderMapper.ts` (normalizer) → `data/transactions.ts`'s existing
+  `Transaction` model (unchanged shape + 2 optional fields) → UI unchanged.
+  `data/transactions.ts` now owns only a small `ATTRIBUTION` table (subaccount/
+  batch/source per tracking number) — OMS has no concept of that.
+- All 29 existing tracking numbers/recipients/subaccounts kept. Each order now
+  carries a real, chronological `events` history (11 reusable scenario
+  generators) instead of a synthetic single-status timeline — covers
+  successful delivery, delivery after a failed-attempt retry, failed→
+  for_return/out_for_return/return_in_transit, full return, cancelled-before-
+  pickup, and a recovered pickup-failure. `TransactionStatus` gained
+  `'cancelled'` (blast radius: 2 `byStatus` literals in
+  `transactionService.ts`, 1 now-exhaustive switch in `onDemandDelivery.ts`,
+  1 filter option, 1 dashboard rollup — all updated).
+- Dataset-wide variation: COD vs. non-COD, buyer- vs. seller-paid service
+  fees, 7 shipment types, 3 pricing types, 3 OMS services, 2 consignor
+  payment-terms profiles, insured vs. uninsured.
+- **Validated:** `npm run typecheck`, `npm run build`, `npm test` (70/70) all
+  green. Not pushed.
+
 ## Most Recent Work — P1 payout account rules corrected: no Pending state (2026-08-19)
 
 Second correction pass on the COD Main Account Payout Setup UX Journey (P1) —

@@ -192,6 +192,11 @@ export function TransactionDetails() {
             <span className="mx-2 text-gray-300">·</span>
             Service Type: <span className="font-medium text-gray-600">{serviceTypeLabel(transaction.serviceType)}</span>
           </p>
+          {transaction.failureReason && (
+            <p className="text-sm text-red-600 mt-1">
+              {transaction.failureReason.replace(/_/g, ' ')}
+            </p>
+          )}
         </div>
 
         {/* P3 UX Journey — Edit Delivery Details. Journey-only surface: hidden

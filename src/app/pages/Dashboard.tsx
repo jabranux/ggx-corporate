@@ -104,7 +104,7 @@ export function Dashboard() {
   // Derived KPI values from real seed data.
   const active     = dashStats ? (dashStats.byStatus['in-transit'] + dashStats.byStatus['picked-up']) : 0;
   const pending    = dashStats ? dashStats.byStatus.pending : 0;
-  const failed     = dashStats ? (dashStats.byStatus.failed + dashStats.byStatus.returned) : 0;
+  const failed     = dashStats ? (dashStats.byStatus.failed + dashStats.byStatus.returned + dashStats.byStatus.cancelled) : 0;
   const totalCod   = dashStats ? dashStats.totalCod : 0;
 
   const stats = dashStats ? [
@@ -122,7 +122,7 @@ export function Dashboard() {
   const performanceRows = dashStats ? [
     { label: 'Delivered',         value: dashStats.byStatus.delivered,   dot: 'bg-emerald-500', pct: Math.round((dashStats.byStatus.delivered / dashStats.total) * 100) },
     { label: 'In Transit',        value: dashStats.byStatus['in-transit'] + dashStats.byStatus['picked-up'], dot: 'bg-blue-500', pct: Math.round(((dashStats.byStatus['in-transit'] + dashStats.byStatus['picked-up']) / dashStats.total) * 100) },
-    { label: 'Failed / Returned', value: dashStats.byStatus.failed + dashStats.byStatus.returned, dot: 'bg-red-400', pct: Math.round(((dashStats.byStatus.failed + dashStats.byStatus.returned) / dashStats.total) * 100) },
+    { label: 'Failed / Returned', value: dashStats.byStatus.failed + dashStats.byStatus.returned + dashStats.byStatus.cancelled, dot: 'bg-red-400', pct: Math.round(((dashStats.byStatus.failed + dashStats.byStatus.returned + dashStats.byStatus.cancelled) / dashStats.total) * 100) },
     { label: 'Pending',           value: dashStats.byStatus.pending,      dot: 'bg-orange-400', pct: Math.round((dashStats.byStatus.pending / dashStats.total) * 100) },
   ] : [];
 

@@ -248,6 +248,7 @@ export function Transactions() {
                   <option value="delivered">Delivered</option>
                   <option value="failed">Failed</option>
                   <option value="returned">Returned</option>
+                  <option value="cancelled">Cancelled</option>
                 </Select>
               </div>
               <div className="w-full sm:w-[180px] flex-shrink-0">

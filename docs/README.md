@@ -52,6 +52,7 @@ check whether the other needs the same update.
 | `context/bulk-booking.md` | Upload File, in-app spreadsheet, product attachment, fees |
 | `context/future-backlog.md` | Detailed specs for planned-but-not-started roadmap items |
 | `context/ui-components.md` | Design system, component, responsive, and Figma rules |
+| `context/oms-sample-data.md` | OMS-shaped sample order data, adapter boundary, status mapping, scenario coverage |
 
 ## Detailed Rule Docs
 

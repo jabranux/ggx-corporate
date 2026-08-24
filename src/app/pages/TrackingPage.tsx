@@ -26,6 +26,7 @@ const statusIcon: Record<string, React.ReactNode> = {
   pending: <IconPackage className="w-6 h-6 text-gray-400" />,
   failed: <IconAlertCircle className="w-6 h-6 text-red-500" />,
   returned: <IconAlertCircle className="w-6 h-6 text-gray-500" />,
+  cancelled: <IconAlertCircle className="w-6 h-6 text-red-500" />,
 };
 
 function TrackingResult({ transaction }: { transaction: Transaction }) {
