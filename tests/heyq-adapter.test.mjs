@@ -216,12 +216,12 @@ describe('common API failures', () => {
 });
 
 describe('requester writes go to HeyQ, then re-read the customer view', () => {
-  it('reply posts to /tickets/:id/messages then re-reads /customer/tickets/:id', async () => {
+  it('reply posts to /customer/tickets/:id/messages then re-reads /customer/tickets/:id', async () => {
     const { result, calls } = await withStub((svc) => svc.replyToMyTicket('tkt_abc123', 'Any update?'), {
       response: HEYQ_TICKET,
     });
     assert.equal(result.status, 'ok');
-    const post = calls.find((c) => c.method === 'POST' && /\/api\/tickets\/tkt_abc123\/messages$/.test(c.url));
+    const post = calls.find((c) => c.method === 'POST' && /\/api\/(customer\/)?tickets\/tkt_abc123\/messages$/.test(c.url));
     assert.ok(post, 'a reply POST must be issued');
     assert.match(String(post.body), /Any update\?/);
     const reread = calls.find((c) => c.method === 'GET' && /\/api\/customer\/tickets\/tkt_abc123\?/.test(c.url));
@@ -242,7 +242,7 @@ describe('requester writes go to HeyQ, then re-read the customer view', () => {
     });
     assert.equal(result.status, 'forbidden');
     // POST issued, but no re-read of this ticket after the failed write.
-    assert.ok(calls.find((c) => c.method === 'POST' && /\/api\/tickets\/tkt_x\/messages$/.test(c.url)));
+    assert.ok(calls.find((c) => c.method === 'POST' && /\/api\/(customer\/)?tickets\/tkt_x\/messages$/.test(c.url)));
     assert.ok(!calls.find((c) => c.method === 'GET' && /\/api\/customer\/tickets\/tkt_x\?/.test(c.url)));
   });
 });

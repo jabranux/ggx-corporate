@@ -272,7 +272,7 @@ describe('live conversation in the ticket detail page', () => {
         const u = String(url); const method = (init?.method ?? 'GET').toUpperCase();
         const path = new URL(u, 'http://x').pathname;
         if (method === 'POST' && path.endsWith('/api/customer/realtime/token')) return json({ token: 'rtok', expiresInMs: 60000 });
-        if (method === 'POST' && /\/api\/tickets\/[^/]+\/messages$/.test(path)) {
+        if (method === 'POST' && /\/api\/(customer\/)?tickets\/[^/]+\/messages$/.test(path)) {
           const body = init?.body ? JSON.parse(init.body) : {};
           window.__ticket.messages.push({ id: 'srv-' + (window.__ticket.messages.length + 1), from: 'you', authorLabel: 'You', body: body.body, createdAt: now() });
           window.__ticket.updatedAt = now();

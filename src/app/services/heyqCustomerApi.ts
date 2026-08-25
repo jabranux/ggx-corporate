@@ -395,12 +395,18 @@ export async function apiReplyToMyTicket(
     // files atomically with the message, so the message never references a missing
     // upload. A rejected batch fails the whole reply (no message is created).
     const form = new FormData();
+    form.append('externalUserId', who.externalUserId);
+    form.append('externalOrgId', who.externalOrgId);
     form.append('body', body);
     for (const f of files) form.append('files', f, f.name);
-    const posted = await postForm(`/tickets/${encodeURIComponent(id)}/messages`, form);
+    const posted = await postForm(`/customer/tickets/${encodeURIComponent(id)}/messages`, form);
     if (!posted.ok) return { status: posted.result };
   } else {
-    const posted = await post(`/tickets/${encodeURIComponent(id)}/messages`, { body });
+    const posted = await post(`/customer/tickets/${encodeURIComponent(id)}/messages`, {
+      externalUserId: who.externalUserId,
+      externalOrgId: who.externalOrgId,
+      body,
+    });
     if (!posted.ok) return { status: posted.result };
   }
   return apiGetMyTicket(who, id);
@@ -411,7 +417,10 @@ export async function apiReopenMyTicket(
   who: HeyQRequesterIdentity,
   id: string,
 ): Promise<HeyQResult<CustomerTicket>> {
-  const posted = await post(`/tickets/${encodeURIComponent(id)}/reopen`);
+  const posted = await post(`/tickets/${encodeURIComponent(id)}/reopen`, {
+    externalUserId: who.externalUserId,
+    externalOrgId: who.externalOrgId,
+  });
   if (!posted.ok) return { status: posted.result };
   return apiGetMyTicket(who, id);
 }
@@ -462,6 +471,8 @@ export async function apiCreateTicket(
       }))
     : undefined;
 
+  const trackingNumber = linkedTransactions?.[0]?.trackingNumber;
+
   const payload = {
     externalUserId: who.externalUserId,
     externalOrgId: who.externalOrgId,
@@ -470,6 +481,7 @@ export async function apiCreateTicket(
     concernType: CONCERN_TO_HEYQ[input.concernType] ?? 'general_inquiry',
     subject: input.subject,
     description: input.description,
+    trackingNumber,
     linkedTransactions,
   };
 
@@ -485,6 +497,7 @@ export async function apiCreateTicket(
     form.append('concernType', payload.concernType);
     form.append('subject', payload.subject);
     form.append('description', payload.description);
+    if (trackingNumber) form.append('trackingNumber', trackingNumber);
     if (linkedTransactions) form.append('linkedTransactions', JSON.stringify(linkedTransactions));
     for (const f of input.files) form.append('files', f, f.name);
     res = await postForm('/customer/tickets', form);

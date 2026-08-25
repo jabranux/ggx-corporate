@@ -212,6 +212,26 @@ export function useTicketConversation(id: string, initialTicket: CustomerTicket)
     setPending([]);
     setAgentTyping(false);
 
+    // REST Polling: poll getTicketById every 5s while conversation is open
+    let isPolling = false;
+    const pollInterval = setInterval(async () => {
+      if (isPolling) return;
+      isPolling = true;
+      try {
+        const res = await getTicketById(id);
+        if (res.status === 'ok') {
+          mergeTicket(res.data);
+          setConnection('open');
+        } else if (res.status === 'unavailable') {
+          setConnection('reconnecting');
+        }
+      } catch {
+        // Silently handle transient errors, keep existing conversation state
+      } finally {
+        isPolling = false;
+      }
+    }, 5_000);
+
     const client = createHeyQRealtimeClient({
       url: getHeyQRealtimeUrl(),
       ticketId: id,
@@ -227,6 +247,7 @@ export function useTicketConversation(id: string, initialTicket: CustomerTicket)
     client.start();
 
     return () => {
+      clearInterval(pollInterval);
       client.stop();
       clientRef.current = null;
       if (agentTypingTimer.current) clearTimeout(agentTypingTimer.current);
