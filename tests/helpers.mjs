@@ -53,11 +53,52 @@ export const CREDENTIALS = {
   manager: { email: 'manager@email.com', password: '!1234qwer' },
 };
 
+/**
+ * Server-verified identity for each demo account (mirrors `api/_lib/demoUsers.ts`).
+ * `stubAuthEndpoints` uses this to fake `/api/auth/login` responses — the real
+ * endpoint isn't reachable from these tests (plain `vite` dev server, no
+ * Vercel functions runtime), so it's stubbed the same way `/api/support/*`
+ * already is (see `addHeyQApiStubScript`).
+ */
+const DEMO_ACCOUNTS = {
+  'max@email.com':     { password: '!1234qwer', id: 'user-admin-001', name: 'Max Rodriguez', email: 'max@email.com',     role: 'admin',   accountId: 'main',        accountName: 'Main Account' },
+  'manager@email.com': { password: '!1234qwer', id: 'user-mgr-001',   name: 'Rina Lopez',    email: 'manager@email.com', role: 'manager', accountId: 'acme-luzon',  accountName: 'Acme Luzon' },
+};
+
+/** Stub `/api/auth/login` and `/api/auth/logout` so `authService.loginMockUser`/
+ * `logoutMockUser`'s real `fetch()` calls resolve without a live Vercel functions
+ * runtime. Must be registered before the navigation that triggers the login form
+ * submit (an init script). */
+async function stubAuthEndpoints(page) {
+  await page.addInitScript((accounts) => {
+    const orig = window.fetch.bind(window);
+    window.fetch = async (url, init) => {
+      const path = new URL(String(url), 'http://x').pathname;
+      const method = (init?.method ?? 'GET').toUpperCase();
+      if (method === 'POST' && path === '/api/auth/login') {
+        let body = {};
+        try { body = init?.body ? JSON.parse(init.body) : {}; } catch { body = {}; }
+        const account = accounts[body.email];
+        if (!account || account.password !== body.password) {
+          return new Response(JSON.stringify({ error: 'Invalid email or password.' }), { status: 401, headers: { 'Content-Type': 'application/json' } });
+        }
+        const { password, ...user } = account;
+        return new Response(JSON.stringify({ user }), { status: 200, headers: { 'Content-Type': 'application/json' } });
+      }
+      if (method === 'POST' && path === '/api/auth/logout') {
+        return new Response(JSON.stringify({ ok: true }), { status: 200, headers: { 'Content-Type': 'application/json' } });
+      }
+      return orig(url, init);
+    };
+  }, DEMO_ACCOUNTS);
+}
+
 /** Launch a browser and sign in, returning a page parked on the dashboard. */
 export async function signIn(base, who = 'admin', viewport = { width: 1280, height: 900 }) {
   const browser = await chromium.launch({ headless: true });
   const context = await browser.newContext({ viewport });
   const page = await context.newPage();
+  await stubAuthEndpoints(page);
 
   const { email, password } = CREDENTIALS[who];
   await page.goto(base + '/', { waitUntil: 'networkidle' });

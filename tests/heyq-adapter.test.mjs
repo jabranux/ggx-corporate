@@ -146,18 +146,16 @@ describe('configuration', () => {
   });
 });
 
-describe('requester identity (POC demo-account mapping — handoff doc §12.2/§13)', () => {
-  it('scopes the read by an opaque demoAccountId — never externalUserId/externalOrgId', async () => {
+describe('requester identity (server-verified session — handoff doc "Server-verified support identity")', () => {
+  it('states no client-side identity at all — no demoAccountId/externalUserId/externalOrgId', async () => {
     const { calls } = await withStub((svc) => svc.listMyTickets(), { response: [] });
     const url = new URL(customerReads(calls)[0].url, 'http://x');
-    // Admin session's stable mock user id (MOCK_AUTH_USERS['max@email.com'].id).
-    assert.equal(url.searchParams.get('demoAccountId'), 'user-admin-001');
-    // The browser must not be able to state a Bridge identity directly any more.
-    assert.equal(url.searchParams.get('externalUserId'), null);
-    assert.equal(url.searchParams.get('externalOrgId'), null);
+    // Identity now travels only via the signed, httpOnly session cookie — the
+    // request carries no identity query params at all.
+    assert.equal(url.search, '');
   });
 
-  it('a different signed-in demo account maps to its own demoAccountId', async () => {
+  it('holds the same for a manager session — still no identity params on the request', async () => {
     const mgr = await signIn(server.base, 'manager');
     try {
       const { calls } = await mgr.page.evaluate(async () => {
@@ -177,7 +175,7 @@ describe('requester identity (POC demo-account mapping — handoff doc §12.2/§
       });
       const read = calls.find((c) => c.method === 'GET' && c.url.includes('/api/support/tickets'));
       const url = new URL(read.url, 'http://x');
-      assert.equal(url.searchParams.get('demoAccountId'), 'user-mgr-001');
+      assert.equal(url.search, '');
     } finally {
       await mgr.browser.close();
     }
@@ -260,7 +258,7 @@ describe('requester writes go through the support proxy, then re-read the custom
     const post = calls.find((c) => c.method === 'POST' && /\/api\/support\/tickets\/tkt_abc123\/messages$/.test(c.url));
     assert.ok(post, 'a reply POST must be issued');
     assert.match(String(post.body), /Any update\?/);
-    const reread = calls.find((c) => c.method === 'GET' && /\/api\/support\/tickets\/tkt_abc123\?/.test(c.url));
+    const reread = calls.find((c) => c.method === 'GET' && /\/api\/support\/tickets\/tkt_abc123$/.test(c.url));
     assert.ok(reread, 'the customer view must be re-read after the reply');
   });
 
@@ -272,7 +270,7 @@ describe('requester writes go through the support proxy, then re-read the custom
     assert.equal(result.status, 'forbidden');
     // POST issued, but no re-read of this ticket after the failed write.
     assert.ok(calls.find((c) => c.method === 'POST' && /\/api\/support\/tickets\/tkt_x\/messages$/.test(c.url)));
-    assert.ok(!calls.find((c) => c.method === 'GET' && /\/api\/support\/tickets\/tkt_x\?/.test(c.url)));
+    assert.ok(!calls.find((c) => c.method === 'GET' && /\/api\/support\/tickets\/tkt_x$/.test(c.url)));
   });
 });
 
@@ -288,18 +286,17 @@ describe('idempotency headers reach the proxy', () => {
         };
         try {
           const api = await import('/src/app/services/heyqCustomerApi.ts');
-          const demoAccountId = 'user-admin-001';
           // eslint-disable-next-line no-new-func
-          await new Function('api', 'demoAccountId', `return (${src})(api, demoAccountId);`)(api, demoAccountId);
+          await new Function('api', `return (${src})(api);`)(api);
           return calls;
         } finally {
           window.fetch = orig;
         }
       },
       {
-        src: ((api, demoAccountId) => Promise.all([
-          api.apiCreateTicket(demoAccountId, { name: 'Max', email: 'max@email.com', concernType: 'general_inquiry', subject: 's1', description: 'd1' }),
-          api.apiCreateTicket(demoAccountId, { name: 'Max', email: 'max@email.com', concernType: 'general_inquiry', subject: 's2', description: 'd2' }),
+        src: ((api) => Promise.all([
+          api.apiCreateTicket({ name: 'Max', email: 'max@email.com', concernType: 'general_inquiry', subject: 's1', description: 'd1' }),
+          api.apiCreateTicket({ name: 'Max', email: 'max@email.com', concernType: 'general_inquiry', subject: 's2', description: 'd2' }),
         ])).toString(),
         response: { id: 'tkt-x', reference: 'HQ-9', subject: 's', issueType: 'General', status: 'open', priority: 'normal', supportTeam: 'CS', createdAt: '2026-01-01T00:00:00Z', updatedAt: '2026-01-01T00:00:00Z', canReopen: false, messages: [] },
       },
@@ -322,18 +319,17 @@ describe('idempotency headers reach the proxy', () => {
         };
         try {
           const api = await import('/src/app/services/heyqCustomerApi.ts');
-          const demoAccountId = 'user-admin-001';
           // eslint-disable-next-line no-new-func
-          await new Function('api', 'demoAccountId', `return (${src})(api, demoAccountId);`)(api, demoAccountId);
+          await new Function('api', `return (${src})(api);`)(api);
           return calls;
         } finally {
           window.fetch = orig;
         }
       },
       {
-        src: ((api, demoAccountId) => Promise.all([
-          api.apiReplyToMyTicket(demoAccountId, 'tkt1', 'hi', 'msg-uuid-1'),
-          api.apiReplyToMyTicket(demoAccountId, 'tkt1', 'hi again (retry)', 'msg-uuid-1'),
+        src: ((api) => Promise.all([
+          api.apiReplyToMyTicket('tkt1', 'hi', 'msg-uuid-1'),
+          api.apiReplyToMyTicket('tkt1', 'hi again (retry)', 'msg-uuid-1'),
         ])).toString(),
         response: HEYQ_TICKET,
       },
@@ -374,7 +370,7 @@ describe('submitting an order report (create via the customer API)', () => {
     const posts = creates(calls);
     assert.equal(posts.length, 1, 'exactly one create must be issued');
     const body = JSON.parse(posts[0].body);
-    assert.equal(body.demoAccountId, 'user-admin-001');
+    assert.equal(body.demoAccountId, undefined, 'the client must not send demoAccountId directly');
     assert.equal(body.externalUserId, undefined, 'the client must not send externalUserId directly');
     assert.equal(body.externalOrgId, undefined, 'the client must not send externalOrgId directly');
     assert.equal(body.concernType, 'delivery_delay'); // mapped from failed_delivery

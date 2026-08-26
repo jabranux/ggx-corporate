@@ -1,21 +1,23 @@
 /**
  * authService — mock authentication service.
  *
- * All functions are async to match the signature of a real auth API.
- * Currently backed by in-memory mock data; swap the implementation body for
- * real fetch() calls when a backend is available.
+ * `loginMockUser`/`logoutMockUser` call the real `/api/auth/login` /
+ * `/api/auth/logout` endpoints (`api/auth/*.ts`), which validate credentials
+ * server-side and set/clear a signed, httpOnly session cookie — that cookie,
+ * not anything read from here, is what `/api/support/**` derives its caller
+ * identity from (see `api/_lib/session.ts`). What this module persists in
+ * `localStorage` is UI-display state only (name/role/account for rendering
+ * and client-side route gating) — forgeable like any client state, but no
+ * longer a security boundary for the support proxy.
  *
- * Future API endpoints:
- *   POST /auth/login         → loginMockUser
- *   POST /auth/logout        → logoutMockUser
- *   GET  /auth/me            → getCurrentUser
- *   GET  /auth/session       → getSessionContext
+ * `getCurrentUser`/`getSessionContext`/`hasPermission` remain synchronous
+ * localStorage reads enriched from `MOCK_AUTH_USERS`, for the same UI-display
+ * purpose; nothing security-critical reads them.
  */
 
 import { loadState, saveState, clearState } from '../lib/storage';
 import {
   type MockAuthUser,
-  MOCK_CREDENTIALS,
   MOCK_AUTH_USERS,
 } from '../data/mock/auth.mock';
 
@@ -39,22 +41,37 @@ export interface SessionContext {
 const AUTH_STORAGE_KEY = 'auth';
 
 /**
- * Attempt mock login with email + password.
- * Returns the authenticated user or an error.
+ * Attempt login with email + password. Credentials are verified server-side
+ * by `POST /api/auth/login` (the security-critical check — see the module
+ * docblock); on success it also sets the httpOnly session cookie
+ * `/api/support/**` relies on. The richer `MOCK_AUTH_USERS` object (with
+ * permissions etc.) is looked up locally from the email the server confirmed,
+ * for display only.
  */
 export async function loginMockUser(
   email: string,
   password: string
 ): Promise<LoginResult> {
-  const expectedPassword = MOCK_CREDENTIALS[email];
-  if (!expectedPassword || expectedPassword !== password) {
+  let res: Response;
+  try {
+    res = await fetch('/api/auth/login', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email, password }),
+    });
+  } catch {
+    return { success: false, user: null, error: 'Unable to reach the server. Try again.' };
+  }
+  if (!res.ok) {
     return { success: false, user: null, error: 'Invalid email or password.' };
   }
-  const user = MOCK_AUTH_USERS[email] ?? null;
+  const data = await res.json().catch(() => null);
+  const verifiedEmail = data?.user?.email;
+  const user = typeof verifiedEmail === 'string' ? MOCK_AUTH_USERS[verifiedEmail] ?? null : null;
   if (!user) {
     return { success: false, user: null, error: 'User not found.' };
   }
-  // Persist a lightweight session (matching AuthContext.tsx shape for compatibility).
+  // Persist a lightweight UI-display session (matching AuthContext.tsx shape).
   saveState(AUTH_STORAGE_KEY, {
     name: user.name,
     email: user.email,
@@ -65,8 +82,15 @@ export async function loginMockUser(
   return { success: true, user };
 }
 
-/** Clear the current session. */
+/** Clear the current session, both the server-verified cookie and the local
+ * UI-display state. Clears local state even if the network call fails, so
+ * the UI always reflects signed-out. */
 export async function logoutMockUser(): Promise<void> {
+  try {
+    await fetch('/api/auth/logout', { method: 'POST' });
+  } catch {
+    /* best-effort — local state below still clears */
+  }
   clearState(AUTH_STORAGE_KEY);
 }
 

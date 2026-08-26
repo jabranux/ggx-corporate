@@ -7,9 +7,9 @@
  * of creating a second message.
  */
 import {
-  bridgeFetch, requireDemoIdentity, hasAttachmentPayload, relay, failConfig, failUpstream,
+  bridgeFetch, requireSessionIdentity, hasAttachmentPayload, relay, failConfig, failUpstream,
   getQueryParam, getHeader, getRequestBody,
-  BridgeConfigError, type ProxyRequest, type ProxyResponse,
+  BridgeConfigError, SessionConfigError, type ProxyRequest, type ProxyResponse,
 } from '../../../_lib/bridge.js';
 
 export default async function handler(req: ProxyRequest, res: ProxyResponse): Promise<void> {
@@ -25,9 +25,9 @@ export default async function handler(req: ProxyRequest, res: ProxyResponse): Pr
       return;
     }
     const body = await getRequestBody(req);
-    const { demoAccountId, externalUserId: _ignoredUserId, externalOrgId: _ignoredOrgId, ...rest } = body;
-    const identity = requireDemoIdentity(res, demoAccountId);
-    if (!identity) return; // 400 already written
+    const { demoAccountId: _ignoredDemoAccountId, externalUserId: _ignoredUserId, externalOrgId: _ignoredOrgId, ...rest } = body;
+    const identity = requireSessionIdentity(req, res);
+    if (!identity) return; // 401 already written
 
     if (hasAttachmentPayload(rest)) {
       res.status(400).json({ error: 'Attachments are not supported in this integration.' });
@@ -42,7 +42,7 @@ export default async function handler(req: ProxyRequest, res: ProxyResponse): Pr
     });
     await relay(res, bridgeRes);
   } catch (err) {
-    if (err instanceof BridgeConfigError) failConfig(res, err);
+    if (err instanceof BridgeConfigError || err instanceof SessionConfigError) failConfig(res, err);
     else failUpstream(res, 'POST /tickets/:id/messages', err);
   }
 }

@@ -13,26 +13,26 @@
  * the browser build, so the key can never end up in client code or a network
  * payload the browser can see.
  *
- * ── POC identity assumption (deliberate, documented) ───────────────────────
- * GGX Corporate has no server-side session yet — it is a mock/demo app whose
- * "signed-in user" lives in browser localStorage (`authService`). The browser
- * therefore cannot be trusted to state its own `externalUserId`/`externalOrgId`
- * (a caller could invoke this proxy with someone else's identity and it would
- * be forwarded to Bridge as-is — this was flagged as a P1 in the handoff doc's
- * §12.2 re-audit). Fix: the browser sends only an opaque `demoAccountId`
- * (`heyqService.getDemoAccountId()`), and `resolveDemoIdentity`
- * (`api/_lib/demoIdentity.ts`) is the ONLY place that maps it to a Bridge
- * identity, by looking it up in the app's existing fixed demo-user dataset.
- * Every route below MUST call `requireDemoIdentity` and use ONLY its result —
- * never read `externalUserId`/`externalOrgId` directly off the request.
- * This narrows what the browser can do — it can only select one of a small,
- * fixed set of demo accounts this deployment ships, and only through a
- * server-owned lookup, never by asserting arbitrary identity fields — but it
- * is still NOT a verified session (see `demoIdentity.ts`'s docblock for the
- * exact boundary). Real session-derived identity is deferred to production
- * (see the handoff doc's "Production auth" section).
+ * ── Server-verified identity ─────────────────────────────────────────────
+ * The browser cannot be trusted to state its own identity: a browser-supplied
+ * `externalUserId`/`externalOrgId`, and later a browser-supplied opaque
+ * `demoAccountId`, were both forgeable (a caller who knew another valid
+ * account's identifier could impersonate that account — see the handoff
+ * doc's "Server-verified support identity" section for the audit history).
+ * Fix: `requireSessionIdentity` below derives identity from the signed,
+ * httpOnly session cookie (`api/_lib/session.ts`) set by `api/auth/login.ts`
+ * — the browser can send it but never read, construct, or edit it — and maps
+ * the verified user id to a Bridge identity via `resolveBridgeIdentity`
+ * (`api/_lib/demoUsers.ts`). Every route below MUST call
+ * `requireSessionIdentity` and use ONLY its result — never read
+ * `externalUserId`/`externalOrgId`/`demoAccountId` directly off the request.
+ * Still a small, fixed POC account set, not general-purpose auth — see
+ * `session.ts` and `demoUsers.ts`'s docblocks for the exact boundary.
  */
-import { resolveDemoIdentity, type BridgeIdentity } from './demoIdentity.js';
+import { readVerifiedSession, SessionConfigError } from './session.js';
+import { resolveBridgeIdentity, type BridgeIdentity } from './demoUsers.js';
+
+export { SessionConfigError } from './session.js';
 
 export class BridgeConfigError extends Error {}
 
@@ -101,22 +101,27 @@ export async function bridgeFetch(path: string, init: BridgeFetchInit): Promise<
 }
 
 /**
- * Resolve `demoAccountId` to a Bridge identity via the app's fixed demo-user
- * allowlist (`demoIdentity.ts`), or write a fail-closed `400` and return
- * `null`. This is the ONLY identity path a route may use — never read
- * `externalUserId`/`externalOrgId` directly off the request, even if present
+ * Derive the caller's Bridge identity from their VERIFIED session cookie
+ * (`session.ts`), or write a fail-closed `401` and return `null`. This is the
+ * ONLY identity path a route may use — never read `externalUserId`/
+ * `externalOrgId`/`demoAccountId` directly off the request, even if present
  * (a caller sending those fields must have no effect: they are ignored, not
  * merged or used as a fallback).
  *
- * Callers MUST `return` immediately when this returns `null` — the 400 is
- * already written to `res`.
+ * Callers MUST `return` immediately when this returns `null` — the 401 is
+ * already written to `res`. Lets `SessionConfigError` (missing
+ * `SESSION_SECRET`) propagate to the caller's try/catch, which turns it into
+ * a 500 the same way `BridgeConfigError` is handled.
  */
-export function requireDemoIdentity(res: ProxyResponse, demoAccountId: unknown): BridgeIdentity | null {
-  const identity = resolveDemoIdentity(demoAccountId);
+export function requireSessionIdentity(req: ProxyRequest, res: ProxyResponse): BridgeIdentity | null {
+  const session = readVerifiedSession(req);
+  if (!session) {
+    res.status(401).json({ error: 'Not signed in. Sign in and try again.' });
+    return null;
+  }
+  const identity = resolveBridgeIdentity(session.sub);
   if (!identity) {
-    res.status(400).json({
-      error: 'Unknown or missing demo account. Sign in with one of this app’s demo accounts and try again.',
-    });
+    res.status(401).json({ error: 'Session account is no longer valid. Sign in again.' });
     return null;
   }
   return identity;

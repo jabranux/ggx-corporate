@@ -3,6 +3,47 @@
 > Lightweight resume/checkpoint file. Detailed June 2026 history was archived to
 > `docs/archive/session_log_2026-06.md`.
 
+## Most Recent Work — server-verified support identity (2026-08-26)
+
+Closed the last security blocker from the audit trail: the support proxy's
+`demoAccountId` was forgeable (a caller could send another valid demo
+account's id and be served as that account). Full write-up:
+`docs/migration/ggx-corporate-heyq-live-ticketing.md` §18.
+
+- Corporate had NO server-verifiable session at all before this — login was
+  100% client-side (`localStorage`, no cookie/token/network call). Added the
+  smallest thing that fixes that: `POST /api/auth/login` validates
+  credentials server-side (`api/_lib/demoUsers.ts`) and sets a signed,
+  httpOnly, expiring cookie (`api/_lib/session.ts`, HMAC-SHA256, 12h TTL,
+  `SESSION_SECRET` env var — new required var, see `.env.example`).
+  `/api/support/**` now derives identity ONLY from that cookie
+  (`requireSessionIdentity` in `api/_lib/bridge.ts`) — `demoAccountId`,
+  `externalUserId`, `externalOrgId` from the request are read and discarded,
+  never trusted. `api/_lib/demoIdentity.ts` removed, replaced by
+  `demoUsers.ts` (credential check + verified-id → Bridge-identity mapping)
+  + `session.ts` (token mint/verify).
+- Client (`authService.ts`, `heyqService.ts`, `heyqCustomerApi.ts`) updated:
+  login/logout now call the real endpoints; ticket read/write functions no
+  longer take or send any identity parameter (travels invisibly via the
+  browser's automatic same-origin cookie).
+- Validated two ways: 35 direct-import unit checks (token tamper/expiry/
+  forged-account rejection, fail-closed on missing `SESSION_SECRET`) + a
+  17-check real-HTTP smoke test through the actual handler code against a
+  throwaway fake Bridge (cross-account isolation, idempotency, forged-field
+  rejection, logout). `npm test`: 71/71 (up from 70 — one test's URL regex
+  needed updating for the now query-string-free requests, not a behavior
+  change). Typecheck/build clean; `dist/` scanned, no secrets present.
+- Restored `scripts/prod-e2e-validation.mjs` — referenced in §17.2 but never
+  actually committed (confirmed via `git log --all`, a doc/reality mismatch,
+  not a deleted file). Rebuilt to authenticate legitimately through the new
+  login endpoint; uses only the app's own public POC demo credentials, no
+  secrets. `npm run e2e:prod` (with `E2E_BASE_URL` set) runs it.
+- **Still blocked**: no Vercel access in this environment (same recurring
+  constraint — see §16.5) to set `SESSION_SECRET` on the real deployment or
+  rerun `prod-e2e-validation.mjs` against live `/api/support/**`. Whoever has
+  Vercel access needs to set it (fresh random value, e.g. `openssl rand
+  -base64 48`) alongside the existing Bridge env vars, then run the script.
+
 ## Most Recent Work — dedicated production Bridge key configured (2026-08-26)
 
 Replaced §15's throwaway validation key with a purpose-generated production

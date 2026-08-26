@@ -23,12 +23,11 @@
  *   POST /api/support/tickets                 → submitOrderReport (create)
  *   POST /api/support/tickets/:id/messages    → replyToMyTicket
  *
- * Every one of those calls is scoped by `demoAccountId` (`getDemoAccountId`
- * below), NOT `externalUserId`/`externalOrgId` — the proxy derives Bridge
- * identity itself from an allowlisted POC demo-account mapping
- * (`api/_lib/demoIdentity.ts`) and ignores anything else the caller sends.
- * See that file's docblock and the handoff doc's "POC identity mapping"
- * section for the full design and its explicit limits (NOT production auth).
+ * None of those calls states its own identity — the proxy derives it
+ * server-side from the caller's signed, httpOnly session cookie (set by
+ * `/api/auth/login`, verified in `api/_lib/session.ts`) and ignores anything
+ * else the caller sends. See `api/_lib/bridge.ts`'s docblock and the handoff
+ * doc's "Server-verified support identity" section for the full design.
  *
  * There is no explicit reopen route/action any more (removed — see the
  * handoff doc's "Reopen removal" section): the legacy Bridge reopen endpoint
@@ -286,12 +285,11 @@ export const REPORT_CONCERN_OPTIONS: { value: HeyQConcernType; label: string }[]
  * externalOrgId}`. LOCAL USE ONLY — order authorization against
  * `transactionService` (`getAuthorizedOrder`, `listAuthorizedTransactions`,
  * `getLiveOrderStatus`) and the dormant realtime/attachment helpers (see
- * `heyqCustomerApi`'s docblock). This is deliberately NOT sent to the Corporate
- * support proxy for any ticket read/write any more — a browser-stated
- * `externalUserId`/`externalOrgId` was a P1 authorization gap (handoff doc
- * §12.2): the proxy now derives Bridge identity itself from `getDemoAccountId`
- * below. If you're adding a call to the Bridge-facing proxy, use
- * `getDemoAccountId`, not this.
+ * `heyqCustomerApi`'s docblock). This is NOT sent to the Corporate support
+ * proxy for any ticket read/write — the proxy derives its own Bridge
+ * identity server-side from the caller's session cookie (see the module
+ * docblock's "Server-verified support identity" pointer), never from
+ * anything this client states.
  */
 export async function getRequesterIdentity(): Promise<HeyQRequesterIdentity | null> {
   const session = await getSessionContext();
@@ -300,26 +298,6 @@ export async function getRequesterIdentity(): Promise<HeyQRequesterIdentity | nu
     externalUserId: session.user.email,
     externalOrgId: session.accountId,
   };
-}
-
-/**
- * The opaque POC/demo account identifier sent to the Corporate support proxy
- * for every ticket read/write. It is the stable `id` already on the app's
- * mock session user (`MockAuthUser.id`, e.g. `user-admin-001`) — NOT
- * `externalUserId`/`externalOrgId`. The proxy (`api/_lib/demoIdentity.ts`)
- * is the only place that maps it to a Bridge identity, by looking it up in
- * the SAME fixed demo-user dataset `authService` is backed by; an unknown
- * value (which can't happen from this function, but could from a
- * hand-crafted request) fails closed there. Returns null when signed out.
- *
- * This is a POC-appropriate mapping, not production authentication — see
- * `demoIdentity.ts`'s docblock and the handoff doc's "POC identity mapping"
- * section for the exact boundary and what real production auth still needs.
- */
-export async function getDemoAccountId(): Promise<string | null> {
-  const session = await getSessionContext();
-  if (!session.isAuthenticated || !session.user) return null;
-  return session.user.id;
 }
 
 // ── OMS order authorization + snapshot ───────────────────────────────────────
@@ -498,8 +476,6 @@ export async function submitOrderReport(input: OrderReportInput): Promise<HeyQRe
     externalUserId: session.user.email,
     externalOrgId: session.accountId,
   };
-  // What actually goes to the Corporate support proxy for the Bridge create call.
-  const demoAccountId = session.user.id;
 
   const capturedAt = new Date().toISOString();
   // Snapshot is REQUIRED on each entry here (unlike the display-only HeyQLinkedOrder,
@@ -521,7 +497,7 @@ export async function submitOrderReport(input: OrderReportInput): Promise<HeyQRe
     });
   }
 
-  return apiCreateTicket(demoAccountId, {
+  return apiCreateTicket({
     name: session.user.name,
     email: session.user.email,
     concernType: input.concernType,
@@ -533,18 +509,20 @@ export async function submitOrderReport(input: OrderReportInput): Promise<HeyQRe
 
 // ── Requester-facing ticket reads + writes (HeyQ customer API) ────────────────
 
-/** The signed-in user's tickets. Scoped by the support proxy to their demo account. */
+/** The signed-in user's tickets. Scoped by the support proxy to the caller's
+ * session cookie; the client-side session check here is a UX shortcut to
+ * skip the request when clearly signed out, not the authorization boundary. */
 export async function listMyTickets(): Promise<CustomerTicket[]> {
-  const demoAccountId = await getDemoAccountId();
-  if (!demoAccountId) return [];
-  return apiListMyTickets(demoAccountId);
+  const session = await getSessionContext();
+  if (!session.isAuthenticated) return [];
+  return apiListMyTickets();
 }
 
 /** One of the signed-in user's tickets. Another user's ticket is `not_found`. */
 export async function getMyTicket(id: string): Promise<HeyQResult<CustomerTicket>> {
-  const demoAccountId = await getDemoAccountId();
-  if (!demoAccountId) return { status: 'forbidden' };
-  return apiGetMyTicket(demoAccountId, id);
+  const session = await getSessionContext();
+  if (!session.isAuthenticated) return { status: 'forbidden' };
+  return apiGetMyTicket(id);
 }
 
 /**
@@ -559,9 +537,9 @@ export async function replyToMyTicket(
   body: string,
   messageId?: string,
 ): Promise<HeyQResult<CustomerTicket>> {
-  const demoAccountId = await getDemoAccountId();
-  if (!demoAccountId) return { status: 'forbidden' };
-  return apiReplyToMyTicket(demoAccountId, id, body, messageId);
+  const session = await getSessionContext();
+  if (!session.isAuthenticated) return { status: 'forbidden' };
+  return apiReplyToMyTicket(id, body, messageId);
 }
 
 // ── Realtime (DORMANT — live ticket conversation over the HeyQ WebSocket) ─────

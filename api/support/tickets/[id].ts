@@ -6,8 +6,8 @@
  * conversation poll (`useTicketConversation`).
  */
 import {
-  bridgeFetch, requireDemoIdentity, relay, failConfig, failUpstream, getQueryParam,
-  BridgeConfigError, type ProxyRequest, type ProxyResponse,
+  bridgeFetch, requireSessionIdentity, relay, failConfig, failUpstream, getQueryParam,
+  BridgeConfigError, SessionConfigError, type ProxyRequest, type ProxyResponse,
 } from '../../_lib/bridge.js';
 
 export default async function handler(req: ProxyRequest, res: ProxyResponse): Promise<void> {
@@ -22,14 +22,13 @@ export default async function handler(req: ProxyRequest, res: ProxyResponse): Pr
       res.status(400).json({ error: 'Ticket id is required.' });
       return;
     }
-    const demoAccountId = getQueryParam(req, 'demoAccountId');
-    const identity = requireDemoIdentity(res, demoAccountId);
-    if (!identity) return; // 400 already written
+    const identity = requireSessionIdentity(req, res);
+    if (!identity) return; // 401 already written
     const qs = new URLSearchParams([['externalUserId', identity.externalUserId], ['externalOrgId', identity.externalOrgId]]).toString();
     const bridgeRes = await bridgeFetch(`/customer/tickets/${encodeURIComponent(id)}?${qs}`, { method: 'GET' });
     await relay(res, bridgeRes);
   } catch (err) {
-    if (err instanceof BridgeConfigError) failConfig(res, err);
+    if (err instanceof BridgeConfigError || err instanceof SessionConfigError) failConfig(res, err);
     else failUpstream(res, 'GET /tickets/:id', err);
   }
 }

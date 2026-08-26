@@ -14,9 +14,9 @@
  * ticket already reopens it via Bridge's atomic RPC; the legacy explicit
  * reopen endpoint only worked against HeyQ's in-memory store and was removed
  * (see the handoff doc's "Reopen removal" section).
- * Full architecture + the POC identity mapping this relies on:
+ * Full architecture + the server-verified identity this relies on:
  * docs/migration/ggx-corporate-heyq-live-ticketing.md and
- * `api/_lib/demoIdentity.ts`.
+ * `api/_lib/session.ts` / `api/_lib/demoUsers.ts`.
  *
  * The proxy forwards to QuadX Bridge's customer surface, which enforces
  * visibility SERVER-SIDE: the response is already projected to what a customer
@@ -26,13 +26,13 @@
  * below), so a malformed or over-broad response can never surface an agent-only
  * field into Business+.
  *
- * Every call below is scoped by an opaque `demoAccountId`, NOT
- * `externalUserId`/`externalOrgId` — the browser cannot state those directly
- * (that was a P1 finding: docs/migration/ggx-corporate-heyq-live-ticketing.md
- * §12.2). The proxy resolves them server-side from a fixed demo-account
- * allowlist (`api/_lib/demoIdentity.ts`) and ignores anything else the request
- * carries. Still a deliberate POC assumption, not production auth — see that
- * file's docblock and the handoff doc.
+ * None of the calls below states its own identity — the browser cannot state
+ * `externalUserId`/`externalOrgId`, nor any account identifier at all
+ * (previously `demoAccountId`, itself forgeable — the P1 finding at
+ * docs/migration/ggx-corporate-heyq-live-ticketing.md's "Server-verified
+ * support identity" section). The proxy derives identity server-side from
+ * the caller's signed, httpOnly session cookie (`api/_lib/session.ts`, set
+ * by `POST /api/auth/login`) and ignores anything else the request carries.
  *
  * Attachments are NOT sent on this path: the approved Bridge contract is
  * text-only (upload bytes are rejected with 400), so `apiCreateTicket` /
@@ -302,7 +302,7 @@ const SUPPORT_PROXY_BASE = '/api/support';
 
 /** Map an HTTP status to the adapter's production-shaped result union. */
 function resultForStatus(status: number): 'forbidden' | 'not_found' | 'unavailable' {
-  if (status === 403) return 'forbidden';
+  if (status === 401 || status === 403) return 'forbidden'; // 401: no/invalid session
   if (status === 404) return 'not_found';
   return 'unavailable'; // 5xx, 429, and anything else transient/unknown
 }
@@ -381,28 +381,20 @@ export function buildAttachmentUrl(
 
 // ── Public operations (consumed by heyqService) ───────────────────────────────
 // Every operation below calls the same-origin Corporate support proxy
-// (SUPPORT_PROXY_BASE), never QuadX Bridge/HeyQ directly, and is scoped by an
-// opaque `demoAccountId` — NOT `externalUserId`/`externalOrgId`. The proxy
-// (`api/_lib/demoIdentity.ts`) is the only place those get derived, from a
-// server-owned allowlist; see that file's docblock and the handoff doc's
-// "POC identity mapping" section.
+// (SUPPORT_PROXY_BASE), never QuadX Bridge/HeyQ directly, and states no
+// identity of its own — the proxy derives it server-side from the caller's
+// session cookie (`api/_lib/session.ts`); see the module docblock.
 
 /** The signed-in requester's tickets. Any failure degrades to an empty list. */
-export async function apiListMyTickets(demoAccountId: string): Promise<CustomerTicket[]> {
-  const res = await getJson(SUPPORT_PROXY_BASE, `/tickets?${new URLSearchParams({ demoAccountId })}`);
+export async function apiListMyTickets(): Promise<CustomerTicket[]> {
+  const res = await getJson(SUPPORT_PROXY_BASE, '/tickets');
   if (!res.ok || !Array.isArray(res.data)) return [];
   return (res.data as HeyQApiCustomerTicket[]).map(toCustomerTicket);
 }
 
 /** One of the requester's tickets, or a typed failure. */
-export async function apiGetMyTicket(
-  demoAccountId: string,
-  id: string,
-): Promise<HeyQResult<CustomerTicket>> {
-  const res = await getJson(
-    SUPPORT_PROXY_BASE,
-    `/tickets/${encodeURIComponent(id)}?${new URLSearchParams({ demoAccountId })}`,
-  );
+export async function apiGetMyTicket(id: string): Promise<HeyQResult<CustomerTicket>> {
+  const res = await getJson(SUPPORT_PROXY_BASE, `/tickets/${encodeURIComponent(id)}`);
   if (!res.ok) return { status: res.result };
   return { status: 'ok', data: toCustomerTicket(res.data as HeyQApiCustomerTicket) };
 }
@@ -420,7 +412,6 @@ export async function apiGetMyTicket(
  * atomic RPC dedupes an ambiguous retry instead of creating a second message.
  */
 export async function apiReplyToMyTicket(
-  demoAccountId: string,
   id: string,
   body: string,
   messageId?: string,
@@ -428,11 +419,11 @@ export async function apiReplyToMyTicket(
   const posted = await post(
     SUPPORT_PROXY_BASE,
     `/tickets/${encodeURIComponent(id)}/messages`,
-    { demoAccountId, body },
+    { body },
     messageId ? { 'X-Bridge-Message-Id': messageId } : undefined,
   );
   if (!posted.ok) return { status: posted.result };
-  return apiGetMyTicket(demoAccountId, id);
+  return apiGetMyTicket(id);
 }
 
 export interface CreateCustomerTicketInput {
@@ -466,7 +457,6 @@ export interface CreateCustomerTicketInput {
  * ticket.
  */
 export async function apiCreateTicket(
-  demoAccountId: string,
   input: CreateCustomerTicketInput,
 ): Promise<HeyQResult<CustomerTicket>> {
   const linkedTransactions = input.linkedTransactions?.length
@@ -487,7 +477,6 @@ export async function apiCreateTicket(
   const trackingNumber = linkedTransactions?.[0]?.trackingNumber;
 
   const payload = {
-    demoAccountId,
     name: input.name,
     email: input.email,
     concernType: CONCERN_TO_HEYQ[input.concernType] ?? 'general_inquiry',

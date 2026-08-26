@@ -1,12 +1,13 @@
 /**
  * Mock authentication data.
  *
- * Demo credentials used by `authService.loginMockUser()`. The primary auth
- * context lives in `contexts/AuthContext.tsx` (`DEMO_USERS`); this file
- * mirrors and extends it with richer mock user objects for the service layer.
- *
- * Future: replace `MOCK_CREDENTIALS` with a real POST /auth/login call and
- * `MOCK_USERS_BY_ID` with a GET /users/me response.
+ * `MOCK_AUTH_USERS` supplies the display-only user object `authService`
+ * renders after a successful `POST /api/auth/login` (credential verification
+ * itself now happens server-side, against the duplicated directory in
+ * `api/_lib/demoUsers.ts` — see that file's docblock for why it's a
+ * duplicate rather than a shared import). The primary auth context lives in
+ * `contexts/AuthContext.tsx` (`DEMO_USERS`); this file mirrors and extends it
+ * with richer mock user objects for the service layer.
  */
 
 import type { UserRole } from '../../contexts/AuthContext';
@@ -49,12 +50,6 @@ const MANAGER_PERMISSIONS: MockPermissions = {
   canAssignManagers: false,
   canGenerateReports: true,   // operational reports only (scoped to subaccount)
   canManagePaymentSettings: false,
-};
-
-/** Demo credential pairs: email → plain-text password (mock only). */
-export const MOCK_CREDENTIALS: Record<string, string> = {
-  'max@email.com':     '!1234qwer',
-  'manager@email.com': '!1234qwer',
 };
 
 /** Full mock user objects, keyed by email. */

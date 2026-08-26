@@ -1178,3 +1178,207 @@ Executed via `scripts/prod-e2e-validation.mjs` calling the live deployed `https:
 
 The end-to-end integration between GGX Corporate deployed on Vercel and QuadX Bridge / HeyQ deployed as a Supabase Edge Function is **COMPLETE, VERIFIED, AND FULLY FUNCTIONAL**.
 
+---
+
+## 18. Server-Verified Support Identity (2026-08-26)
+
+Closes the final security blocker a follow-up audit raised against §13's fix:
+`demoAccountId` (the POC identity the browser sent to `/api/support/**`) was
+still **forgeable**. It mapped through a server-side allowlist
+(`api/_lib/demoIdentity.ts`), so a caller couldn't invent a Bridge identity
+out of thin air — but it *could* send any OTHER real demo account's id and be
+served as that account, because nothing tied `demoAccountId` to who the
+caller had actually authenticated as. §13's own docblock said as much
+("`demoAccountId` is exactly as forgeable as `externalUserId` was").
+
+### 18.1 Root cause: no server-verifiable session existed at all
+
+Before this pass, GGX Corporate's entire "signed-in user" concept was
+client-only: `authService.loginMockUser()` checked credentials against an
+in-bundle table and wrote the result straight to `localStorage`
+(`src/app/lib/storage.ts`) — no cookie, no token, no server round trip. There
+was nothing server-side to verify, by design (it's a POC). Fixing the
+forgeable-identity finding meant introducing the smallest thing that makes
+identity server-verifiable, not just re-shuffling client-supplied fields.
+
+### 18.2 Fix: signed httpOnly session cookie, minted only by a real login endpoint
+
+**New files:**
+- `api/_lib/session.ts` — HMAC-SHA256 signed, expiring (12h) session token;
+  `createSessionToken` (mint), `verifySessionToken`/`readVerifiedSession`
+  (verify — fail closed on missing/malformed/tampered/expired), cookie
+  builders (`HttpOnly; SameSite=Lax`, `Secure` on any deployed environment).
+  Throws `SessionConfigError` if `SESSION_SECRET` is unset, so a
+  misconfigured deployment surfaces as a clear 500, not a silent "everyone is
+  signed out."
+- `api/_lib/demoUsers.ts` — replaces `demoIdentity.ts`. Self-contained POC
+  user directory (duplicated from `src/app/data/mock/auth.mock.ts` on
+  purpose — importing `src/` into `api/` previously broke serverless
+  execution, see §17.1). `verifyDemoCredentials` is the only password check
+  in the system; `resolveBridgeIdentity(userId)` maps a **verified** session's
+  stable id to a Bridge identity by re-reading the CURRENT table, not by
+  trusting fields embedded in an already-issued token — so removing a demo
+  account invalidates what any outstanding session for it can do.
+- `api/auth/login.ts` — `POST /api/auth/login`. The ONLY place a session
+  token is minted, and only after `verifyDemoCredentials` succeeds. Sets the
+  httpOnly cookie and returns a password-free user object.
+- `api/auth/logout.ts` — `POST /api/auth/logout`. Clears the cookie.
+  Unauthenticated by design (logging out never needs to prove who you are).
+
+**Changed:**
+- `api/_lib/bridge.ts` — `requireDemoIdentity(res, demoAccountId)` replaced
+  with `requireSessionIdentity(req, res)`: verifies the session cookie, maps
+  it to a Bridge identity via `resolveBridgeIdentity`, writes a fail-closed
+  `401` (not `400` — this is now an authentication failure, not a bad
+  parameter) and returns `null` on any failure. Every `/api/support/**` route
+  updated to call it instead; none of them read `demoAccountId`,
+  `externalUserId`, or `externalOrgId` off the request body/query any more —
+  those fields are still explicitly destructured-and-discarded so a caller
+  sending them has zero effect, but the destination the server trusts is the
+  cookie alone.
+- `src/app/services/authService.ts` — `loginMockUser` now calls
+  `POST /api/auth/login` first; the richer `MOCK_AUTH_USERS` display object is
+  looked up from the email the SERVER confirmed, not re-checked client-side.
+  `logoutMockUser` calls `POST /api/auth/logout`. What's left in
+  `localStorage` is UI-display state only (name/role/account for rendering
+  and client-side route gating) — still forgeable like any client state, but
+  no longer a security boundary for the support proxy.
+- `src/app/services/heyqService.ts` / `heyqCustomerApi.ts` — `getDemoAccountId`
+  removed; `apiListMyTickets`, `apiGetMyTicket`, `apiReplyToMyTicket`,
+  `apiCreateTicket` no longer take an identity parameter at all. Identity now
+  travels invisibly via the browser's automatic same-origin cookie
+  attachment — nothing in application code states it.
+- `tests/helpers.mjs` — `signIn()` now stubs `/api/auth/login` /
+  `/api/auth/logout` (the checked-in test suite runs against a plain `vite`
+  dev server with no Vercel Functions runtime behind it, so the real
+  endpoints aren't reachable there — same reason `/api/support/*` was already
+  stubbed per-test). `tests/heyq-adapter.test.mjs` /
+  `heyq-attachments.test.mjs` updated for the new signatures; the identity
+  test now asserts the request carries **no** identity query params at all
+  (previously it asserted a specific `demoAccountId` value — the opposite of
+  what's now correct, since a value shouldn't be observable client-side any
+  more).
+- `.env.example` — documents the new required `SESSION_SECRET`.
+- Removed: `api/_lib/demoIdentity.ts` (superseded by `demoUsers.ts` +
+  `session.ts`).
+
+### 18.3 What the browser can and cannot do now
+
+| Before (§13) | Now |
+|---|---|
+| Browser sends `demoAccountId`; proxy trusts whichever value arrives | Browser sends nothing identity-related; proxy trusts only a signed cookie it issued itself |
+| A caller who knew another account's `demoAccountId` could act as them | A caller can only act as whoever `POST /api/auth/login` actually authenticated |
+| Missing/unknown identity → `400` | Missing/invalid/expired/tampered session → `401` |
+| No cross-request unforgeability guarantee | HMAC-SHA256 signature + expiry; a forged or edited cookie fails verification |
+
+Still explicitly a POC mechanism, not general-purpose auth: a fixed 2-account
+demo directory, no password hashing (plaintext compare, but never logged and
+compared via `timingSafeEqual`), no refresh-token rotation, no CSRF token
+(accepted risk — `SameSite=Lax` + httpOnly cover the practical same-origin
+POC threat model here). **Known limitation:** logout clears the browser's
+cookie but the signed token itself isn't revoked server-side (no revocation
+store — would be over-building for a POC); a caller who captured the raw
+cookie value before logout could keep using it until its 12h expiry. A real
+deployment needs actual session revocation (or short-lived tokens + refresh),
+real password hashing, and probably a real IdP — out of scope here by design
+(see the "Important POC constraint" this task was given).
+
+### 18.4 Validation
+
+Two layers, both against the REAL handler code (not reimplemented):
+
+1. **Direct-import unit checks** (`api/_lib/session.ts`, `demoUsers.ts`,
+   `bridge.ts`, `api/auth/*.ts` imported and called directly via `tsx`): 35
+   checks — credential verification, token mint/verify round-trip, tamper
+   detection (payload edit, signature edit, garbage token), expiry, a signed
+   token for a since-removed account still failing identity resolution,
+   `requireSessionIdentity` ignoring forged body identity fields, login/logout
+   handler status codes and cookie attributes, and `SESSION_SECRET` unset
+   throwing a config error on both mint and verify (fail closed, not silent).
+2. **Real HTTP integration smoke test**: a throwaway local Node server
+   (deleted after the run) mounted the actual `api/auth/*.ts` and
+   `api/support/**` handlers behind real `http.Server` request/response
+   objects, backed by a throwaway in-memory fake of QuadX Bridge's customer
+   surface (same request/response shapes — `X-Corporate-Internal-Key`,
+   `Idempotency-Key`, `X-Bridge-Message-Id`, 404-on-mismatched-identity). 17
+   checks, all real HTTP round trips with real `Set-Cookie`/`Cookie` headers:
+
+   | # | Check | Result |
+   |---|---|---|
+   | 1 | Authenticated legitimate account → support API succeeds | PASS |
+   | 2 | Unauthenticated request → `401` | PASS |
+   | 3 | Garbage/forged session cookie → `401` | PASS |
+   | 4 | Forged `demoAccountId`/`externalUserId`/`externalOrgId` in body → no effect, real caller's identity used | PASS |
+   | 5 | Create idempotency (same `Idempotency-Key` → same ticket id) | PASS |
+   | 6 | Get/reply work; reply idempotency (`X-Bridge-Message-Id`) | PASS |
+   | 7 | Account A (manager) cannot GET or reply to Account B (admin)'s ticket → `404` | PASS |
+   | 8 | Query-string identity spoofing cannot bypass cross-account isolation → `404` | PASS |
+   | 9 | Attachment payload → `400` (contract unchanged) | PASS |
+   | 10 | Logout → `200`, cookie cleared (`Max-Age=0`) | PASS |
+   | 11 | (documented limitation) pre-logout cookie value still valid until expiry — see §18.3 | confirmed, expected |
+
+   Resolved-ticket reply auto-reopen was NOT exercised by this pass — putting
+   a ticket into `resolved` status is an agent-side HeyQ action, not reachable
+   from Corporate's customer-only surface (§14/§17 verified this same code
+   path directly against a real/hosted Bridge already; this identity change
+   doesn't touch it). `scripts/prod-e2e-validation.mjs` (§18.5) accepts an
+   optional `E2E_RESOLVED_TICKET_ID` to exercise it against a real deployment
+   where such a ticket exists.
+
+   Regression: `npm run typecheck` (0 errors), `npm run build` (clean; `dist/`
+   scanned — `QUADX_BRIDGE_API_KEY`, `SESSION_SECRET`, and
+   `X-Corporate-Internal-Key` all 100% absent), `npm test` (**71/71 passed**,
+   up from 70 — one test's URL-matching regex needed updating for the now-
+   query-string-free re-read request, not a behavior change).
+
+**Not validated in this pass (no Vercel/production access in this
+environment — same constraint noted in every prior session, see §16.5):**
+actually deploying `SESSION_SECRET` to Vercel, or re-running against the live
+`https://ggx-corporate.vercel.app/api/support/**` routes. Whoever has Vercel
+access needs to set `SESSION_SECRET` (a fresh random value, e.g. `openssl
+rand -base64 48` — see `.env.example`) alongside the existing
+`QUADX_BRIDGE_URL`/`QUADX_BRIDGE_API_KEY`, then run §18.5's script against
+that deployment.
+
+### 18.5 `scripts/prod-e2e-validation.mjs` — restored (was referenced but never committed)
+
+§17.2 described running `scripts/prod-e2e-validation.mjs` against the live
+deployment, but the file was never actually committed to this repo (`git log
+--all` on the path returns nothing). That §17.2 entry was a documentation/
+reality mismatch, not a script that existed and got deleted.
+
+This task adds the file for real, rebuilt to match the new auth mechanism —
+the old approach (`?demoAccountId=...` query params) wouldn't authenticate
+against the new endpoint anyway. It:
+
+- Authenticates **legitimately** through the real `POST /api/auth/login`
+  (never bypasses or weakens auth to make automation easier, per this task's
+  instruction).
+- Uses only the app's own POC demo credentials (`max@email.com` /
+  `manager@email.com`, password `!1234qwer` — already shown on the Login
+  screen itself as a sign-in hint, not a production secret), overridable via
+  `E2E_ADMIN_EMAIL`/`E2E_ADMIN_PASSWORD`/`E2E_MANAGER_EMAIL`/
+  `E2E_MANAGER_PASSWORD`. Never reads or needs `QUADX_BRIDGE_API_KEY`,
+  `SESSION_SECRET`, or any service-role key.
+- Defaults `E2E_BASE_URL` to `http://localhost:3000` (never a live URL by
+  default); point it at production explicitly:
+  `E2E_BASE_URL=https://ggx-corporate.vercel.app node scripts/prod-e2e-validation.mjs`
+  (or `npm run e2e:prod` with the env var set).
+- Runs the same 16 checks validated in §18.4's smoke test, live over HTTP,
+  plus the optional `E2E_RESOLVED_TICKET_ID` reopen check.
+- Holds no DB/service-role credentials, so it cannot clean up the tickets it
+  creates — it prints their ids at the end for manual pruning if run against
+  a shared/production database (mirrors the manual cleanup §14/§17 did with
+  direct DB access, which this lean script deliberately doesn't have).
+
+### 18.6 Response status summary
+
+- **SERVER_VERIFIED_IDENTITY**: PASS (§18.4, layers 1–2, all local/simulated —
+  see §18.4's "not validated" note for what still needs a real deployment)
+- **CROSS_ACCOUNT**: PASS (§18.4, checks 7–8)
+- **PRODUCTION_E2E**: BLOCKED — no Vercel/production access in this
+  environment (§18.4's "not validated" note); `scripts/prod-e2e-validation.mjs`
+  is ready for whoever has that access to run
+- **E2E_REPRODUCIBILITY**: PASS — `scripts/prod-e2e-validation.mjs` restored
+  and self-verified against a real (simulated-Bridge) HTTP round trip (§18.5)
+
