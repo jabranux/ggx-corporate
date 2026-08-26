@@ -3,6 +3,25 @@
 > Lightweight resume/checkpoint file. Detailed June 2026 history was archived to
 > `docs/archive/session_log_2026-06.md`.
 
+## Most Recent Work — dedicated production Bridge key configured (2026-08-26)
+
+Replaced §15's throwaway validation key with a purpose-generated production
+secret. Full write-up: `docs/migration/ggx-corporate-heyq-live-ticketing.md` §16.
+
+- Generated 256 bits of fresh randomness (not reused from any existing
+  Supabase/app secret), set via `supabase secrets set QUADX_BRIDGE_API_KEY=...
+  --project-ref rwzwktrepfgsooerpyjx` — the Bridge Edge Function's own secret
+  store. Never printed, never committed, local scratchpad copy deleted right
+  after configuring it.
+- Re-confirmed fail-closed against the live hosted URL: missing key → 401,
+  wrong key → 401, the new key → 200 (minimal non-mutating smoke test).
+- **Corporate/Vercel side still NOT configured** — no Vercel CLI/linked
+  project available in this environment (same as every prior pass). Per
+  instruction, did not expose the secret as a workaround. Whoever has Vercel
+  access needs to set `QUADX_BRIDGE_URL` + `QUADX_BRIDGE_API_KEY` there — see
+  §16.5 for the recommended approach (rotate to a new value they choose
+  themselves, since Supabase secrets can't be read back out via the CLI).
+
 ## Most Recent Work — QuadX Bridge deployed as a Supabase Edge Function (2026-08-26)
 
 The "no hosted Bridge exists" blocker from the previous session is resolved.

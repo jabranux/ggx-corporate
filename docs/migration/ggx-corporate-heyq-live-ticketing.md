@@ -1,7 +1,7 @@
 # GGX Corporate ⇄ QuadX Bridge / HeyQ Live Ticketing Integration
 
-**Status:** QuadX Bridge is now DEPLOYED and LIVE-VALIDATED as a Supabase Edge
-Function — see §15  
+**Status:** Bridge deployed + dedicated production key CONFIGURED
+(Bridge-side); Corporate/Vercel side NOT YET CONFIGURED — see §16  
 **Integration Boundary:** `GGX Corporate Browser → Corporate /api/support/* proxy → QuadX Bridge (Supabase Edge Function) → HeyQ/Supabase`  
 **Production Bridge URL:** `https://rwzwktrepfgsooerpyjx.supabase.co/functions/v1/quadx-bridge`  
 **Handoff File:** `docs/migration/ggx-corporate-heyq-live-ticketing.md`
@@ -14,10 +14,14 @@ Function — see §15
 > action was knowingly non-functional (P2). §13 documents the corrective pass
 > for both. §14 documents a live round trip against a real but LOCAL Bridge +
 > Postgres instance, run because no hosted Bridge could be found at the time.
-> §15 (**read this one first**) documents actually hosting QuadX Bridge — as a
-> Supabase Edge Function in HeyQ's own project — and the live validation
-> against that real, deployed, production URL above. §§1–10 remain for the
-> ticket lifecycle/contract details, which are unchanged throughout.
+> §15 documents actually hosting QuadX Bridge — as a Supabase Edge Function in
+> HeyQ's own project — and the live validation against that real, deployed,
+> production URL above. §16 (**read this one first for current status**)
+> replaces §15's throwaway validation key with a dedicated production secret
+> and confirms the Bridge side is fully configured — Corporate/Vercel's side
+> still is not (no secret value is ever recorded in this document). §§1–10
+> remain for the ticket lifecycle/contract details, which are unchanged
+> throughout.
 
 ---
 
@@ -1034,3 +1038,92 @@ Vercel access should, after setting §15.3's two environment variables:
 
 This is the one remaining gate before this integration can be called fully
 production-verified end-to-end.
+
+---
+
+## 16. Dedicated Production Bridge Key (2026-08-26)
+
+§15.3 deployed the Edge Function with a throwaway value for
+`QUADX_BRIDGE_API_KEY` (used only for that session's validation, generated
+and discarded in-process, never committed). This pass replaces it with a
+**dedicated, purpose-generated production secret**.
+
+### 16.1 Generation
+
+- Generated fresh: 256 bits of CSPRNG randomness (`node:crypto.randomBytes(32)`,
+  base64url-encoded) with a `qxbridge_live_` label prefix, produced and
+  written directly to a local scratchpad file — never echoed to a terminal,
+  never printed in this conversation, never written to any file in either
+  repository.
+- **Not reused from anywhere**: not the Supabase anon/publishable key, not
+  the service-role/secret key, not the project JWT/JWKS material, not any
+  other application secret. Confirmed by construction (freshly generated,
+  distinct prefix) and by cross-checking `supabase secrets list`'s output
+  (§16.2) — every secret name on the project has its own independent digest.
+- The local scratchpad copy was deleted immediately after §16.2 configured it.
+
+### 16.2 Where it's configured
+
+- Set as a **Supabase project secret** on the hosted HeyQ project via:
+  `supabase secrets set QUADX_BRIDGE_API_KEY=<generated> --project-ref rwzwktrepfgsooerpyjx`
+- This is the SAME mechanism `supabase/functions/quadx-bridge/index.ts`
+  already reads from (`Deno.env.get('QUADX_BRIDGE_API_KEY')`, §15.1) — no
+  function code change was needed, only the secret's value.
+- `supabase secrets list --project-ref rwzwktrepfgsooerpyjx` confirms the
+  secret is registered (name + an opaque digest + `updated_at` timestamp
+  only — the CLI never returns the raw value, by Supabase's own design).
+- **Not** configured anywhere in the Corporate repo, the HeyQ repo, or this
+  document — Corporate's side still only has the `QUADX_BRIDGE_API_KEY=`
+  empty placeholder in `.env.example` (§15.3), by design.
+
+### 16.3 Fail-closed confirmation (re-verified against the new key)
+
+| Check | Request | Result |
+|---|---|---|
+| Missing key | No `X-Corporate-Internal-Key` / `Authorization` header at all | `401 {"error":"Unauthenticated Corporate Bridge Caller"}` |
+| Incorrect key | `X-Corporate-Internal-Key: definitely-wrong-key-value` | `401 {"error":"Unauthenticated Corporate Bridge Caller"}` |
+| Correct (new) key | `X-Corporate-Internal-Key: <the new dedicated secret>` | `200 []` — an authenticated, non-mutating list call for an identity with no tickets |
+
+### 16.4 Minimal authenticated hosted smoke test
+
+A single, non-mutating authenticated request (`GET /customer/tickets` for an
+identity with no existing data) against the live production URL —
+`https://rwzwktrepfgsooerpyjx.supabase.co/functions/v1/quadx-bridge` —
+using the new key, returned `200 []`. Combined with §16.3's missing/incorrect
+checks against the same live deployment, this confirms the new key is fully
+wired end-to-end: the Edge Function reads it correctly from its Supabase
+secret and enforces it exactly as before. (The full 17-check create/reply/
+idempotency/cross-account round trip was already exhaustively validated in
+§15.4–§15.5 with a then-current key; re-running that entire suite again here
+was judged unnecessary — this task's scope is the KEY, and the auth gate is
+the only behavior a key rotation can affect.)
+
+### 16.5 Corporate / Vercel configuration status: NOT COMPLETE
+
+**No Vercel CLI or linked project is available in this environment** (same
+constraint as every prior pass — re-confirmed at the start of this task).
+Per instruction, the generated secret was **not** exposed as a workaround
+(not printed here, not placed in any file, not read back out after being
+set). Required action, for whoever has Vercel access to Corporate's
+project:
+
+1. Set on Corporate's Vercel project (Production **and** Preview
+   environments, server-side only — never a `VITE_`-prefixed variable):
+   - `QUADX_BRIDGE_URL=https://rwzwktrepfgsooerpyjx.supabase.co/functions/v1/quadx-bridge`
+   - `QUADX_BRIDGE_API_KEY=<matching value>`
+2. Because Supabase secrets are write-only from the CLI (there is no command
+   that reads a previously-set value back out — confirmed in §16.2, `secrets
+   list` returns only a digest), the operator should generate/choose their
+   **own** value at that point and set it in BOTH places together:
+   `supabase secrets set QUADX_BRIDGE_API_KEY=<their value>
+   --project-ref rwzwktrepfgsooerpyjx`, then the identical value in Vercel.
+   This intentionally rotates past the value generated in this session (which
+   is not recorded anywhere and cannot be recovered), so the production
+   credential never needs to have passed through this session/chat at all
+   for the record to stay clean.
+3. Re-run §15.9's remaining gate (Vercel deployment + real HTTP smoke test)
+   once both are set.
+
+Until that happens, the Bridge side (§16.1–§16.4) is fully configured and
+working, but the integration is not yet live for Corporate's actual
+production traffic — Corporate has no key to send.
