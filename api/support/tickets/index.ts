@@ -10,14 +10,16 @@
  * the caller also sends is discarded, never forwarded to Bridge.
  */
 import {
-  bridgeFetch, requireDemoIdentity, hasAttachmentPayload, relay, failConfig, failUpstream, single,
+  bridgeFetch, requireDemoIdentity, hasAttachmentPayload, relay, failConfig, failUpstream,
+  getQueryParam, getHeader, getRequestBody,
   BridgeConfigError, type ProxyRequest, type ProxyResponse,
 } from '../../_lib/bridge.js';
 
 export default async function handler(req: ProxyRequest, res: ProxyResponse): Promise<void> {
   try {
     if (req.method === 'GET') {
-      const identity = requireDemoIdentity(res, single(req.query.demoAccountId));
+      const demoAccountId = getQueryParam(req, 'demoAccountId');
+      const identity = requireDemoIdentity(res, demoAccountId);
       if (!identity) return; // 400 already written
 
       const qs = new URLSearchParams([['externalUserId', identity.externalUserId], ['externalOrgId', identity.externalOrgId]]).toString();
@@ -27,7 +29,7 @@ export default async function handler(req: ProxyRequest, res: ProxyResponse): Pr
     }
 
     if (req.method === 'POST') {
-      const body = (req.body ?? {}) as Record<string, unknown>;
+      const body = await getRequestBody(req);
       const { demoAccountId, externalUserId: _ignoredUserId, externalOrgId: _ignoredOrgId, ...rest } = body;
       const identity = requireDemoIdentity(res, demoAccountId);
       if (!identity) return; // 400 already written
@@ -38,7 +40,7 @@ export default async function handler(req: ProxyRequest, res: ProxyResponse): Pr
         res.status(400).json({ error: 'Attachments are not supported in this integration.' });
         return;
       }
-      const idempotencyKey = single(req.headers['idempotency-key']);
+      const idempotencyKey = getHeader(req, 'idempotency-key');
       const bridgeRes = await bridgeFetch('/customer/tickets', {
         method: 'POST',
         body: { ...rest, ...identity }, // server-resolved identity always wins

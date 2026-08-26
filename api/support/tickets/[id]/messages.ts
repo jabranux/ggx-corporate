@@ -7,7 +7,8 @@
  * of creating a second message.
  */
 import {
-  bridgeFetch, requireDemoIdentity, hasAttachmentPayload, relay, failConfig, failUpstream, single,
+  bridgeFetch, requireDemoIdentity, hasAttachmentPayload, relay, failConfig, failUpstream,
+  getQueryParam, getHeader, getRequestBody,
   BridgeConfigError, type ProxyRequest, type ProxyResponse,
 } from '../../../_lib/bridge.js';
 
@@ -18,12 +19,12 @@ export default async function handler(req: ProxyRequest, res: ProxyResponse): Pr
       res.status(405).json({ error: 'Method not allowed' });
       return;
     }
-    const id = single(req.query.id);
+    const id = getQueryParam(req, 'id');
     if (!id) {
       res.status(400).json({ error: 'Ticket id is required.' });
       return;
     }
-    const body = (req.body ?? {}) as Record<string, unknown>;
+    const body = await getRequestBody(req);
     const { demoAccountId, externalUserId: _ignoredUserId, externalOrgId: _ignoredOrgId, ...rest } = body;
     const identity = requireDemoIdentity(res, demoAccountId);
     if (!identity) return; // 400 already written
@@ -32,7 +33,7 @@ export default async function handler(req: ProxyRequest, res: ProxyResponse): Pr
       res.status(400).json({ error: 'Attachments are not supported in this integration.' });
       return;
     }
-    const messageId = single(req.headers['x-bridge-message-id']);
+    const messageId = getHeader(req, 'x-bridge-message-id');
     const bridgeRes = await bridgeFetch(`/customer/tickets/${encodeURIComponent(id)}/messages`, {
       method: 'POST',
       body: { ...rest, ...identity }, // server-resolved identity always wins

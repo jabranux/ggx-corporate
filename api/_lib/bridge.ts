@@ -142,9 +142,10 @@ export function hasAttachmentPayload(body: Record<string, unknown> | undefined |
 
 export interface ProxyRequest {
   method?: string;
-  query: Record<string, string | string[] | undefined>;
-  body: unknown;
-  headers: Record<string, string | string[] | undefined>;
+  url?: string;
+  query?: Record<string, string | string[] | undefined>;
+  body?: unknown;
+  headers?: Record<string, string | string[] | undefined>;
 }
 
 export interface ProxyResponse {
@@ -157,6 +158,61 @@ export interface ProxyResponse {
 /** First value of a possibly-repeated header/query param, or undefined. */
 export function single(value: string | string[] | undefined): string | undefined {
   return Array.isArray(value) ? value[0] : value;
+}
+
+/** Safely extract a query parameter from req.query or req.url. */
+export function getQueryParam(req: ProxyRequest, key: string): string | undefined {
+  if (req?.query && typeof req.query === 'object') {
+    const val = req.query[key];
+    if (Array.isArray(val)) return val[0];
+    if (typeof val === 'string') return val;
+  }
+  if (req?.url) {
+    try {
+      const url = new URL(req.url, 'http://localhost');
+      return url.searchParams.get(key) ?? undefined;
+    } catch {
+      // ignore
+    }
+  }
+  return undefined;
+}
+
+/** Safely extract a header from req.headers. */
+export function getHeader(req: ProxyRequest, key: string): string | undefined {
+  if (!req?.headers) return undefined;
+  const lowerKey = key.toLowerCase();
+  const val = req.headers[lowerKey] ?? req.headers[key];
+  if (Array.isArray(val)) return val[0];
+  if (typeof val === 'string') return val;
+  return undefined;
+}
+
+/** Safely extract request body as an object. */
+export async function getRequestBody(req: ProxyRequest): Promise<Record<string, unknown>> {
+  if (req?.body && typeof req.body === 'object') {
+    return req.body as Record<string, unknown>;
+  }
+  if (typeof req?.body === 'string') {
+    try {
+      return JSON.parse(req.body);
+    } catch {
+      return {};
+    }
+  }
+  if (req && typeof (req as any).on === 'function') {
+    try {
+      const buffers: Uint8Array[] = [];
+      for await (const chunk of req as any) {
+        buffers.push(chunk);
+      }
+      const text = Buffer.concat(buffers).toString('utf-8');
+      return text ? JSON.parse(text) : {};
+    } catch {
+      return {};
+    }
+  }
+  return {};
 }
 
 /** Relay a Bridge response to the Corporate browser client unchanged (status +
