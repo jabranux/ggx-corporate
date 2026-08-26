@@ -1127,3 +1127,54 @@ project:
 Until that happens, the Bridge side (§16.1–§16.4) is fully configured and
 working, but the integration is not yet live for Corporate's actual
 production traffic — Corporate has no key to send.
+
+---
+
+## 17. Final Production E2E Validation & Vercel Routing Diagnosis (2026-08-26)
+
+With production credentials configured on both GGX Corporate Vercel and HeyQ Supabase `quadx-bridge`, full end-to-end validation was executed through the live deployed HTTP routes at `https://ggx-corporate.vercel.app/api/support/**`.
+
+### 17.1 Stalled Endpoint Diagnosis & Fix
+
+During initial HTTP testing against `https://ggx-corporate.vercel.app/api/support/tickets`, requests returned `HTTP 200 OK` with `index.html` (the SPA shell) instead of executing the serverless function.
+
+**Root Causes**:
+1. **Unpushed Commits**: The local commits containing `api/` serverless functions had not been pushed to `origin/master`, so Vercel was serving an older static-only deployment.
+2. **SPA Rewrite Scope**: `vercel.json` configured `"source": "/(.*)"`, which rewrote all paths including `/api/` to `/index.html`.
+3. **TSConfig Scope & Import Extensions**: `tsconfig.app.json` excluded `api/`, causing build/resolution issues in Vercel's Node builder; additionally relative imports used `.ts` extensions which failed ESM module resolution in Node.
+4. **Module Dependency**: `api/_lib/demoIdentity.ts` imported from `src/app/data/mock/auth.mock.ts` (which transitively imported React `AuthContext`), breaking serverless execution.
+
+**Fixes Applied**:
+- Updated `vercel.json` rewrite rule to exclude `/api/` routes: `{ "source": "/((?!api/).*)", "destination": "/index.html" }`.
+- Added `"api"` to `include` in `tsconfig.app.json`.
+- Inlined `BridgeIdentity` map in `api/_lib/demoIdentity.ts` to make `api/` 100% self-contained for Node serverless execution without importing `src/` modules.
+- Changed relative import paths in `api/` to use `.js` extension for ESM compatibility.
+- Added robust helper functions (`getQueryParam`, `getHeader`, `getRequestBody`) in `api/_lib/bridge.ts` to handle both Vercel-parsed and raw Node `IncomingMessage` streams.
+- Normalized `body` parameter mapping in `api/support/tickets/[id]/messages.ts`.
+- Pushed commits to `origin/master` and `james/master`.
+
+### 17.2 Final Production E2E Results (ALL 14 CHECKS PASS)
+
+Executed via `scripts/prod-e2e-validation.mjs` calling the live deployed `https://ggx-corporate.vercel.app/api/support/**` HTTP routes and verifying against the hosted Supabase database (`rwzwktrepfgsooerpyjx`):
+
+| # | Check | Status | Verification Detail |
+|---|---|---|---|
+| 1 | Create ticket from Corporate | **PASS** | `POST /api/support/tickets` returned HTTP 200 with ticket ID `06dea0eb-3474-42d6-aea6-aabc0065cd67`. Verified row in hosted DB `tickets` table with `tracking_number = GGX-PROD-LIVE-10001`, `requester_external_user_id = max@email.com`, `requester_external_org_id = main`. |
+| 2 | Retrieve/list ticket | **PASS** | `GET /api/support/tickets?demoAccountId=user-admin-001` returned HTTP 200 with array containing created ticket ID. |
+| 3 | Ticket detail / Polling | **PASS** | `GET /api/support/tickets/:id` returned HTTP 200 with ticket object and initial customer message. |
+| 4 | Corporate reply reaches HeyQ | **PASS** | `POST /api/support/tickets/:id/messages` returned HTTP 200. Verified reply message inserted into hosted DB `ticket_messages`. |
+| 5 | CSR reply visible via polling | **PASS** | Inserted agent message in DB (`author_type: agent`, `channel: web`). `GET /api/support/tickets/:id` poll returned thread containing the CSR reply (`from: support`). |
+| 6 | Resolved ticket auto-reopen | **PASS** | Set DB status to `resolved`. Customer reply `POST /api/support/tickets/:id/messages` automatically reopened ticket status to `in_progress`. |
+| 7 | Create idempotency | **PASS** | Resent `POST /api/support/tickets` with matching `Idempotency-Key` header. Returned SAME ticket ID; DB row count for tracking number remained 1. |
+| 8 | Reply idempotency | **PASS** | Resent `POST /api/support/tickets/:id/messages` with matching `X-Bridge-Message-Id` header. Returned HTTP 200; DB message count remained 1. |
+| 9 | Cross-account isolation | **PASS** | `GET` and `POST` reply attempts by manager account (`user-mgr-001`) against admin ticket returned HTTP `404 Not Found`. |
+| 10 | Spoofed identity override rejection | **PASS** | `POST /api/support/tickets` carrying spoofed `externalUserId` / `externalOrgId` body parameters created ticket with server-resolved identity (`max@email.com` / `main`) in DB; spoofed fields were ignored. |
+| 11 | Invalid / missing credentials fail closed | **PASS** | `demoAccountId` missing or set to invalid string returned HTTP `400 Bad Request`. |
+| 12 | Attachment rejection contract | **PASS** | Request body containing `attachments` array returned HTTP `400 Bad Request` ("Attachments are not supported in this integration"). |
+| 13 | Production browser bundle secrets check | **PASS** | Built `dist/` bundle scanned via Node `fs`. `QUADX_BRIDGE_API_KEY`, `X-Corporate-Internal-Key`, and `SUPABASE_SERVICE_ROLE_KEY` confirmed 100% absent. |
+| 14 | Database cleanup | **PASS** | All test tickets (`GGX-PROD-LIVE-%`) and messages deleted from hosted DB after validation; verified 0 remaining. |
+
+### 17.3 Conclusion
+
+The end-to-end integration between GGX Corporate deployed on Vercel and QuadX Bridge / HeyQ deployed as a Supabase Edge Function is **COMPLETE, VERIFIED, AND FULLY FUNCTIONAL**.
+
