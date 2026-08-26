@@ -137,8 +137,20 @@ export async function captureHandoffs(page) {
  * script, so it must be added BEFORE the navigation it should affect (no
  * reload here).
  */
-export async function addHeyQApiStubScript(page, tickets) {
-  await page.addInitScript((tickets) => {
+/**
+ * Live Concern Categories fixture, shaped exactly like Bridge's
+ * `GET /customer/categories` response — used to stub `/api/support/categories`
+ * so the report drawer's live category selector has real-shaped data to render
+ * without a live proxy/Bridge/HeyQ.
+ */
+export const CONCERN_CATEGORIES_FIXTURE = [
+  { id: 'cat-general', slug: 'general', name: 'General inquiry', subcategories: [{ id: 'sub-gen-info', name: 'General information' }] },
+  { id: 'cat-delivery', slug: 'delivery', name: 'Delivery', requiresTracking: true, subcategories: [{ id: 'sub-del-late', name: 'Late delivery' }] },
+  { id: 'cat-cod', slug: 'cod', name: 'COD', requiresTracking: true, requiresOrderRef: true, subcategories: [{ id: 'sub-cod-remit', name: 'Remittance' }] },
+];
+
+export async function addHeyQApiStubScript(page, tickets, categories = CONCERN_CATEGORIES_FIXTURE) {
+  await page.addInitScript(({ tickets, categories }) => {
     const orig = window.fetch.bind(window);
     const json = (data, status = 200) =>
       new Response(JSON.stringify(data), { status, headers: { 'Content-Type': 'application/json' } });
@@ -147,15 +159,21 @@ export async function addHeyQApiStubScript(page, tickets) {
       const method = (init?.method ?? 'GET').toUpperCase();
       const path = new URL(u, 'http://x').pathname;
 
+      // Live category taxonomy for the report drawer's selector.
+      if (method === 'GET' && path.endsWith('/api/support/categories')) {
+        return json(categories);
+      }
+
       // Create (embedded report drawer). Body is JSON for text-only submissions.
       if (method === 'POST' && path.endsWith('/api/support/tickets')) {
         let body = {};
         try { body = init?.body ? JSON.parse(init.body) : {}; } catch { body = {}; }
         const linkedTransactions = body.linkedTransactions;
         const now = new Date().toISOString();
+        const category = categories.find((c) => c.id === body.categoryId);
         return json({
           id: 'tkt-created-1', reference: 'HQ-2026-9001', subject: body.subject,
-          concernType: body.concernType, issueType: 'Reported issue', status: 'open',
+          concernType: body.concernType, issueType: category?.name ?? 'Reported issue', status: 'open',
           priority: 'normal', supportTeam: 'Customer Support', createdAt: now, updatedAt: now,
           openedBySupport: false, canReopen: false,
           linkedOrder: linkedTransactions?.[0], linkedTransactions,
@@ -175,7 +193,7 @@ export async function addHeyQApiStubScript(page, tickets) {
       }
       return orig(url, init);
     };
-  }, tickets);
+  }, { tickets, categories });
 }
 
 /** Add the stub and reload so it takes effect on the current page. */

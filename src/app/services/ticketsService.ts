@@ -49,8 +49,8 @@ export {
 };
 
 // Re-exported so pages have one import site for the HeyQ handoff + report actions.
-export { openHeyQContact, startOrderHandoff, getLiveOrderStatus, submitOrderReport, listAuthorizedTransactions, getAttachmentUrl, buildAttachmentUrl, REPORT_CONCERN_OPTIONS, getRequesterIdentity } from './heyqService';
-export type { OrderReportInput, AuthorizedTransactionOption, HeyQConcernType, HeyQRequesterIdentity } from './heyqService';
+export { openHeyQContact, startOrderHandoff, getLiveOrderStatus, submitOrderReport, listAuthorizedTransactions, getAttachmentUrl, buildAttachmentUrl, listConcernCategories, getRequesterIdentity } from './heyqService';
+export type { OrderReportInput, AuthorizedTransactionOption, HeyQConcernType, HeyQRequesterIdentity, ConcernCategory, ConcernSubcategory } from './heyqService';
 
 // Realtime (live conversation) — the token/URL/event-projection seam. Pages don't
 // touch heyqService directly for realtime; they go through the client + hook,

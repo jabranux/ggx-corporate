@@ -295,8 +295,8 @@ describe('idempotency headers reach the proxy', () => {
       },
       {
         src: ((api) => Promise.all([
-          api.apiCreateTicket({ name: 'Max', email: 'max@email.com', concernType: 'general_inquiry', subject: 's1', description: 'd1' }),
-          api.apiCreateTicket({ name: 'Max', email: 'max@email.com', concernType: 'general_inquiry', subject: 's2', description: 'd2' }),
+          api.apiCreateTicket({ name: 'Max', email: 'max@email.com', categoryId: 'cat-general', subject: 's1', description: 'd1' }),
+          api.apiCreateTicket({ name: 'Max', email: 'max@email.com', categoryId: 'cat-general', subject: 's2', description: 'd2' }),
         ])).toString(),
         response: { id: 'tkt-x', reference: 'HQ-9', subject: 's', issueType: 'General', status: 'open', priority: 'normal', supportTeam: 'CS', createdAt: '2026-01-01T00:00:00Z', updatedAt: '2026-01-01T00:00:00Z', canReopen: false, messages: [] },
       },
@@ -355,11 +355,11 @@ describe('submitting an order report (create via the customer API)', () => {
     messages: [{ id: 'm1', from: 'you', authorLabel: 'You', body: 'Recipient was available.', createdAt: '2026-07-15T00:00:00Z' }],
   };
 
-  it('authorizes the order via OMS, then POSTs a mapped payload to /customer/tickets', async () => {
+  it('authorizes the order via OMS, then POSTs the canonical categoryId to /customer/tickets', async () => {
     const { result, calls } = await withStub(
       (svc) => svc.submitOrderReport({
         externalOrderIds: ['GGX-2026-90008'],
-        concernType: 'failed_delivery', // Business+ concern → HeyQ delivery_delay
+        categoryId: 'cat-delivery',
         subject: 'Delivery failed',
         description: 'Recipient was available.',
       }),
@@ -373,7 +373,9 @@ describe('submitting an order report (create via the customer API)', () => {
     assert.equal(body.demoAccountId, undefined, 'the client must not send demoAccountId directly');
     assert.equal(body.externalUserId, undefined, 'the client must not send externalUserId directly');
     assert.equal(body.externalOrgId, undefined, 'the client must not send externalOrgId directly');
-    assert.equal(body.concernType, 'delivery_delay'); // mapped from failed_delivery
+    assert.equal(body.categoryId, 'cat-delivery', 'the canonical category id is sent verbatim, never substituted');
+    // Best-effort legacy label hint derived from the category — never authoritative.
+    assert.equal(body.concernType, 'delivery_delay');
     assert.equal(body.subject, 'Delivery failed');
     // Multi-transaction wire shape: a linkedTransactions array (one entry here).
     assert.equal(body.linkedTransactions.length, 1);
@@ -381,11 +383,26 @@ describe('submitting an order report (create via the customer API)', () => {
     assert.equal(body.linkedTransactions[0].snapshot.shipmentStatus, 'failed_delivery'); // OMS 'failed' → HeyQ
   });
 
+  it('sends a category id with no legacy equivalent WITHOUT fabricating a concernType', async () => {
+    const { calls } = await withStub(
+      (svc) => svc.submitOrderReport({
+        externalOrderIds: [],
+        categoryId: 'cat-technical', // has no entry in the legacy hint map
+        subject: 'App keeps crashing',
+        description: 'On the tracking page.',
+      }),
+      { response: { ...CREATED, linkedOrder: undefined } },
+    );
+    const body = JSON.parse(creates(calls)[0].body);
+    assert.equal(body.categoryId, 'cat-technical');
+    assert.equal(body.concernType, undefined, 'no locally-invented legacy label for an unmapped category');
+  });
+
   it('creates ONE ticket linking ALL selected transactions (not one per transaction)', async () => {
     const { result, calls } = await withStub(
       (svc) => svc.submitOrderReport({
         externalOrderIds: ['GGX-2026-90008', 'GGX-2026-90009'],
-        concernType: 'general_inquiry',
+        categoryId: 'cat-general',
         subject: 'Two affected orders',
         description: 'Both delayed.',
       }),
@@ -403,7 +420,7 @@ describe('submitting an order report (create via the customer API)', () => {
     const { result, calls } = await withStub(
       (svc) => svc.submitOrderReport({
         externalOrderIds: [],
-        concernType: 'billing_issue',
+        categoryId: 'cat-payment',
         subject: 'Billing question',
         description: 'Not about a specific order.',
       }),
@@ -421,7 +438,7 @@ describe('submitting an order report (create via the customer API)', () => {
       (svc) => svc.submitOrderReport({
         // First is authorized, second is unknown: the whole submission must fail.
         externalOrderIds: ['GGX-2026-90008', 'GGX-9999-00000'],
-        concernType: 'general_inquiry',
+        categoryId: 'cat-general',
         subject: 'x',
         description: 'y',
       }),
@@ -429,6 +446,63 @@ describe('submitting an order report (create via the customer API)', () => {
     );
     assert.equal(result.status, 'not_found');
     assert.equal(creates(calls).length, 0, 'no create request may be sent when any order is unauthorized');
+  });
+});
+
+describe('live Concern Categories (report drawer selector)', () => {
+  const CATEGORIES = [
+    { id: 'cat-general', slug: 'general', name: 'General inquiry', subcategories: [{ id: 'sub-gen-info', name: 'General information' }] },
+    { id: 'cat-delivery', slug: 'delivery', name: 'Delivery', requiresTracking: true, subcategories: [] },
+  ];
+
+  it('fetches from the same-origin Corporate proxy, never Bridge/Railway directly', async () => {
+    const { result, calls } = await withStub((svc) => svc.listConcernCategories(), { response: CATEGORIES });
+    assert.equal(result.status, 'ok');
+    const reads = calls.filter((c) => c.method === 'GET' && c.url.includes('/api/support/categories'));
+    assert.equal(reads.length, 1);
+    assert.doesNotMatch(reads[0].url, /^https?:\/\//);
+    assert.deepEqual(result.data.map((c) => c.id), ['cat-general', 'cat-delivery']);
+  });
+
+  it('carries requiresTracking/requiresOrderRef and subcategories through untouched', async () => {
+    const { result } = await withStub((svc) => svc.listConcernCategories(), { response: CATEGORIES });
+    const delivery = result.data.find((c) => c.id === 'cat-delivery');
+    assert.equal(delivery.requiresTracking, true);
+    const general = result.data.find((c) => c.id === 'cat-general');
+    assert.deepEqual(general.subcategories, [{ id: 'sub-gen-info', name: 'General information' }]);
+  });
+
+  it('never exposes a team/routing field even if the response carried one', async () => {
+    const { result } = await withStub((svc) => svc.listConcernCategories(), {
+      response: [{ ...CATEGORIES[0], defaultTeamId: 'team-cs', internalNotes: 'x' }],
+    });
+    const blob = JSON.stringify(result.data).toLowerCase();
+    assert.ok(!blob.includes('team-cs'), 'no routing/team field may reach Business+');
+    assert.ok(!blob.includes('internalnotes'));
+  });
+
+  it('treats zero eligible categories as a distinct, valid "empty" outcome — not a failure', async () => {
+    const { result } = await withStub((svc) => svc.listConcernCategories(), { response: [] });
+    assert.equal(result.status, 'ok');
+    assert.deepEqual(result.data, []);
+  });
+
+  it('maps a fetch failure to unavailable — never a fabricated fallback category list', async () => {
+    const { result } = await withStub((svc) => svc.listConcernCategories(), { response: { error: 'down' }, status: 503 });
+    assert.equal(result.status, 'unavailable');
+  });
+
+  it('maps a network error to unavailable', async () => {
+    const { result } = await withStub((svc) => svc.listConcernCategories(), { reject: true });
+    assert.equal(result.status, 'unavailable');
+  });
+
+  it('drops a malformed entry (missing id/name) rather than passing it through', async () => {
+    const { result } = await withStub((svc) => svc.listConcernCategories(), {
+      response: [...CATEGORIES, { slug: 'broken', subcategories: [] }],
+    });
+    assert.equal(result.status, 'ok');
+    assert.equal(result.data.length, 2, 'the malformed entry is filtered out, not defaulted or passed through');
   });
 });
 

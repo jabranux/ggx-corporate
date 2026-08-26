@@ -99,6 +99,9 @@ describe('transaction → in-app report drawer', () => {
     await page.getByRole('dialog', { name: /report an issue/i }).waitFor({ state: 'visible', timeout: 10_000 });
     // The drawer carries the order context.
     await page.getByRole('dialog').getByText(ORDER).waitFor();
+    // Wait for the live category selector to finish loading (stubbed) before
+    // filling the rest of the form — it gates submission.
+    await page.locator('#report-category').waitFor({ state: 'visible', timeout: 10_000 });
 
     // Fill and submit — the create call is served by the stubbed customer API.
     await page.locator('#report-description').fill('The rider marked this failed but nobody came.');
@@ -118,6 +121,7 @@ describe('transaction → in-app report drawer', () => {
       await addHeyQApiStubScript(mgr.page, TICKETS);
       await mgr.page.goto(`${server.base}/dashboard/transactions/${ORDER}`, { waitUntil: 'networkidle' });
       await mgr.page.getByRole('button', { name: /report an issue/i }).first().click();
+      await mgr.page.locator('#report-category').waitFor({ state: 'visible', timeout: 10_000 });
       await mgr.page.locator('#report-description').fill('Please check this order.');
       await mgr.page.getByRole('button', { name: /submit report/i }).click();
       // OMS authorization is the gate — it fails before any ticket is created.
@@ -159,6 +163,7 @@ describe('Support Tickets page (reads the HeyQ customer API)', () => {
     await page.getByRole('dialog', { name: /report an issue/i }).waitFor({ state: 'visible', timeout: 10_000 });
     assert.equal((await handoffs()).length, before, 'must not redirect to HeyQ / open /contact');
     assert.match(page.url(), /\/dashboard\/support-tickets$/);
+    await page.locator('#report-category').waitFor({ state: 'visible', timeout: 10_000 });
 
     // A general concern submits with no linked transaction and stays in Business+.
     await page.locator('#report-subject').fill('General billing question');

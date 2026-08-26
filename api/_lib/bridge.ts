@@ -244,3 +244,37 @@ export function failUpstream(res: ProxyResponse, route: string, err: unknown): v
   console.error(`[support proxy] ${route}`, err);
   res.status(502).json({ error: 'QuadX Bridge is temporarily unreachable.' });
 }
+
+/**
+ * Re-verify a category id against Bridge's LIVE `GET /customer/categories`
+ * response, fresh, right before a ticket is created — never against anything
+ * cached in this process. Ticket creation is the one write that carries a
+ * category id, and Bridge's own `create_customer_ticket_bridge` RPC does not
+ * itself reject an unrecognized id (it silently substitutes a mapped default —
+ * see docs/migration/ggx-corporate-live-concern-categories.md's "Known
+ * Bridge-side limitations"). This closes that gap from the Corporate side:
+ * an id that is missing, malformed, or no longer live is rejected here,
+ * before Bridge is ever asked to create anything.
+ */
+export async function verifyLiveCategoryId(
+  categoryId: string,
+): Promise<'ok' | 'invalid' | 'unavailable'> {
+  let bridgeRes: Response;
+  try {
+    bridgeRes = await bridgeFetch('/customer/categories', { method: 'GET' });
+  } catch {
+    return 'unavailable';
+  }
+  if (!bridgeRes.ok) return 'unavailable';
+  let categories: unknown;
+  try {
+    categories = await bridgeRes.json();
+  } catch {
+    return 'unavailable';
+  }
+  if (!Array.isArray(categories)) return 'unavailable';
+  const isLive = categories.some(
+    (c) => c && typeof c === 'object' && (c as { id?: unknown }).id === categoryId,
+  );
+  return isLive ? 'ok' : 'invalid';
+}

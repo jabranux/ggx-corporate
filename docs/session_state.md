@@ -3,6 +3,55 @@
 > Lightweight resume/checkpoint file. Detailed June 2026 history was archived to
 > `docs/archive/session_log_2026-06.md`.
 
+## Most Recent Work — live Concern Categories wired end-to-end (2026-08-26)
+
+Completed the Corporate-side integration of QuadX Bridge's live Concern
+Categories API (HeyQ commit `1b591c52af28ab92e264c4e3957313d032e9707c`). Full
+write-up: `docs/migration/ggx-corporate-live-concern-categories.md`.
+
+- **New:** `GET /api/support/categories` (BFF proxy, session-gated, no
+  caching) and `verifyLiveCategoryId` (`api/_lib/bridge.ts`) — `POST
+  /api/support/tickets` now requires a `categoryId` and re-verifies it against
+  a fresh Bridge fetch before creating anything (400 on unknown/missing, 502
+  fail-closed if verification itself can't reach Bridge).
+- **Report drawer** (`ReportIssueDrawer.tsx`) now loads categories live with
+  explicit loading/ready/empty/error states and re-verifies the selection
+  immediately before submit, clearing (never silently substituting) a
+  selection that went stale while the drawer was open.
+- **Retired** the hardcoded `REPORT_CONCERN_OPTIONS`/`HEYQ_CONCERN_LABELS`
+  catalog in `heyqService.ts` that used to drive category selection — replaced
+  by `listConcernCategories()`. `apiCreateTicket` now sends the canonical
+  `categoryId`; a small one-way `CATEGORY_ID_TO_CONCERN_TYPE` shim still sends
+  a best-effort legacy `concernType` label alongside it, only because Bridge's
+  own ticket-read `issueType` label is keyed off the legacy field, not
+  `category_id` (a documented Bridge-side gap, not fixed here — see the
+  handoff doc's §9).
+- **Found two real Bridge-side gaps, documented but NOT fixed** (out of this
+  task's Corporate-only scope): (1) Bridge's own `create_customer_ticket_bridge`
+  path validates `categoryId` against a static reference array, not the live
+  `public.categories` table `GET /customer/categories` actually reads — an id
+  valid in the live table but absent from the static seed would be silently
+  substituted rather than rejected (dormant today since the seed is an exact
+  clone, but a real latent gap); Corporate's own fresh re-verification closes
+  this from its side regardless. (2) The customer ticket READ projection
+  never exposes `categoryId` at all — only the legacy `concernType`/`issueType`.
+- **Validated:** `npm run typecheck`, `npm run build` (dist/ scanned, Bridge
+  key confirmed absent), `npm test` **79/79** (up from 71 — 2 create-flow
+  updates + 6 new category tests). A throwaway esbuild-bundled smoke script
+  exercised the two BFF route handlers directly against a real local fake
+  Bridge HTTP server: 21/21 checks passed (auth gate, live relay, secret never
+  leaked, unreachable-Bridge fail-closed, valid/invalid/missing categoryId,
+  spoofed-identity override, empty-vs-failure distinction) — not committed.
+  Also manually verified in a real browser (`npm run dev`) that the drawer's
+  error state renders and correctly blocks submission against the actually
+  unreachable `/api/support/categories` (no Vercel Functions runtime under
+  plain Vite in this environment — same recurring constraint as every prior
+  HeyQ-integration session on this project).
+- **Not deployed; live round-trip not run** — no `QUADX_BRIDGE_URL`/
+  `QUADX_BRIDGE_API_KEY` configured in this environment (same blocker
+  recorded across this project's entire HeyQ history). Requires a Corporate/
+  Vercel redeploy once pushed; no new secret, database, or migration needed.
+
 ## Most Recent Work — production reply 503 diagnosed and fixed (2026-08-26)
 
 `npm run e2e:prod` against live production (`https://ggx-corporate.vercel.app`)

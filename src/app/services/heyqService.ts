@@ -53,14 +53,18 @@ import {
   apiGetMyTicket,
   apiReplyToMyTicket,
   apiCreateTicket,
+  apiListConcernCategories,
   apiMintRealtimeToken,
   buildAttachmentUrl,
   getHeyQApiBaseUrl,
   projectRealtimeMessage,
   type RealtimeToken,
+  type ConcernCategory,
+  type ConcernSubcategory,
 } from './heyqCustomerApi';
 
 export { projectRealtimeMessage, buildAttachmentUrl } from './heyqCustomerApi';
+export type { ConcernCategory, ConcernSubcategory } from './heyqCustomerApi';
 
 // ── HeyQ contract types (owned by HeyQ; mirrored here for the adapter) ────────
 // HeyQ's requester-facing vocabulary. Previously shared from the in-process mock;
@@ -74,6 +78,16 @@ export type HeyQTicketStatus =
   | 'resolved'
   | 'closed';
 
+/**
+ * Legacy, read-only concern descriptor Bridge still returns on a ticket READ
+ * (`CustomerTicket.concernType` below) — it does NOT drive ticket creation any
+ * more. Ticket creation now selects a live Concern Category (`ConcernCategory`,
+ * `listConcernCategories` below) and submits its canonical `id`; this type only
+ * shapes what an already-created ticket reports back. See
+ * docs/migration/ggx-corporate-live-concern-categories.md for the full history —
+ * the report drawer's hardcoded `REPORT_CONCERN_OPTIONS`/`HEYQ_CONCERN_LABELS`
+ * catalog that used to drive category selection has been retired.
+ */
 export type HeyQConcernType =
   | 'delivery_delay'
   | 'failed_delivery'
@@ -83,17 +97,6 @@ export type HeyQConcernType =
   | 'billing_issue'
   | 'address_correction'
   | 'general_inquiry';
-
-export const HEYQ_CONCERN_LABELS: Record<HeyQConcernType, string> = {
-  delivery_delay: 'Delayed Delivery',
-  failed_delivery: 'Delivery Failed',
-  missing_parcel: 'Missing Package',
-  damaged_parcel: 'Package Damaged',
-  cod_concern: 'COD Concern',
-  billing_issue: 'Billing Inquiry',
-  address_correction: 'Wrong Address',
-  general_inquiry: 'General Inquiry',
-};
 
 /**
  * The signed-in Business+ user, as HeyQ's requester identity. `externalOrgId` is
@@ -270,13 +273,21 @@ export const TICKET_STATUS_OPTIONS: { value: HeyQTicketStatus; label: string }[]
   ['new', 'open', 'in_progress', 'on_hold', 'resolved', 'closed'] as HeyQTicketStatus[]
 ).map((s) => ({ value: s, label: TICKET_STATUS_META[s].label }));
 
-/** Concern options for the in-app report drawer. */
-export const REPORT_CONCERN_OPTIONS: { value: HeyQConcernType; label: string }[] = (
-  [
-    'delivery_delay', 'failed_delivery', 'missing_parcel', 'damaged_parcel',
-    'cod_concern', 'billing_issue', 'address_correction', 'general_inquiry',
-  ] as HeyQConcernType[]
-).map((c) => ({ value: c, label: HEYQ_CONCERN_LABELS[c] }));
+// ── Concern Categories (live, for the report drawer's selector) ──────────────
+
+/**
+ * The live, active Concern Category taxonomy for the report drawer's selector,
+ * fetched fresh through the Corporate BFF on every call (no local caching —
+ * matches Bridge's own "no caching anywhere" contract). Gated the same way as
+ * every other read here: an unauthenticated caller gets `forbidden` without a
+ * network call, a UX shortcut rather than the authorization boundary itself
+ * (the BFF's own session check is that boundary).
+ */
+export async function listConcernCategories(): Promise<HeyQResult<ConcernCategory[]>> {
+  const session = await getSessionContext();
+  if (!session.isAuthenticated) return { status: 'forbidden' };
+  return apiListConcernCategories();
+}
 
 // ── Identity ─────────────────────────────────────────────────────────────────
 
@@ -439,7 +450,8 @@ export interface OrderReportInput {
    * Every id is authorized against OMS before the ticket is created.
    */
   externalOrderIds: string[];
-  concernType: HeyQConcernType;
+  /** Canonical, currently-live category id (from `listConcernCategories`). */
+  categoryId: string;
   subject: string;
   description: string;
 }
@@ -500,7 +512,7 @@ export async function submitOrderReport(input: OrderReportInput): Promise<HeyQRe
   return apiCreateTicket({
     name: session.user.name,
     email: session.user.email,
-    concernType: input.concernType,
+    categoryId: input.categoryId,
     subject: input.subject,
     description: input.description,
     linkedTransactions: linkedTransactions.length ? linkedTransactions : undefined,

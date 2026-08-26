@@ -10,6 +10,13 @@
  *   GET  /api/support/tickets/:id              → one of them
  *   POST /api/support/tickets                  → create a ticket
  *   POST /api/support/tickets/:id/messages     → a requester reply
+ *   GET  /api/support/categories               → the live Concern Category taxonomy
+ *
+ * Categories are LIVE, not a Corporate-side catalog: `apiListConcernCategories`
+ * always calls the proxy fresh (no caching here, matching Bridge's own
+ * "no caching anywhere" contract) and `apiCreateTicket` sends the exact
+ * `categoryId` it was given — never a locally-substituted default. See
+ * docs/migration/ggx-corporate-live-concern-categories.md.
  * There is no explicit reopen route any more — replying to a resolved/on_hold
  * ticket already reopens it via Bridge's atomic RPC; the legacy explicit
  * reopen endpoint only worked against HeyQ's in-memory store and was removed
@@ -111,6 +118,29 @@ interface HeyQApiLinkedOrder {
   capturedAt: string;
 }
 
+/** A selectable concern subcategory, as Bridge's `GET /customer/categories` returns it. */
+export interface ConcernSubcategory {
+  id: string;
+  name: string;
+}
+
+/**
+ * A selectable Concern Category, exactly as Bridge's `GET /customer/categories`
+ * returns it (see `CustomerConcernCategory` in the HeyQ repo's
+ * `src/app/models/ticket.ts`). `id` is the canonical identity — the only value
+ * `apiCreateTicket` sends as `categoryId`. No team/routing field is ever
+ * present on this response (Bridge deliberately omits it).
+ */
+export interface ConcernCategory {
+  id: string;
+  slug: string;
+  name: string;
+  description?: string;
+  requiresTracking?: boolean;
+  requiresOrderRef?: boolean;
+  subcategories: ConcernSubcategory[];
+}
+
 interface HeyQApiCustomerTicket {
   id: string;
   reference: string;
@@ -180,16 +210,28 @@ const SHIPMENT_TO_HEYQ: Record<string, string> = {
   returned: 'returned',
 };
 
-/** Business+ concern → HeyQ concern (HeyQ owns the taxonomy; unknowns default). */
-const CONCERN_TO_HEYQ: Record<HeyQConcernType, string> = {
-  delivery_delay: 'delivery_delay',
-  failed_delivery: 'delivery_delay',
-  missing_parcel: 'missing_parcel',
-  damaged_parcel: 'damaged_parcel',
-  cod_concern: 'cod_concern',
-  billing_issue: 'payment_issue',
-  address_correction: 'address_correction',
-  general_inquiry: 'general_inquiry',
+/**
+ * Best-effort LEGACY concern-type hint, derived from the canonical categoryId,
+ * sent alongside `categoryId` on ticket creation. This exists only because
+ * Bridge's customer ticket READ projection (`issueType`) still labels itself
+ * from the ticket's legacy `concern_type` column, not from `category_id` (a
+ * documented Bridge-side gap — see docs/migration/
+ * ggx-corporate-live-concern-categories.md's "Known Bridge-side limitations").
+ * `categoryId` remains the sole canonical, write-authoritative value; this map
+ * never influences it and a category with no obvious legacy equivalent simply
+ * gets HeyQ's own generic label. Reverse of Bridge's own `CATEGORY_BY_CONCERN`
+ * (server/supabaseBridge.ts) for the ids that pass have a real one; kept in
+ * sync only for the categories present at this pass's seed time.
+ */
+const CATEGORY_ID_TO_CONCERN_TYPE: Record<string, string> = {
+  'cat-delivery': 'delivery_delay',
+  'cat-pickup': 'pickup_issue',
+  'cat-claims': 'missing_parcel',
+  'cat-cod': 'cod_concern',
+  'cat-disbursal': 'remittance_concern',
+  'cat-payment': 'payment_issue',
+  'cat-general': 'general_inquiry',
+  'cat-account': 'account_concern',
 };
 
 function toSnapshot(s: HeyQApiSnapshot): HeyQOrderSnapshot {
@@ -430,7 +472,8 @@ export interface CreateCustomerTicketInput {
   /** Requester display fields for the ticket's guest requester record. */
   name: string;
   email: string;
-  concernType: HeyQConcernType;
+  /** Canonical, currently-live category id (Bridge `GET /customer/categories`'s `id`). */
+  categoryId: string;
   subject: string;
   description: string;
   /**
@@ -479,7 +522,11 @@ export async function apiCreateTicket(
   const payload = {
     name: input.name,
     email: input.email,
-    concernType: CONCERN_TO_HEYQ[input.concernType] ?? 'general_inquiry',
+    categoryId: input.categoryId,
+    // Best-effort legacy label hint only — see CATEGORY_ID_TO_CONCERN_TYPE's docblock.
+    // Omitted (not defaulted) when the category has no obvious legacy equivalent, so
+    // Bridge applies its own generic label rather than this adapter guessing one.
+    concernType: CATEGORY_ID_TO_CONCERN_TYPE[input.categoryId],
     subject: input.subject,
     description: input.description,
     trackingNumber,
@@ -490,6 +537,38 @@ export async function apiCreateTicket(
   const res = await postJson(SUPPORT_PROXY_BASE, '/tickets', payload, { 'Idempotency-Key': idempotencyKey });
   if (!res.ok) return { status: res.result };
   return { status: 'ok', data: toCustomerTicket(res.data as HeyQApiCustomerTicket) };
+}
+
+// ── Concern Categories (live, no caching) ─────────────────────────────────────
+
+/**
+ * The live, active Concern Category taxonomy from Bridge, for the ticket-
+ * creation category selector. Always fetched fresh — no caching in this
+ * module, matching Bridge's own "no caching anywhere in the path" contract.
+ * An empty array is a valid, distinct outcome from a fetch failure: the
+ * caller must tell "zero categories configured" apart from "couldn't reach
+ * Bridge" (see the module docblock and the handoff doc's UI-states section).
+ */
+export async function apiListConcernCategories(): Promise<HeyQResult<ConcernCategory[]>> {
+  const res = await getJson(SUPPORT_PROXY_BASE, '/categories');
+  if (!res.ok) return { status: res.result };
+  if (!Array.isArray(res.data)) return { status: 'unavailable' };
+  const categories = (res.data as Partial<ConcernCategory>[])
+    .filter((c): c is ConcernCategory & { id: string; name: string } => typeof c?.id === 'string' && typeof c?.name === 'string')
+    .map((c) => ({
+      id: c.id,
+      slug: typeof c.slug === 'string' ? c.slug : c.id,
+      name: c.name,
+      description: typeof c.description === 'string' ? c.description : undefined,
+      requiresTracking: c.requiresTracking === true,
+      requiresOrderRef: c.requiresOrderRef === true,
+      subcategories: Array.isArray(c.subcategories)
+        ? c.subcategories
+            .filter((s): s is ConcernSubcategory => typeof s?.id === 'string' && typeof s?.name === 'string')
+            .map((s) => ({ id: s.id, name: s.name }))
+        : [],
+    }));
+  return { status: 'ok', data: categories };
 }
 
 // ── Realtime connection token (short-lived, single-use, ticket-scoped) ─────────

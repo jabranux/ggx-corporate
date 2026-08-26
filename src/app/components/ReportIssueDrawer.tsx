@@ -1,15 +1,27 @@
 import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router';
 import {
-  IconX, IconHeadset, IconSend, IconCircleCheck, IconAlertTriangle,
+  IconX, IconHeadset, IconSend, IconCircleCheck, IconAlertTriangle, IconLoader2,
 } from '@tabler/icons-react';
 import { Button } from './ui/Button';
 import { Select } from './ui/Select';
 import { TransactionMultiSelect } from './TransactionMultiSelect';
 import {
-  submitOrderReport, REPORT_CONCERN_OPTIONS,
-  type CustomerTicket, type HeyQConcernType, type AuthorizedTransactionOption,
+  submitOrderReport, listConcernCategories,
+  type CustomerTicket, type ConcernCategory, type AuthorizedTransactionOption,
 } from '../services/ticketsService';
+
+/**
+ * The live category selector's load state. `empty`/`error` are distinct: zero
+ * eligible categories vs. a fetch that failed outright, since each needs its
+ * own message (see the handoff doc's UI-states section). Neither ever
+ * fabricates a locally-invented category — both simply block submission.
+ */
+type CategoriesPhase =
+  | { kind: 'loading' }
+  | { kind: 'ready'; categories: ConcernCategory[] }
+  | { kind: 'empty' }
+  | { kind: 'error' };
 
 interface ReportIssueDrawerProps {
   open: boolean;
@@ -45,11 +57,34 @@ const FAILURE_MESSAGE: Record<'forbidden' | 'not_found' | 'unavailable', string>
  */
 export function ReportIssueDrawer({ open, onClose, preselected, onSubmitted }: ReportIssueDrawerProps) {
   const navigate = useNavigate();
-  const [concernType, setConcernType] = useState<HeyQConcernType>('delivery_delay');
+  const [categoriesPhase, setCategoriesPhase] = useState<CategoriesPhase>({ kind: 'loading' });
+  const [categoryId, setCategoryId] = useState('');
+  const [categoryStale, setCategoryStale] = useState(false);
   const [subject, setSubject] = useState('');
   const [description, setDescription] = useState('');
   const [transactions, setTransactions] = useState<AuthorizedTransactionOption[]>([]);
   const [phase, setPhase] = useState<Phase>({ kind: 'form' });
+
+  /**
+   * Load the live category taxonomy fresh (no local caching). Keeps whatever
+   * category the caller already has selected if it's still present in the
+   * new list; otherwise leaves it unselected — never silently substitutes
+   * another category or a fabricated default.
+   */
+  const loadCategories = async () => {
+    setCategoriesPhase({ kind: 'loading' });
+    const res = await listConcernCategories();
+    if (res.status !== 'ok') {
+      setCategoriesPhase({ kind: 'error' });
+      return;
+    }
+    if (res.data.length === 0) {
+      setCategoriesPhase({ kind: 'empty' });
+      return;
+    }
+    setCategoriesPhase({ kind: 'ready', categories: res.data });
+    setCategoryId((prev) => (prev && res.data.some((c) => c.id === prev) ? prev : res.data[0].id));
+  };
 
   // Reset to a clean form each time the drawer opens. Preselection seeds both the
   // selected transactions and a sensible default subject (only when exactly one is
@@ -57,11 +92,13 @@ export function ReportIssueDrawer({ open, onClose, preselected, onSubmitted }: R
   useEffect(() => {
     if (open) {
       const seed = preselected ?? [];
-      setConcernType('delivery_delay');
+      setCategoryId('');
+      setCategoryStale(false);
       setSubject(seed.length === 1 ? `Issue with order ${seed[0].trackingNumber}` : '');
       setDescription('');
       setTransactions(seed);
       setPhase({ kind: 'form' });
+      void loadCategories();
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open]);
@@ -69,16 +106,45 @@ export function ReportIssueDrawer({ open, onClose, preselected, onSubmitted }: R
   if (!open) return null;
 
   const submitting = phase.kind === 'submitting';
-  const canSubmit = subject.trim().length > 0 && description.trim().length > 0 && !submitting;
+  const canSubmit =
+    subject.trim().length > 0 &&
+    description.trim().length > 0 &&
+    categoriesPhase.kind === 'ready' &&
+    categoryId.length > 0 &&
+    !submitting;
 
   const close = () => { if (!submitting) onClose(); };
 
   const handleSubmit = async () => {
     if (!canSubmit) return; // guards empty input AND blocks duplicate submits
     setPhase({ kind: 'submitting' });
+
+    // Re-verify the selection against a FRESH fetch right before submit — the
+    // category may have been deactivated/removed while the drawer sat open.
+    // Never send a possibly-stale id; fail safely and let the user reselect
+    // without losing subject/description/linked transactions.
+    const fresh = await listConcernCategories();
+    if (fresh.status !== 'ok') {
+      setCategoriesPhase({ kind: 'error' });
+      setPhase({ kind: 'form' });
+      return;
+    }
+    if (fresh.data.length === 0) {
+      setCategoriesPhase({ kind: 'empty' });
+      setPhase({ kind: 'form' });
+      return;
+    }
+    setCategoriesPhase({ kind: 'ready', categories: fresh.data });
+    if (!fresh.data.some((c) => c.id === categoryId)) {
+      setCategoryId('');
+      setCategoryStale(true);
+      setPhase({ kind: 'form' });
+      return;
+    }
+
     const res = await submitOrderReport({
       externalOrderIds: transactions.map((t) => t.externalOrderId),
-      concernType,
+      categoryId,
       subject: subject.trim(),
       description: description.trim(),
     });
@@ -137,19 +203,56 @@ export function ReportIssueDrawer({ open, onClose, preselected, onSubmitted }: R
               </div>
 
               <div>
-                <label htmlFor="report-concern" className="block text-sm font-medium text-gray-700 mb-1.5">
+                <label htmlFor="report-category" className="block text-sm font-medium text-gray-700 mb-1.5">
                   What’s the issue?
                 </label>
-                <Select
-                  id="report-concern"
-                  value={concernType}
-                  onChange={(e) => setConcernType(e.target.value as HeyQConcernType)}
-                  disabled={submitting}
-                >
-                  {REPORT_CONCERN_OPTIONS.map((o) => (
-                    <option key={o.value} value={o.value}>{o.label}</option>
-                  ))}
-                </Select>
+                {categoriesPhase.kind === 'loading' && (
+                  <div className="flex items-center gap-2 h-10 px-3 rounded-lg border border-gray-200 bg-gray-50 text-sm text-gray-400">
+                    <IconLoader2 className="w-4 h-4 animate-spin flex-shrink-0" />
+                    Loading categories…
+                  </div>
+                )}
+                {categoriesPhase.kind === 'empty' && (
+                  <div className="flex items-start gap-2.5 rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-700">
+                    <IconAlertTriangle className="w-4 h-4 flex-shrink-0 mt-0.5" />
+                    <span>No support categories are available right now. Please try again shortly.</span>
+                  </div>
+                )}
+                {categoriesPhase.kind === 'error' && (
+                  <div className="flex items-start gap-2.5 rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-700">
+                    <IconAlertTriangle className="w-4 h-4 flex-shrink-0 mt-0.5" />
+                    <div>
+                      <p>Couldn’t load support categories.</p>
+                      <button
+                        type="button"
+                        onClick={() => void loadCategories()}
+                        className="mt-1 font-medium underline underline-offset-2 hover:no-underline"
+                      >
+                        Try again
+                      </button>
+                    </div>
+                  </div>
+                )}
+                {categoriesPhase.kind === 'ready' && (
+                  <>
+                    <Select
+                      id="report-category"
+                      value={categoryId}
+                      onChange={(e) => { setCategoryId(e.target.value); setCategoryStale(false); }}
+                      disabled={submitting}
+                    >
+                      {categoryId === '' && <option value="" disabled>Select a category…</option>}
+                      {categoriesPhase.categories.map((c) => (
+                        <option key={c.id} value={c.id}>{c.name}</option>
+                      ))}
+                    </Select>
+                    {categoryStale && (
+                      <p className="mt-1.5 text-xs text-red-600">
+                        Your selected category is no longer available. Please choose again.
+                      </p>
+                    )}
+                  </>
+                )}
               </div>
 
               <div>
