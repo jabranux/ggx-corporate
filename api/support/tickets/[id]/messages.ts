@@ -34,9 +34,10 @@ export default async function handler(req: ProxyRequest, res: ProxyResponse): Pr
       return;
     }
     const messageId = getHeader(req, 'x-bridge-message-id');
+    const messageText = String(rest.body ?? rest.message ?? '');
     const bridgeRes = await bridgeFetch(`/customer/tickets/${encodeURIComponent(id)}/messages`, {
       method: 'POST',
-      body: { ...rest, ...identity }, // server-resolved identity always wins
+      body: { ...rest, body: messageText, ...identity }, // server-resolved identity always wins
       headers: messageId ? { 'X-Bridge-Message-Id': messageId } : undefined,
     });
     await relay(res, bridgeRes);
