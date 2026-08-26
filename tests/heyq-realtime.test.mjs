@@ -1,17 +1,24 @@
 /**
- * Realtime (live conversation) tests for the Business+ → HeyQ integration.
+ * Realtime tests for the Business+ → HeyQ integration.
  *
- * Three layers, all driven INSIDE the running app (Vite serves the real TS
- * modules the app uses), with `window.fetch` and `window.WebSocket` stubbed so we
- * exercise the real client without a live HeyQ:
+ * DORMANT capability, kept for when a future Bridge contract adds a realtime
+ * channel (see docs/migration/ggx-corporate-heyq-live-ticketing.md and
+ * `useTicketConversation.ts`'s module docblock). The approved QuadX Bridge
+ * contract for this POC is REST + 5-second polling only — `useTicketConversation`
+ * does NOT open a WebSocket, so nothing below is exercised by the running app.
+ * These tests still verify the standalone client module is correct in
+ * isolation, so it stays usable the day a realtime contract is approved:
  *
- *   • service seam   — the WS URL derivation, the connection-token mint, and the
- *                      customer-safe message projection allowlist.
+ *   • service seam    — the WS URL derivation, the connection-token mint, and
+ *                       the customer-safe message projection allowlist.
  *   • realtime client — the protocol lifecycle (auth → subscribe → refetch),
- *                      event filtering, typing, reconnect + token re-mint, teardown.
- *   • detail UI       — an agent reply and typing appear WITHOUT a refresh, a
- *                      duplicate event does not duplicate a message, and an
- *                      optimistic reply reconciles to a single confirmed bubble.
+ *                       event filtering, typing, reconnect + token re-mint,
+ *                       teardown. Exercises `heyqRealtimeClient.ts` directly.
+ *   • detail UI       — the ACTUAL wired-up behavior: an agent reply appears
+ *                       via the 5-second REST poll (not a socket push), a
+ *                       repeated poll of the same data does not duplicate a
+ *                       message, and an optimistic reply reconciles to a
+ *                       single confirmed bubble.
  */
 import { after, before, describe, it } from 'node:test';
 import assert from 'node:assert/strict';
@@ -246,12 +253,15 @@ describe('realtime client lifecycle', () => {
   });
 });
 
-// ── Detail UI: live updates without a refresh ────────────────────────────────
+// ── Detail UI: the ACTUAL wired-up behavior — REST polling, no socket ─────────
 
-describe('live conversation in the ticket detail page', () => {
+describe('the ticket detail page (REST polling only — no WebSocket is opened)', () => {
   const TICKET_ID = 'tkt-live-1';
 
-  /** Install a controllable fake WebSocket + HeyQ fetch stub, then open the ticket. */
+  /** Install a Corporate-support-proxy fetch stub, then open the ticket. No
+   * WebSocket is installed — asserting its absence is the point: if the hook
+   * ever opened one again, `window.WebSocket` would no longer be this no-op
+   * stub and the constructor guard below would throw, failing the test loudly. */
   async function openLiveTicket() {
     await page.addInitScript((ticketId) => {
       const now = () => new Date().toISOString();
@@ -265,44 +275,39 @@ describe('live conversation in the ticket detail page', () => {
       };
       window.__ticket = ticket;
 
-      // Fetch stub: token mint, customer reads, and reply (append + return).
+      // Fetch stub: customer reads (poll + initial) and reply (append + return),
+      // all under the same-origin /api/support/* proxy shape.
       const origFetch = window.fetch.bind(window);
       const json = (data, status = 200) => new Response(JSON.stringify(data), { status, headers: { 'Content-Type': 'application/json' } });
       window.fetch = async (url, init) => {
         const u = String(url); const method = (init?.method ?? 'GET').toUpperCase();
         const path = new URL(u, 'http://x').pathname;
-        if (method === 'POST' && path.endsWith('/api/customer/realtime/token')) return json({ token: 'rtok', expiresInMs: 60000 });
-        if (method === 'POST' && /\/api\/(customer\/)?tickets\/[^/]+\/messages$/.test(path)) {
+        if (method === 'POST' && /\/api\/support\/tickets\/[^/]+\/messages$/.test(path)) {
           const body = init?.body ? JSON.parse(init.body) : {};
           window.__ticket.messages.push({ id: 'srv-' + (window.__ticket.messages.length + 1), from: 'you', authorLabel: 'You', body: body.body, createdAt: now() });
           window.__ticket.updatedAt = now();
           return json(window.__ticket);
         }
-        if (u.includes('/api/customer/tickets')) {
-          const m = path.match(/\/api\/customer\/tickets\/([^/]+)$/);
+        if (u.includes('/api/support/tickets')) {
+          const m = path.match(/\/api\/support\/tickets\/([^/]+)$/);
           if (m) return json(window.__ticket);
           return json([window.__ticket]);
         }
         return origFetch(url, init);
       };
 
-      // Fake WebSocket that auto-completes the handshake and exposes an emitter.
-      let sock = null;
-      class FakeWS {
-        static OPEN = 1;
-        constructor(url) { this.url = url; this.readyState = 0; sock = this; window.__ws = this;
-          setTimeout(() => { this.readyState = 1; this.onopen && this.onopen(); }, 0); }
-        send(data) {
-          const m = JSON.parse(data);
-          if (m.t === 'auth') this._emit({ t: 'auth_ok', audience: 'customer' });
-          else if (m.t === 'subscribe') this._emit({ t: 'subscribed', ticketId: m.ticketId });
-        }
-        close() { this.readyState = 3; }
-        _emit(obj) { this.onmessage && this.onmessage({ data: JSON.stringify(obj) }); }
+      // No realtime client should ever be constructed on this contract — make
+      // that loud instead of silent if the hook regresses.
+      class NoSocketExpected {
+        constructor() { throw new Error('useTicketConversation must not open a WebSocket on the REST-only Bridge contract'); }
       }
-      window.WebSocket = FakeWS;
-      // Push a server event as if from the agent side.
-      window.__emit = (event) => sock && sock._emit({ t: 'event', event });
+      window.WebSocket = NoSocketExpected;
+      // Directly mutate the mock ticket, as if HeyQ/Bridge received an agent
+      // reply out-of-band — the next 5-second poll is what surfaces it.
+      window.__addAgentReply = (body) => {
+        window.__ticket.messages.push({ id: 'agent-1', from: 'support', authorLabel: 'Customer Support', body, createdAt: now() });
+        window.__ticket.updatedAt = now();
+      };
     }, TICKET_ID);
 
     await page.goto(`${server.base}/dashboard/support-tickets/${TICKET_ID}`, { waitUntil: 'networkidle' });
@@ -310,39 +315,18 @@ describe('live conversation in the ticket detail page', () => {
     await page.getByText('Live', { exact: true }).first().waitFor({ timeout: 15000 });
   }
 
-  it('shows an agent reply live, and a duplicate event does not duplicate it', async () => {
+  it('shows an agent reply after the next poll, and a repeated poll of the same data does not duplicate it', async () => {
     await openLiveTicket();
 
-    await page.evaluate(() => window.__emit({
-      id: 'evt-a', type: 'message.created', ticketId: 'tkt-live-1', actorType: 'agent',
-      serverTimestamp: new Date().toISOString(),
-      data: { messageKind: 'public', message: { id: 'agent-1', from: 'support', authorLabel: 'Customer Support', body: 'Your parcel is out for delivery.', createdAt: new Date().toISOString() } },
-    }));
-    await page.getByText('Your parcel is out for delivery.').first().waitFor({ timeout: 5000 });
+    await page.evaluate(() => window.__addAgentReply('Your parcel is out for delivery.'));
+    // The poll runs every 5s; give it two cycles' worth of margin.
+    await page.getByText('Your parcel is out for delivery.').first().waitFor({ timeout: 12_000 });
 
-    // Re-emit the SAME event id — must be de-duplicated by the hook.
-    await page.evaluate(() => window.__emit({
-      id: 'evt-a', type: 'message.created', ticketId: 'tkt-live-1', actorType: 'agent',
-      serverTimestamp: new Date().toISOString(),
-      data: { messageKind: 'public', message: { id: 'agent-1', from: 'support', authorLabel: 'Customer Support', body: 'Your parcel is out for delivery.', createdAt: new Date().toISOString() } },
-    }));
-    await page.waitForTimeout(200);
+    // Let at least one more poll run over the SAME (unchanged) ticket data —
+    // the message must not be duplicated by re-upserting the same id.
+    await page.waitForTimeout(5_500);
     const count = await page.getByText('Your parcel is out for delivery.').count();
-    assert.equal(count, 1, 'a duplicate event must not duplicate the message');
-  });
-
-  it('shows the agent typing indicator and clears it', async () => {
-    await openLiveTicket();
-    await page.evaluate(() => window.__emit({
-      id: 'evt-t1', type: 'typing.started', ticketId: 'tkt-live-1', actorType: 'agent',
-      serverTimestamp: new Date().toISOString(), data: { label: 'Support' },
-    }));
-    await page.getByText('Customer Support is typing…').waitFor({ timeout: 5000 });
-    await page.evaluate(() => window.__emit({
-      id: 'evt-t2', type: 'typing.stopped', ticketId: 'tkt-live-1', actorType: 'agent',
-      serverTimestamp: new Date().toISOString(), data: { label: 'Support' },
-    }));
-    await page.getByText('Customer Support is typing…').waitFor({ state: 'detached', timeout: 5000 });
+    assert.equal(count, 1, 'a repeated poll of unchanged data must not duplicate the message');
   });
 
   it('renders an optimistic reply and reconciles it to a single confirmed message', async () => {

@@ -5,7 +5,6 @@ import {
 } from '@tabler/icons-react';
 import { Button } from './ui/Button';
 import { Select } from './ui/Select';
-import { AttachmentInput } from './AttachmentInput';
 import { TransactionMultiSelect } from './TransactionMultiSelect';
 import {
   submitOrderReport, REPORT_CONCERN_OPTIONS,
@@ -50,7 +49,6 @@ export function ReportIssueDrawer({ open, onClose, preselected, onSubmitted }: R
   const [subject, setSubject] = useState('');
   const [description, setDescription] = useState('');
   const [transactions, setTransactions] = useState<AuthorizedTransactionOption[]>([]);
-  const [files, setFiles] = useState<File[]>([]);
   const [phase, setPhase] = useState<Phase>({ kind: 'form' });
 
   // Reset to a clean form each time the drawer opens. Preselection seeds both the
@@ -63,7 +61,6 @@ export function ReportIssueDrawer({ open, onClose, preselected, onSubmitted }: R
       setSubject(seed.length === 1 ? `Issue with order ${seed[0].trackingNumber}` : '');
       setDescription('');
       setTransactions(seed);
-      setFiles([]);
       setPhase({ kind: 'form' });
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -84,7 +81,6 @@ export function ReportIssueDrawer({ open, onClose, preselected, onSubmitted }: R
       concernType,
       subject: subject.trim(),
       description: description.trim(),
-      files: files.length ? files : undefined,
     });
     if (res.status === 'ok') {
       onSubmitted?.(res.data);
@@ -187,9 +183,11 @@ export function ReportIssueDrawer({ open, onClose, preselected, onSubmitted }: R
 
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1.5">
-                  Attachments <span className="font-normal text-gray-400">(optional)</span>
+                  Attachments
                 </label>
-                <AttachmentInput value={files} onChange={setFiles} disabled={submitting} />
+                <p className="text-xs text-gray-400 rounded-lg border border-dashed border-gray-200 px-3 py-2">
+                  Attachments aren’t available in this demo integration yet — describe the issue in Details above.
+                </p>
               </div>
             </div>
 

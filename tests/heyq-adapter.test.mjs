@@ -2,10 +2,12 @@
  * Focused contract tests for the Business+ → HeyQ adapter.
  *
  * Two halves:
- *   • The HeyQ customer API path (`heyqCustomerApi` behind `heyqService`) — driven
- *     with a stubbed `window.fetch`, so we assert the request the adapter makes
- *     (identity, URL, config) and the mapping/privacy of the response it returns,
- *     plus the failure modes, without a live HeyQ.
+ *   • The Corporate support-proxy path (`heyqCustomerApi` behind `heyqService`)
+ *     — driven with a stubbed `window.fetch`, so we assert the request the
+ *     adapter makes (identity, URL, idempotency headers) and the mapping/
+ *     privacy of the response it returns, plus the failure modes, without a
+ *     live proxy/Bridge/HeyQ. Every ticket read/write goes to the same-origin
+ *     `/api/support/*` proxy, never a Bridge/Railway origin directly.
  *   • The OMS side (order authorization + the customer-safe snapshot + live
  *     status) — driven against the real `transactionService`, which owns orders.
  *
@@ -17,6 +19,10 @@ import assert from 'node:assert/strict';
 import { startDevServer, stopDevServer, signIn } from './helpers.mjs';
 
 const PORT = 5191;
+// The legacy standalone HeyQ API origin. No longer used by any ticket
+// read/write (those go through /api/support/*) — kept only as the default
+// base for the two DORMANT, unused capabilities (realtime token minting,
+// attachment download URLs). See heyqCustomerApi.ts's module docblock.
 const API_DEFAULT = 'https://heyq-api-production.up.railway.app';
 
 let server;
@@ -118,18 +124,20 @@ after(async () => {
 
 // The page is a live dashboard whose shell also polls the ticket list, so the
 // stub sees background calls too — assert on the RELEVANT request, not the count.
-const customerReads = (calls) => calls.filter((c) => c.method === 'GET' && c.url.includes('/api/customer/tickets'));
-const creates = (calls) => calls.filter((c) => c.method === 'POST' && c.url.endsWith('/api/customer/tickets'));
+const customerReads = (calls) => calls.filter((c) => c.method === 'GET' && c.url.includes('/api/support/tickets'));
+const creates = (calls) => calls.filter((c) => c.method === 'POST' && c.url.endsWith('/api/support/tickets'));
 
 describe('configuration', () => {
-  it('reads tickets from the deployed HeyQ API by default, under /api/customer', async () => {
+  it('reads tickets through the same-origin Corporate support proxy, never Bridge/Railway directly', async () => {
     const { calls } = await withStub((svc) => svc.listMyTickets(), { response: [] });
     const reads = customerReads(calls);
     assert.ok(reads.length >= 1, 'a customer read must be issued');
-    assert.ok(reads[0].url.startsWith(`${API_DEFAULT}/api/customer/tickets`), reads[0].url);
+    assert.ok(reads[0].url.startsWith('/api/support/tickets'), reads[0].url);
+    // Same-origin/relative — never an absolute Bridge/Railway URL.
+    assert.doesNotMatch(reads[0].url, /^https?:\/\//);
   });
 
-  it('exposes the API base url override point', async () => {
+  it('keeps the dormant realtime/attachment base at its legacy default (unused by any live read/write)', async () => {
     const base = await page.evaluate(async () => {
       const api = await import('/src/app/services/heyqCustomerApi.ts');
       return api.getHeyQApiBaseUrl();
@@ -141,7 +149,7 @@ describe('configuration', () => {
 describe('requester identity', () => {
   it('scopes the read to the signed-in identity via query params', async () => {
     const { calls } = await withStub((svc) => svc.listMyTickets(), { response: [] });
-    const url = new URL(customerReads(calls)[0].url);
+    const url = new URL(customerReads(calls)[0].url, 'http://x');
     // Admin session: max@email.com / main (the account scope).
     assert.equal(url.searchParams.get('externalUserId'), 'max@email.com');
     assert.equal(url.searchParams.get('externalOrgId'), 'main');
@@ -215,24 +223,24 @@ describe('common API failures', () => {
   });
 });
 
-describe('requester writes go to HeyQ, then re-read the customer view', () => {
-  it('reply posts to /customer/tickets/:id/messages then re-reads /customer/tickets/:id', async () => {
+describe('requester writes go through the support proxy, then re-read the customer view', () => {
+  it('reply posts to /api/support/tickets/:id/messages then re-reads /api/support/tickets/:id', async () => {
     const { result, calls } = await withStub((svc) => svc.replyToMyTicket('tkt_abc123', 'Any update?'), {
       response: HEYQ_TICKET,
     });
     assert.equal(result.status, 'ok');
-    const post = calls.find((c) => c.method === 'POST' && /\/api\/(customer\/)?tickets\/tkt_abc123\/messages$/.test(c.url));
+    const post = calls.find((c) => c.method === 'POST' && /\/api\/support\/tickets\/tkt_abc123\/messages$/.test(c.url));
     assert.ok(post, 'a reply POST must be issued');
     assert.match(String(post.body), /Any update\?/);
-    const reread = calls.find((c) => c.method === 'GET' && /\/api\/customer\/tickets\/tkt_abc123\?/.test(c.url));
+    const reread = calls.find((c) => c.method === 'GET' && /\/api\/support\/tickets\/tkt_abc123\?/.test(c.url));
     assert.ok(reread, 'the customer view must be re-read after the reply');
   });
 
-  it('reopen posts to /tickets/:id/reopen then re-reads the customer view', async () => {
+  it('reopen posts to /api/support/tickets/:id/reopen then re-reads the customer view', async () => {
     const { result, calls } = await withStub((svc) => svc.reopenMyTicket('tkt_abc123'), { response: HEYQ_TICKET });
     assert.equal(result.status, 'ok');
-    assert.ok(calls.find((c) => c.method === 'POST' && /\/api\/tickets\/tkt_abc123\/reopen$/.test(c.url)));
-    assert.ok(calls.find((c) => c.method === 'GET' && /\/api\/customer\/tickets\/tkt_abc123\?/.test(c.url)));
+    assert.ok(calls.find((c) => c.method === 'POST' && /\/api\/support\/tickets\/tkt_abc123\/reopen$/.test(c.url)));
+    assert.ok(calls.find((c) => c.method === 'GET' && /\/api\/support\/tickets\/tkt_abc123\?/.test(c.url)));
   });
 
   it('a failed reply surfaces the failure without re-reading', async () => {
@@ -242,8 +250,77 @@ describe('requester writes go to HeyQ, then re-read the customer view', () => {
     });
     assert.equal(result.status, 'forbidden');
     // POST issued, but no re-read of this ticket after the failed write.
-    assert.ok(calls.find((c) => c.method === 'POST' && /\/api\/(customer\/)?tickets\/tkt_x\/messages$/.test(c.url)));
-    assert.ok(!calls.find((c) => c.method === 'GET' && /\/api\/customer\/tickets\/tkt_x\?/.test(c.url)));
+    assert.ok(calls.find((c) => c.method === 'POST' && /\/api\/support\/tickets\/tkt_x\/messages$/.test(c.url)));
+    assert.ok(!calls.find((c) => c.method === 'GET' && /\/api\/support\/tickets\/tkt_x\?/.test(c.url)));
+  });
+});
+
+describe('idempotency headers reach the proxy', () => {
+  it('two separate create calls each carry their own, different Idempotency-Key', async () => {
+    const out = await page.evaluate(
+      async ({ src, response }) => {
+        const calls = [];
+        const orig = window.fetch;
+        window.fetch = async (url, init) => {
+          calls.push({ url: String(url), headers: init?.headers ?? {} });
+          return new Response(JSON.stringify(response), { status: 200, headers: { 'Content-Type': 'application/json' } });
+        };
+        try {
+          const api = await import('/src/app/services/heyqCustomerApi.ts');
+          const who = { externalUserId: 'max@email.com', externalOrgId: 'main' };
+          // eslint-disable-next-line no-new-func
+          await new Function('api', 'who', `return (${src})(api, who);`)(api, who);
+          return calls;
+        } finally {
+          window.fetch = orig;
+        }
+      },
+      {
+        src: ((api, who) => Promise.all([
+          api.apiCreateTicket(who, { name: 'Max', email: 'max@email.com', concernType: 'general_inquiry', subject: 's1', description: 'd1' }),
+          api.apiCreateTicket(who, { name: 'Max', email: 'max@email.com', concernType: 'general_inquiry', subject: 's2', description: 'd2' }),
+        ])).toString(),
+        response: { id: 'tkt-x', reference: 'HQ-9', subject: 's', issueType: 'General', status: 'open', priority: 'normal', supportTeam: 'CS', createdAt: '2026-01-01T00:00:00Z', updatedAt: '2026-01-01T00:00:00Z', canReopen: false, messages: [] },
+      },
+    );
+    const posts = out.filter((c) => c.url.endsWith('/api/support/tickets'));
+    assert.equal(posts.length, 2);
+    assert.ok(posts[0].headers['Idempotency-Key'], 'a create must carry an Idempotency-Key');
+    assert.ok(posts[1].headers['Idempotency-Key'], 'a create must carry an Idempotency-Key');
+    assert.notEqual(posts[0].headers['Idempotency-Key'], posts[1].headers['Idempotency-Key'], 'two distinct create calls get distinct keys');
+  });
+
+  it('a retried reply forwards the SAME X-Bridge-Message-Id so Bridge can dedupe it', async () => {
+    const out = await page.evaluate(
+      async ({ src, response }) => {
+        const calls = [];
+        const orig = window.fetch;
+        window.fetch = async (url, init) => {
+          calls.push({ url: String(url), headers: init?.headers ?? {} });
+          return new Response(JSON.stringify(response), { status: 200, headers: { 'Content-Type': 'application/json' } });
+        };
+        try {
+          const api = await import('/src/app/services/heyqCustomerApi.ts');
+          const who = { externalUserId: 'max@email.com', externalOrgId: 'main' };
+          // eslint-disable-next-line no-new-func
+          await new Function('api', 'who', `return (${src})(api, who);`)(api, who);
+          return calls;
+        } finally {
+          window.fetch = orig;
+        }
+      },
+      {
+        src: ((api, who) => Promise.all([
+          api.apiReplyToMyTicket(who, 'tkt1', 'hi', 'msg-uuid-1'),
+          api.apiReplyToMyTicket(who, 'tkt1', 'hi again (retry)', 'msg-uuid-1'),
+        ])).toString(),
+        response: HEYQ_TICKET,
+      },
+    );
+    const posts = out.filter((c) => /\/messages$/.test(c.url));
+    assert.equal(posts.length, 2);
+    assert.equal(posts[0].headers['X-Bridge-Message-Id'], 'msg-uuid-1');
+    assert.equal(posts[1].headers['X-Bridge-Message-Id'], 'msg-uuid-1');
   });
 });
 

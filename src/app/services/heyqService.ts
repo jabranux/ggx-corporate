@@ -5,27 +5,32 @@
  *   • OMS (via `transactionService`) owns orders and shipment/delivery status.
  *   • HeyQ owns tickets: assignment, escalation, messages, status changes,
  *     resolution, reopening, history.
- *   • Business+ owns neither. It is a REQUESTER CLIENT of HeyQ and a read
- *     consumer of OMS.
+ *   • Business+ owns neither. It is a REQUESTER CLIENT of HeyQ (via QuadX
+ *     Bridge) and a read consumer of OMS.
  *
- * Every Business+ ↔ HeyQ interaction goes through this module. The requester
- * reads and writes now hit the deployed HeyQ mock API over its CUSTOMER surface
- * (see `heyqCustomerApi`); HeyQ enforces visibility server-side. The OMS side
- * (order authorization, the customer-safe snapshot, live delivery status) is read
- * through `transactionService`, never from HeyQ and never from page state.
+ * Every Business+ ↔ HeyQ interaction goes through this module. Ticket reads and
+ * writes go through GGX Corporate's own same-origin support proxy
+ * (`/api/support/*`, see `heyqCustomerApi`'s docblock and
+ * docs/migration/ggx-corporate-heyq-live-ticketing.md), which forwards to
+ * QuadX Bridge and attaches the server-only Bridge secret — never the browser.
+ * The OMS side (order authorization, the customer-safe snapshot, live delivery
+ * status) is read through `transactionService`, never from HeyQ and never from
+ * page state.
  *
- * HeyQ customer endpoints used (requester-scoped):
- *   GET  /api/customer/tickets            → listMyTickets
- *   GET  /api/customer/tickets/:id        → getMyTicket
- *   POST /api/tickets/:id/messages        → replyToMyTicket
- *   POST /api/tickets/:id/reopen          → reopenMyTicket
- *   (ticket creation happens in HeyQ's own /contact form — we hand off to it)
+ * Corporate proxy routes used (requester-scoped, all same-origin):
+ *   GET  /api/support/tickets                → listMyTickets
+ *   GET  /api/support/tickets/:id             → getMyTicket
+ *   POST /api/support/tickets                 → submitOrderReport (create)
+ *   POST /api/support/tickets/:id/messages    → replyToMyTicket
+ *   POST /api/support/tickets/:id/reopen      → reopenMyTicket
  *
  * ── What this adapter deliberately does NOT do ─────────────────────────────
  * It exposes no agent/internal surface. Internal notes, assignee identity, team
  * queue, SLA policy, support tier and escalation state are dropped by HeyQ's
  * server-side projection and are never requested here — they must never reach a
- * Business+ page. Agent actions belong to the HeyQ agent app.
+ * Business+ page. Agent actions belong to the HeyQ agent app. It also sends no
+ * attachments — the approved Bridge contract is text-only (see
+ * `heyqCustomerApi`'s docblock).
  */
 
 import { getTransactionById, getTransactionsBySubaccountId, statusConfig, serviceTypeLabel } from './transactionService';
@@ -420,15 +425,15 @@ export interface OrderReportInput {
   concernType: HeyQConcernType;
   subject: string;
   description: string;
-  /** Files attached in the report drawer (uploaded with the ticket on submit). */
-  files?: File[];
 }
 
 /**
  * Authorized download/preview URL for one of a ticket's attachments, for the
- * signed-in requester. Resolves identity through the same path as every other
- * read; returns null when unauthenticated. `inline` requests inline rendering
- * (HeyQ serves only images/PDFs inline and forces a download otherwise).
+ * signed-in requester. DORMANT: the approved Bridge contract is text-only, so
+ * no ticket ever carries an attachment id for this to be called with in
+ * practice — kept only so a future attachment-capable Bridge doesn't need this
+ * URL-building logic rebuilt. Resolves identity through the same path as every
+ * other read; returns null when unauthenticated.
  */
 export async function getAttachmentUrl(ticketId: string, attachmentId: string, inline = false): Promise<string | null> {
   const who = await getRequesterIdentity();
@@ -481,7 +486,6 @@ export async function submitOrderReport(input: OrderReportInput): Promise<HeyQRe
     subject: input.subject,
     description: input.description,
     linkedTransactions: linkedTransactions.length ? linkedTransactions : undefined,
-    files: input.files,
   });
 }
 
@@ -501,16 +505,20 @@ export async function getMyTicket(id: string): Promise<HeyQResult<CustomerTicket
   return apiGetMyTicket(who, id);
 }
 
-/** Post a public reply, optionally with file attachments. Replying to a
- * resolved/closed ticket reopens it in HeyQ. */
+/**
+ * Post a public reply (text-only — see the module docblock). Replying to a
+ * resolved/closed ticket reopens it in HeyQ. `messageId`, when given, is
+ * forwarded as the Bridge idempotency identifier for this reply — the caller
+ * reuses the same id across a retry of the same logical send.
+ */
 export async function replyToMyTicket(
   id: string,
   body: string,
-  files?: File[],
+  messageId?: string,
 ): Promise<HeyQResult<CustomerTicket>> {
   const who = await getRequesterIdentity();
   if (!who) return { status: 'forbidden' };
-  return apiReplyToMyTicket(who, id, body, files);
+  return apiReplyToMyTicket(who, id, body, messageId);
 }
 
 /** Reopen a resolved/closed ticket. HeyQ owns the resulting state transition. */
@@ -520,7 +528,15 @@ export async function reopenMyTicket(id: string): Promise<HeyQResult<CustomerTic
   return apiReopenMyTicket(who, id);
 }
 
-// ── Realtime (live ticket conversation over the HeyQ WebSocket channel) ───────
+// ── Realtime (DORMANT — live ticket conversation over the HeyQ WebSocket) ─────
+//
+// UNUSED by the running app. The approved QuadX Bridge contract for this POC
+// is REST + 5-second polling only (see hooks/useTicketConversation.ts); it has
+// no realtime/WebSocket route. This section (and heyqRealtimeClient.ts) is
+// left in place, still pointed at the legacy standalone HeyQ API origin, as a
+// documented dormant capability rather than deleted — nothing in the running
+// app calls it, so it never reaches HeyQ/Bridge from the browser. See
+// docs/migration/ggx-corporate-heyq-live-ticketing.md.
 //
 // HeyQ owns the channel and remains the source of truth (persist-first, then
 // broadcast). Business+ is a CUSTOMER subscriber to a single authorized ticket.

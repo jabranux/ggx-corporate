@@ -89,11 +89,12 @@ export async function captureHandoffs(page) {
 }
 
 /**
- * Add a HeyQ-customer-API fetch stub to a page, so the UI renders real API-shaped
- * tickets without a live HeyQ. Intercepts GET /api/customer/tickets (list) and
- * /api/customer/tickets/:id (detail); everything else falls through to the real
- * fetch. Registered as an init script, so it must be added BEFORE the navigation
- * it should affect (no reload here).
+ * Add a Corporate-support-proxy fetch stub to a page, so the UI renders real
+ * API-shaped tickets without a live proxy/Bridge/HeyQ. Intercepts
+ * GET /api/support/tickets (list) and /api/support/tickets/:id (detail);
+ * everything else falls through to the real fetch. Registered as an init
+ * script, so it must be added BEFORE the navigation it should affect (no
+ * reload here).
  */
 export async function addHeyQApiStubScript(page, tickets) {
   await page.addInitScript((tickets) => {
@@ -106,7 +107,7 @@ export async function addHeyQApiStubScript(page, tickets) {
       const path = new URL(u, 'http://x').pathname;
 
       // Create (embedded report drawer). Body is JSON for text-only submissions.
-      if (method === 'POST' && path.endsWith('/api/customer/tickets')) {
+      if (method === 'POST' && path.endsWith('/api/support/tickets')) {
         let body = {};
         try { body = init?.body ? JSON.parse(init.body) : {}; } catch { body = {}; }
         const linkedTransactions = body.linkedTransactions;
@@ -122,8 +123,8 @@ export async function addHeyQApiStubScript(page, tickets) {
       }
 
       // Reads.
-      if (u.includes('/api/customer/tickets')) {
-        const m = path.match(/\/api\/customer\/tickets\/([^/]+)$/);
+      if (u.includes('/api/support/tickets')) {
+        const m = path.match(/\/api\/support\/tickets\/([^/]+)$/);
         if (m) {
           const id = decodeURIComponent(m[1]);
           const t = tickets.find((x) => x.id === id || x.reference === id);

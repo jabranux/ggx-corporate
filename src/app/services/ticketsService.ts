@@ -156,10 +156,11 @@ export async function getTicketById(id: string): Promise<HeyQResult<CustomerTick
   return getMyTicket(id);
 }
 
-/** Post a public reply, optionally with attachments. In HeyQ this reopens a
- * resolved/closed ticket. */
-export async function replyToTicket(id: string, body: string, files?: File[]): Promise<HeyQResult<CustomerTicket>> {
-  return replyToMyTicket(id, body, files);
+/** Post a public reply (text-only). In HeyQ this reopens a resolved/closed
+ * ticket. `messageId`, when given, is the Bridge idempotency identifier for
+ * this reply (see `heyqService.replyToMyTicket`). */
+export async function replyToTicket(id: string, body: string, messageId?: string): Promise<HeyQResult<CustomerTicket>> {
+  return replyToMyTicket(id, body, messageId);
 }
 
 /** Reopen a resolved/closed ticket. */

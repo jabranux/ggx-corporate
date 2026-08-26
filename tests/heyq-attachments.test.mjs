@@ -1,14 +1,21 @@
 /**
  * Attachment support for the Business+ ↔ HeyQ integration (client side).
  *
+ * The approved QuadX Bridge contract for this POC is TEXT-ONLY — attachment
+ * byte uploads are rejected with 400, so the app no longer offers an
+ * attachment picker (`AttachmentInput` is unwired from the report drawer and
+ * the reply composer) and the adapter no longer builds a multipart body for
+ * ticket creation or replies. See docs/migration/ggx-corporate-heyq-live-ticketing.md.
+ *
  * Runs INSIDE the page (Vite serves the TS modules) so we exercise the real
- * adapter + shared attachment policy the app uses. Two halves:
- *   • the shared policy (allowlist / size / double-extension / MIME mismatch),
- *   • the adapter's UPLOAD path — `apiCreateTicket` / `apiReplyToMyTicket` must
- *     send a real multipart body carrying the File(s); `buildAttachmentUrl` must
- *     produce an authorized, identity-scoped download URL; and the realtime
- *     projection must carry an attachment's `id` through so the other side can
- *     download a file that arrives live.
+ * adapter + shared attachment policy the app uses. Three halves:
+ *   • the shared policy module (allowlist / size / double-extension / MIME
+ *     mismatch) — still present and correct, just unused by any wired-up UI;
+ *   • the adapter's create/reply paths — confirm they are JSON-only now, never
+ *     multipart, since there is no `files` parameter left to carry them;
+ *   • `buildAttachmentUrl` + the realtime attachment-id projection — DORMANT
+ *     (see heyqCustomerApi.ts's module docblock): correct in isolation, but no
+ *     Bridge ticket will ever carry an attachment id in practice.
  */
 import { after, before, describe, it } from 'node:test';
 import assert from 'node:assert/strict';
@@ -42,7 +49,7 @@ const withStub = (fn, { response = null, status = 200 } = {}) =>
       const calls = [];
       const orig = window.fetch;
       window.fetch = async (url, init) => {
-        const rec = { url: String(url), method: init?.method ?? 'GET', form: null };
+        const rec = { url: String(url), method: init?.method ?? 'GET', form: null, body: init?.body instanceof FormData ? null : (init?.body ?? null) };
         if (init?.body instanceof FormData) {
           rec.form = { fields: {}, files: [] };
           for (const [k, v] of init.body.entries()) {
@@ -109,50 +116,28 @@ describe('attachment policy (shared with HeyQ)', () => {
   });
 });
 
-// ── adapter upload paths ─────────────────────────────────────────────────────
+// ── adapter create/reply are JSON-only (no attachment upload path) ────────────
 
-describe('adapter uploads a real multipart body', () => {
-  it('apiCreateTicket sends fields + files as multipart when files are attached', async () => {
-    const { calls } = await withStub(async (WHO) => {
-      const api = await import('/src/app/services/heyqCustomerApi.ts');
-      const file = new File([new Uint8Array([1, 2, 3])], 'receipt.pdf', { type: 'application/pdf' });
-      return api.apiCreateTicket(WHO, {
-        name: 'Max', email: WHO.externalUserId, concernType: 'delivery_delay',
-        subject: 's', description: 'd', files: [file],
-      });
-    }, { response: TICKET_RESPONSE() });
-
-    const create = calls.find((c) => c.method === 'POST' && c.url.endsWith('/api/customer/tickets'));
-    assert.ok(create, 'a create POST must be issued');
-    assert.ok(create.form, 'the create must be multipart form-data');
-    assert.equal(create.form.fields.externalUserId, 'max@email.com');
-    assert.equal(create.form.files.length, 1);
-    assert.equal(create.form.files[0].field, 'files');
-    assert.equal(create.form.files[0].name, 'receipt.pdf');
-    assert.equal(create.form.files[0].type, 'application/pdf');
-  });
-
-  it('apiCreateTicket stays JSON (no multipart) when there are no files', async () => {
+describe('create and reply never send a multipart body — attachments are disabled', () => {
+  it('apiCreateTicket has no files parameter and always posts plain JSON to the support proxy', async () => {
     const { calls } = await withStub(async (WHO) => {
       const api = await import('/src/app/services/heyqCustomerApi.ts');
       return api.apiCreateTicket(WHO, { name: 'Max', email: WHO.externalUserId, concernType: 'delivery_delay', subject: 's', description: 'd' });
     }, { response: TICKET_RESPONSE() });
-    const create = calls.find((c) => c.method === 'POST' && c.url.endsWith('/api/customer/tickets'));
-    assert.ok(create && create.form === null, 'no-file create must be plain JSON');
+    const create = calls.find((c) => c.method === 'POST' && c.url.endsWith('/api/support/tickets'));
+    assert.ok(create, 'a create POST must be issued');
+    assert.equal(create.form, null, 'creation is always JSON, never multipart');
   });
 
-  it('apiReplyToMyTicket sends the reply body + files as multipart', async () => {
+  it('apiReplyToMyTicket has no files parameter and always posts plain JSON to the support proxy', async () => {
     const { calls } = await withStub(async (WHO) => {
       const api = await import('/src/app/services/heyqCustomerApi.ts');
-      const file = new File([new Uint8Array([9])], 'evidence.jpg', { type: 'image/jpeg' });
-      return api.apiReplyToMyTicket(WHO, 'tkt_att', 'here is proof', [file]);
-    }, { response: TICKET_RESPONSE({ messages: [{ id: 'm1', from: 'you', authorLabel: 'You', body: 'here is proof', createdAt: '2026-07-17T00:00:00Z', attachments: [{ id: 'a1', name: 'evidence.jpg', size: 1, type: 'image/jpeg' }] }] }) });
-
-    const reply = calls.find((c) => c.method === 'POST' && /\/tickets\/tkt_att\/messages$/.test(c.url));
+      return api.apiReplyToMyTicket(WHO, 'tkt_att', 'here is my update, no file needed');
+    }, { response: TICKET_RESPONSE() });
+    const reply = calls.find((c) => c.method === 'POST' && /\/api\/support\/tickets\/tkt_att\/messages$/.test(c.url));
     assert.ok(reply, 'a reply POST must be issued');
-    assert.ok(reply.form, 'the reply must be multipart form-data');
-    assert.equal(reply.form.fields.body, 'here is proof');
-    assert.equal(reply.form.files[0].name, 'evidence.jpg');
+    assert.equal(reply.form, null, 'a reply is always JSON, never multipart');
+    assert.equal(JSON.parse(reply.body ?? '{}').body, 'here is my update, no file needed');
   });
 });
 

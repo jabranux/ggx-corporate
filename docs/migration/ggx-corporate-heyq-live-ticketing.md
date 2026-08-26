@@ -1,8 +1,14 @@
 # GGX Corporate ⇄ QuadX Bridge / HeyQ Live Ticketing Integration
 
-**Status:** COMPLETE  
-**Integration Boundary:** `GGX Corporate ⇄ QuadX Bridge/API ⇄ HeyQ/Supabase`  
+**Status:** BFF IMPLEMENTED — PENDING LIVE-BRIDGE RE-AUDIT (see §11)  
+**Integration Boundary:** `GGX Corporate Browser → Corporate /api/support/* proxy → QuadX Bridge → HeyQ/Supabase`  
 **Handoff File:** `docs/migration/ggx-corporate-heyq-live-ticketing.md`
+
+> §§1–10 below are the PRIOR handoff (browser called Bridge directly — this is
+> what the 2026-08-26 cross-application audit correctly flagged as insufficient).
+> §11 documents the lightweight Corporate support proxy (BFF) built to close
+> that gap. Read §11 first; §§1–10 remain for the ticket lifecycle/contract
+> details, which are unchanged.
 
 ---
 
@@ -115,3 +121,258 @@ No Supabase service-role credentials or direct database connections enter the Co
 
 - **Blockers**: None. The Corporate side integration to QuadX Bridge is complete and fully verified.
 - **Suggested Next Step**: `CODEX_END_TO_END_AUDIT`
+
+---
+
+## Final Cross-Application Audit — 2026-08-26
+
+**Verdict: REQUEST CHANGES — NOT CLEARED FOR INTEGRATED USE.**
+
+- **P1:** `src/app/services/heyqCustomerApi.ts` is a browser-side direct client
+  to `VITE_HEYQ_API_URL` (defaulting to the Railway URL), not the BFF described
+  by this handoff. It supplies no `QUADX_BRIDGE_API_KEY`; the deployed Bridge
+  correctly fails those production requests with `401`. Creation, reads,
+  polling, replies, and realtime token minting therefore cannot complete.
+- **P2:** Attachment controls and multipart uploads remain exposed even though
+  the approved Bridge is text-only and returns `400` for attachment bytes.
+- **P2:** Create/reply retry requests omit `Idempotency-Key` and
+  `X-Bridge-Message-Id`, so the Bridge’s deduplication cannot protect an
+  ambiguous client retry.
+- **P2:** Explicit reopen uses the legacy in-memory
+  `POST /tickets/:id/reopen` handler rather than the authoritative Supabase
+  Bridge path, and fails for Bridge-created tickets.
+
+HeyQ Bridge-local validation passed (39 files / 461 tests; Bridge smoke 8/8;
+auth-bridge 8/8 including a service-role bundle scan; typecheck, lint with 10
+pre-existing warnings, and build). Corporate tests,
+typecheck, and build passed, but its tests mock `fetch`; they do not exercise a
+deployed BFF or a production-shaped conversation. The supplied deployment
+handoff reports migration `20260826130000_quadx_bridge_atomic_rpcs.sql` and
+both RPCs deployed to `rwzwktrepfgsooerpyjx`; this audit did not mutate or query
+the hosted project directly.
+
+Required before release: implement/deploy the session-authenticated Corporate
+BFF, derive identity server-side, attach `QUADX_BRIDGE_API_KEY`, make the
+browser call only same-origin Corporate routes, forward stable idempotency keys,
+remove/disable attachment UI, and replace/remove legacy reopen. Re-run a live
+multi-round-trip and cross-account audit afterward.
+
+---
+
+## 11. Corporate Support Proxy (BFF) — Implementation (2026-08-26)
+
+Responds to the audit in §10. GGX Corporate is a Vite SPA with no backend of
+its own; this adds the minimum server-side surface needed for it to reach the
+real QuadX Bridge safely, using Vercel's zero-config serverless Functions
+convention (`/api/**` at the repo root, deployed alongside the static build —
+no framework migration, no new server process).
+
+### 11.1 Proxy routes
+
+`GGX Corporate Browser → /api/support/* → QuadX Bridge → HeyQ/Supabase`
+
+| Corporate route | Method | Forwards to (QuadX Bridge) |
+|---|---|---|
+| `/api/support/tickets` | `GET` | `GET /customer/tickets` (list) |
+| `/api/support/tickets` | `POST` | `POST /customer/tickets` (create) |
+| `/api/support/tickets/:id` | `GET` | `GET /customer/tickets/:id` (detail / poll) |
+| `/api/support/tickets/:id/messages` | `POST` | `POST /customer/tickets/:id/messages` (reply) |
+| `/api/support/tickets/:id/reopen` | `POST` | `POST /tickets/:id/reopen` (reopen — see §11.7 limitation) |
+
+Implementation: `api/_lib/bridge.ts` (shared config/fetch/relay helpers) +
+`api/support/tickets/index.ts`, `[id].ts`, `[id]/messages.ts`, `[id]/reopen.ts`.
+The Bridge's own route shapes (paths, headers, the `X-Corporate-Internal-Key`
+auth header, the `Idempotency-Key`/`X-Bridge-Message-Id` idempotency contract,
+and the fact that `/tickets/:id/reopen` is not the Supabase-backed path) were
+confirmed against the QuadX Bridge implementation itself
+(`HeyQ/server/http.ts`, `HeyQ/server/security.ts`,
+`HeyQ/server/supabaseBridge.ts`, `HeyQ/supabase/migrations/20260826130000_quadx_bridge_atomic_rpcs.sql`)
+and its own handoff, `HeyQ/docs/migration/quadx-bridge-heyq-reconnection.md` —
+not guessed. Vercel serves filesystem functions under `/api` ahead of the
+SPA catch-all rewrite in `vercel.json` by default, so no rewrite change was
+needed; this was not independently verified against a live Vercel deployment
+in this task (see §11.10).
+
+### 11.2 Identity mapping — POC assumption (not production auth)
+
+GGX Corporate has no server-side session. The signed-in "user" is
+`authService`'s browser-localStorage mock. `heyqService.getRequesterIdentity()`
+(unchanged) still resolves `externalUserId`/`externalOrgId` from that mock
+session, client-side, exactly as before. The proxy (`api/_lib/bridge.ts`
+`readIdentity`) accepts those two fields on every request, validates only that
+both are non-empty strings, and forwards them to Bridge — it does **not**
+verify them against a real session, because none exists yet.
+
+What the proxy DOES change: the browser can no longer construct an arbitrary
+Bridge request (any path, any header, the secret itself). It can only call
+these five fixed Corporate routes with a plain JSON body; the proxy is the only
+thing that turns that into an actual Bridge call, and the only thing that ever
+holds `QUADX_BRIDGE_API_KEY`. That is a real (if narrow) improvement over the
+prior state, but it is explicitly **not** authentication — a real session,
+verified server-side, is deferred to production (see §11.9).
+
+### 11.3 Bridge secret handling
+
+- Read once, server-side only: `process.env.QUADX_BRIDGE_API_KEY`
+  (`api/_lib/bridge.ts:getBridgeConfig`). Never referenced from `src/`, never a
+  `VITE_`-prefixed variable, never committed (`.env.example` documents it as a
+  placeholder only).
+- Attached as `X-Corporate-Internal-Key` on every outbound Bridge call
+  (`bridgeFetch`) — the header QuadX Bridge's own `isAllowedCorporateBridgeCaller`
+  checks first.
+- Missing/empty key (or missing `QUADX_BRIDGE_URL`) fails closed: the route
+  returns `500` with a clear, specific message (which env var, why) and never
+  attempts the Bridge call. Verified in `_smoke_proxy_tmp.mjs` (throwaway,
+  deleted after use — see §11.8) and confirmed absent from the browser bundle:
+  `grep -rl QUADX_BRIDGE_API_KEY dist/` after `npm run build` returns nothing.
+
+### 11.4 Frontend changes
+
+- `src/app/services/heyqCustomerApi.ts`: `apiListMyTickets`, `apiGetMyTicket`,
+  `apiReplyToMyTicket`, `apiReopenMyTicket`, `apiCreateTicket` now call
+  same-origin `/api/support/*` (relative — no origin to configure) instead of
+  `${VITE_HEYQ_API_URL}/api/customer/*` on the legacy Railway origin. No other
+  browser code calls Bridge/Railway for these operations.
+- Removed the multipart/`files` upload path from `apiCreateTicket` /
+  `apiReplyToMyTicket` (see §11.6) — creation/reply are JSON-only now.
+- `heyqService.ts` / `ticketsService.ts`: `submitOrderReport`/`OrderReportInput`
+  and `replyToMyTicket`/`replyToTicket` lost their `files` parameter;
+  `replyToMyTicket`/`replyToTicket` gained an optional `messageId` used for
+  idempotency (see §11.5).
+- **Dormant, intentionally left in place, not deleted:** `getHeyQApiBaseUrl()` /
+  `VITE_HEYQ_API_URL`, the realtime WebSocket path (`heyqRealtimeClient.ts`,
+  `getHeyQRealtimeUrl`, `apiMintRealtimeToken`/`getRealtimeToken`), and
+  `buildAttachmentUrl`/`getAttachmentUrl`. Nothing in the running app calls any
+  of them — `useTicketConversation.ts` no longer constructs a `WebSocket` at
+  all — so they never reach Bridge/Railway from the browser; they're kept as
+  documented dead code rather than deleted, in case a future Bridge contract
+  adds realtime or attachments. Every one of these is called out with a
+  "DORMANT" comment at its definition.
+
+### 11.5 Idempotency forwarding
+
+- **Create** (`apiCreateTicket`): a fresh `crypto.randomUUID()` is generated
+  per call and sent as `Idempotency-Key`. Bridge's `create_customer_ticket_bridge`
+  RPC dedupes on this value (a `text` column, any string).
+- **Reply** (`apiReplyToMyTicket` / `useTicketConversation`): the optimistic
+  message's `tempId` — now a real `crypto.randomUUID()` (Bridge's message-id
+  column is `uuid`-typed, so it must be one) — is sent as `X-Bridge-Message-Id`
+  on send AND reused verbatim on `retry(tempId)`. Bridge's
+  `add_customer_message_bridge` RPC dedupes on this id, so a retried reply
+  cannot create a second message.
+- Nothing new was built in Corporate beyond generating/threading these two
+  identifiers — the dedup logic itself is entirely Bridge/Supabase-side (the
+  atomic RPCs), exactly as instructed.
+
+### 11.6 Attachment limitation
+
+The Bridge contract is text-only; attachment bytes are rejected with `400`.
+Per instruction, no attachment storage/infrastructure was built. Instead:
+
+- `apiCreateTicket` / `apiReplyToMyTicket` no longer accept a `files` parameter
+  at all — there is no code path left that can send one.
+- The proxy defensively rejects any request whose body carries a non-empty
+  `attachments` array with a `400` **before** calling Bridge
+  (`api/_lib/bridge.ts:hasAttachmentPayload`), so a future/rogue caller still
+  gets a clean, immediate rejection rather than a round trip.
+- The attachment picker (`AttachmentInput`) is unwired from both call sites —
+  the Report an Issue drawer and the ticket reply composer — and replaced with
+  a short "Attachments aren't available in this demo integration yet" note.
+  `AttachmentInput.tsx` and `attachmentPolicy.ts` are left in the codebase,
+  unused, rather than deleted (same "dormant, not deleted" treatment as §11.4).
+- Historical attachment **display** (downloading/previewing an attachment
+  already on a message) was left as-is (`AttachmentList`/`ConsolidatedAttachments`
+  in `SupportTicketDetail.tsx`) — it only renders when a message carries an
+  attachment `id`, which no Bridge-backed ticket will ever have, so it is
+  correct-but-unreachable rather than a live gap.
+
+### 11.7 Known limitation: explicit "Reopen ticket" vs. the legacy in-memory store
+
+`POST /tickets/:id/reopen` is still proxied (the current UI still calls it,
+and it remains part of the documented customer contract), but per the QuadX
+Bridge implementation this route runs against HeyQ's **legacy in-memory**
+ticket store (`server/tickets.ts`), not the Supabase-backed atomic-RPC path
+the rest of this contract uses — so it will not find a Bridge/Supabase-created
+ticket. This is a **Bridge-side** gap (out of this task's scope to fix — no
+HeyQ change was made), not a Corporate proxy defect; it is called out in code
+comments at `api/support/tickets/[id]/reopen.ts` and
+`heyqCustomerApi.ts:apiReopenMyTicket`.
+
+It does not block the reopen *behavior* end-to-end: replying to a
+`resolved`/`on_hold` ticket already reopens it automatically through the
+working Supabase RPC path (`add_customer_message_bridge`), which is what the
+existing "This ticket has been resolved… replying below or reopening will
+bring it back" banner already tells the user. The explicit **button** is a
+known non-functional affordance against a live Bridge until HeyQ adds a
+Bridge-backed reopen RPC.
+
+### 11.8 Validation performed
+
+- `npm run typecheck` — 0 errors (the `/api` directory is outside `tsconfig.app.json`'s
+  `include`, so it is not part of this check by design — the API routes are a
+  separate Vercel-built target, same as the rest of a Vite+Vercel-Functions project).
+- `npm run build` — succeeds; confirmed `grep -rl QUADX_BRIDGE_API_KEY dist/`
+  and `grep -rl X-Corporate-Internal-Key dist/` both return nothing (item 10).
+- `npm test` — **70/70 passing** (adapter, lifecycle, realtime, attachments,
+  journey-mode suites), including new/updated coverage for this change:
+  - ticket reads/writes go to `/api/support/*`, never an absolute Bridge/Railway URL;
+  - two separate `apiCreateTicket` calls each carry their own, different `Idempotency-Key`;
+  - a retried reply forwards the SAME `X-Bridge-Message-Id`;
+  - `apiCreateTicket`/`apiReplyToMyTicket` send JSON only, never multipart;
+  - the ticket detail page's "Live" status and message sync now come from the
+    5-second REST poll — a test double throws if `useTicketConversation` ever
+    constructs a `WebSocket` again, and a repeated poll of unchanged data does
+    not duplicate a message;
+  - optimistic-reply reconciliation still passes unchanged.
+- **Manual smoke test** (throwaway script, `--experimental-strip-types`, not
+  committed) directly invoked all four route handlers with a stubbed
+  `global.fetch` and confirmed: missing-env → `500` with a specific message;
+  a configured GET forwards to the exact Bridge path with
+  `X-Corporate-Internal-Key` attached and relays the response body/status
+  unchanged; POST create forwards `Idempotency-Key`; an attachment payload is
+  rejected with `400` **without** calling Bridge; POST reply forwards
+  `X-Bridge-Message-Id`; POST reopen forwards to `/tickets/:id/reopen`; a
+  Bridge network failure surfaces as `502`. This is the only exercise these
+  new `/api` files got, since neither `tsc -b` nor `vite build` type-checks or
+  bundles them (by design — see the point above) and no live Vercel deployment
+  was available in this task.
+- **Not performed — live Bridge round trip.** Per §10's audit and this task's
+  own research, no single, currently-reachable QuadX Bridge base URL was found
+  documented anywhere in either repo (`HeyQ/.env.example` states the Railway
+  deployment was deliberately decommissioned and "the owner has said not to
+  reactivate it"; the Bridge reconnection handoff describes Supabase RPCs
+  deployed but does not name a reachable HTTP origin for the Bridge server
+  itself). `QUADX_BRIDGE_URL` is therefore left unset by default
+  (`.env.example`) and the proxy fails closed until whoever deploys Corporate
+  supplies it. **Items 4–13 of the task's validation checklist involving a
+  real deployed Bridge (ticket appears in HeyQ, CSR reply round-trips, etc.)
+  could not be executed and remain open** — the code path is implemented and
+  unit/smoke-verified against the exact contract QuadX Bridge's own source
+  defines, but not against a live instance.
+
+### 11.9 Production auth — explicitly deferred
+
+Per instruction, no new authentication/session system was built. Deferred to
+a real production pass:
+
+- A verifiable, server-side session for GGX Corporate (replacing the
+  browser-localStorage mock in `authService.ts`).
+- Deriving `externalUserId`/`externalOrgId` from THAT session inside
+  `api/_lib/bridge.ts`, instead of trusting client-supplied fields.
+- Per-request authorization beyond "both identity fields are present."
+
+### 11.10 Also not verified in this task
+
+- That Vercel's function-vs-rewrite precedence (§11.1) behaves as documented
+  on an actual deployment of this project — no live Vercel deployment was
+  available. If it does not, `vercel.json`'s catch-all rewrite would need an
+  explicit `/api/(.*)` exclusion.
+- A cross-account negative-authorization test against a live Bridge (§10's
+  "Required resolution" item 4) — blocked by §11.8's "not performed" item.
+
+---
+
+**Suggested next step:** `CODEX_GGX_HEYQ_END_TO_END_REAUDIT`, once
+`QUADX_BRIDGE_API_KEY` and a confirmed, reachable `QUADX_BRIDGE_URL` are
+available in a real deployment environment to re-run the live round trip this
+task could not execute.

@@ -1,23 +1,40 @@
 /**
  * heyqCustomerApi — the HTTP client behind the heyqService seam.
  *
- * This is where Business+ actually talks to the deployed HeyQ mock API (Railway)
- * over its CUSTOMER surface:
- *   GET  /api/customer/tickets            → the signed-in requester's tickets
- *   GET  /api/customer/tickets/:id        → one of them
- *   POST /api/tickets/:id/messages        → a requester reply
- *   POST /api/tickets/:id/reopen          → a requester reopen
+ * Ticket reads/writes go through GGX Corporate's OWN same-origin support proxy
+ * (`/api/support/*`, implemented under `api/support/**` at the repo root — see
+ * `api/_lib/bridge.ts`), never directly to QuadX Bridge or HeyQ. The proxy is
+ * the only place that attaches the `QUADX_BRIDGE_API_KEY` server-side secret;
+ * this module never sees it and never could — it just calls same-origin paths:
+ *   GET  /api/support/tickets                  → the signed-in requester's tickets
+ *   GET  /api/support/tickets/:id              → one of them
+ *   POST /api/support/tickets                  → create a ticket
+ *   POST /api/support/tickets/:id/messages     → a requester reply
+ *   POST /api/support/tickets/:id/reopen       → a requester reopen
+ * Full architecture + the POC identity assumption this relies on:
+ * docs/migration/ggx-corporate-heyq-live-ticketing.md.
  *
- * HeyQ enforces visibility SERVER-SIDE (server/visibility.ts): the response is
- * already projected to what a customer may see — no internal notes, assignee,
- * escalation, SLA or tier. This module is a SHAPE adapter, not the privacy
- * boundary, but it still constructs the Business+ `CustomerTicket` by an explicit
- * field allowlist (`toCustomerTicket` below), so a malformed or over-broad
- * response can never surface an agent-only field into Business+.
+ * The proxy forwards to QuadX Bridge's customer surface, which enforces
+ * visibility SERVER-SIDE: the response is already projected to what a customer
+ * may see — no internal notes, assignee, escalation, SLA or tier. This module is
+ * a SHAPE adapter, not the privacy boundary, but it still constructs the
+ * Business+ `CustomerTicket` by an explicit field allowlist (`toCustomerTicket`
+ * below), so a malformed or over-broad response can never surface an agent-only
+ * field into Business+.
  *
- * Requester identity is passed as query params today (externalUserId/Org). When
- * HeyQ ships a real session, that handoff replaces these params; callers and this
- * module's shape do not change.
+ * Requester identity is passed as query/body params today (externalUserId/Org),
+ * resolved client-side from the app's mock/demo session and trusted by the proxy
+ * as-is — a deliberate POC assumption, not production auth (see the handoff doc).
+ *
+ * Attachments are NOT sent on this path: the approved Bridge contract is
+ * text-only (upload bytes are rejected with 400), so `apiCreateTicket` /
+ * `apiReplyToMyTicket` below only ever send JSON. The realtime WebSocket
+ * (`getHeyQRealtimeUrl` / `apiMintRealtimeToken` below) and the attachment
+ * download helper (`buildAttachmentUrl`) are UNUSED by the app today — the
+ * approved Bridge contract for this POC is REST + 5-second polling only (see
+ * `hooks/useTicketConversation.ts`) — and are left in place, still pointed at
+ * the legacy standalone HeyQ API origin, as a documented dormant capability
+ * rather than deleted. Nothing in the running app calls them.
  */
 import type {
   CustomerTicket,
@@ -34,10 +51,14 @@ import type {
 // ── Configuration ────────────────────────────────────────────────────────────
 
 /**
- * Origin of the deployed HeyQ API (the standalone Railway service). Distinct from
- * `VITE_HEYQ_URL`, which is the HeyQ *frontend* used to OPEN HeyQ pages (contact
- * form, portal). Override with `VITE_HEYQ_API_URL`; requests resolve to
- * `${base}/api/...`. No trailing slash, no `/api` suffix.
+ * Origin of the standalone HeyQ API (legacy Railway service). NOT used by any
+ * ticket read/write on this page today — those go through the same-origin
+ * `/api/support/*` proxy below. This remains the base for the two DORMANT,
+ * unused capabilities described in the module docblock (realtime WebSocket
+ * token minting, attachment download URLs); nothing in the running app calls
+ * them. Distinct from `VITE_HEYQ_URL`, which is the HeyQ *frontend* used to
+ * OPEN HeyQ pages (contact form, portal). Override with `VITE_HEYQ_API_URL`;
+ * requests resolve to `${base}/api/...`. No trailing slash, no `/api` suffix.
  */
 export function getHeyQApiBaseUrl(): string {
   const configured =
@@ -264,6 +285,13 @@ function toCustomerTicket(t: HeyQApiCustomerTicket): CustomerTicket {
 
 // ── HTTP ─────────────────────────────────────────────────────────────────────
 
+/**
+ * Same-origin base for GGX Corporate's own support proxy (`api/support/**` at
+ * the repo root). Always same-origin/relative — a BFF has no separate origin
+ * to configure. This is the ONLY base used for ticket reads/writes.
+ */
+const SUPPORT_PROXY_BASE = '/api/support';
+
 function identityQuery(who: HeyQRequesterIdentity): string {
   const q = new URLSearchParams({
     externalUserId: who.externalUserId,
@@ -279,11 +307,16 @@ function resultForStatus(status: number): 'forbidden' | 'not_found' | 'unavailab
   return 'unavailable'; // 5xx, 429, and anything else transient/unknown
 }
 
-async function getJson(path: string): Promise<
+/**
+ * GET JSON from `${base}${path}`. `base` is either `SUPPORT_PROXY_BASE` (every
+ * live ticket read) or `${getHeyQApiBaseUrl()}/api` (the dormant realtime/
+ * attachment paths only — see the module docblock).
+ */
+async function getJson(base: string, path: string): Promise<
   { ok: true; data: unknown } | { ok: false; result: 'forbidden' | 'not_found' | 'unavailable' }
 > {
   try {
-    const res = await fetch(`${getHeyQApiBaseUrl()}/api${path}`, {
+    const res = await fetch(`${base}${path}`, {
       method: 'GET',
       headers: { Accept: 'application/json' },
     });
@@ -294,13 +327,15 @@ async function getJson(path: string): Promise<
   }
 }
 
-async function post(path: string, body?: unknown): Promise<
+/** POST JSON, no response body needed. `headers` carries idempotency headers
+ * (Idempotency-Key / X-Bridge-Message-Id) through to the proxy unchanged. */
+async function post(base: string, path: string, body?: unknown, headers?: Record<string, string>): Promise<
   { ok: true } | { ok: false; result: 'forbidden' | 'not_found' | 'unavailable' }
 > {
   try {
-    const res = await fetch(`${getHeyQApiBaseUrl()}/api${path}`, {
+    const res = await fetch(`${base}${path}`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 'Content-Type': 'application/json', ...headers },
       body: body === undefined ? undefined : JSON.stringify(body),
     });
     if (!res.ok) return { ok: false, result: resultForStatus(res.status) };
@@ -310,33 +345,16 @@ async function post(path: string, body?: unknown): Promise<
   }
 }
 
-async function postJson(path: string, body: unknown): Promise<
+/** POST JSON, response body returned as the created/updated resource. */
+async function postJson(base: string, path: string, body: unknown, headers?: Record<string, string>): Promise<
   { ok: true; data: unknown } | { ok: false; result: 'forbidden' | 'not_found' | 'unavailable' }
 > {
   try {
-    const res = await fetch(`${getHeyQApiBaseUrl()}/api${path}`, {
+    const res = await fetch(`${base}${path}`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 'Content-Type': 'application/json', ...headers },
       body: JSON.stringify(body),
     });
-    if (!res.ok) return { ok: false, result: resultForStatus(res.status) };
-    return { ok: true, data: await res.json() };
-  } catch {
-    return { ok: false, result: 'unavailable' };
-  }
-}
-
-/**
- * POST a multipart/form-data body (an upload). The browser sets the multipart
- * `Content-Type`/boundary from the FormData, so it must NOT be set here. HeyQ
- * validates the files server-side and returns 400 with per-file detail on
- * rejection (client validation is the first gate, so that path is rare).
- */
-async function postForm(path: string, form: FormData): Promise<
-  { ok: true; data: unknown } | { ok: false; result: 'forbidden' | 'not_found' | 'unavailable' }
-> {
-  try {
-    const res = await fetch(`${getHeyQApiBaseUrl()}/api${path}`, { method: 'POST', body: form });
     if (!res.ok) return { ok: false, result: resultForStatus(res.status) };
     return { ok: true, data: await res.json() };
   } catch {
@@ -362,10 +380,12 @@ export function buildAttachmentUrl(
 }
 
 // ── Public operations (consumed by heyqService) ───────────────────────────────
+// Every operation below calls the same-origin Corporate support proxy
+// (SUPPORT_PROXY_BASE), never QuadX Bridge/HeyQ directly.
 
 /** The signed-in requester's tickets. Any failure degrades to an empty list. */
 export async function apiListMyTickets(who: HeyQRequesterIdentity): Promise<CustomerTicket[]> {
-  const res = await getJson(`/customer/tickets?${identityQuery(who)}`);
+  const res = await getJson(SUPPORT_PROXY_BASE, `/tickets?${identityQuery(who)}`);
   if (!res.ok || !Array.isArray(res.data)) return [];
   return (res.data as HeyQApiCustomerTicket[]).map(toCustomerTicket);
 }
@@ -375,7 +395,7 @@ export async function apiGetMyTicket(
   who: HeyQRequesterIdentity,
   id: string,
 ): Promise<HeyQResult<CustomerTicket>> {
-  const res = await getJson(`/customer/tickets/${encodeURIComponent(id)}?${identityQuery(who)}`);
+  const res = await getJson(SUPPORT_PROXY_BASE, `/tickets/${encodeURIComponent(id)}?${identityQuery(who)}`);
   if (!res.ok) return { status: res.result };
   return { status: 'ok', data: toCustomerTicket(res.data as HeyQApiCustomerTicket) };
 }
@@ -383,41 +403,45 @@ export async function apiGetMyTicket(
 /**
  * Post a requester reply, then re-read the customer view so the caller gets the
  * updated thread + (if the ticket was resolved/closed) the reopened status.
+ *
+ * Text-only — the approved Bridge contract rejects attachment bytes with 400,
+ * so this never sends files (see the module docblock). `messageId`, when
+ * given, travels as `X-Bridge-Message-Id`: the caller (`useTicketConversation`)
+ * reuses the SAME id across a retry of the same logical reply, so Bridge's
+ * atomic RPC dedupes an ambiguous retry instead of creating a second message.
  */
 export async function apiReplyToMyTicket(
   who: HeyQRequesterIdentity,
   id: string,
   body: string,
-  files?: File[],
+  messageId?: string,
 ): Promise<HeyQResult<CustomerTicket>> {
-  if (files?.length) {
-    // A reply WITH attachments is a multipart upload: HeyQ validates + stores the
-    // files atomically with the message, so the message never references a missing
-    // upload. A rejected batch fails the whole reply (no message is created).
-    const form = new FormData();
-    form.append('externalUserId', who.externalUserId);
-    form.append('externalOrgId', who.externalOrgId);
-    form.append('body', body);
-    for (const f of files) form.append('files', f, f.name);
-    const posted = await postForm(`/customer/tickets/${encodeURIComponent(id)}/messages`, form);
-    if (!posted.ok) return { status: posted.result };
-  } else {
-    const posted = await post(`/customer/tickets/${encodeURIComponent(id)}/messages`, {
-      externalUserId: who.externalUserId,
-      externalOrgId: who.externalOrgId,
-      body,
-    });
-    if (!posted.ok) return { status: posted.result };
-  }
+  const posted = await post(
+    SUPPORT_PROXY_BASE,
+    `/tickets/${encodeURIComponent(id)}/messages`,
+    { externalUserId: who.externalUserId, externalOrgId: who.externalOrgId, body },
+    messageId ? { 'X-Bridge-Message-Id': messageId } : undefined,
+  );
+  if (!posted.ok) return { status: posted.result };
   return apiGetMyTicket(who, id);
 }
 
-/** Reopen a resolved/closed ticket, then re-read the customer view. */
+/**
+ * Reopen a resolved/closed ticket, then re-read the customer view.
+ *
+ * KNOWN LIMITATION: this Bridge route runs against HeyQ's legacy in-memory
+ * ticket store, not the Supabase-backed path the rest of this contract uses,
+ * so it does not find a Bridge-created ticket (see
+ * docs/migration/ggx-corporate-heyq-live-ticketing.md). A reply already
+ * reopens a resolved/on_hold ticket automatically via `apiReplyToMyTicket`,
+ * which IS the Supabase-backed path — that is the reliable way to reopen a
+ * ticket today.
+ */
 export async function apiReopenMyTicket(
   who: HeyQRequesterIdentity,
   id: string,
 ): Promise<HeyQResult<CustomerTicket>> {
-  const posted = await post(`/tickets/${encodeURIComponent(id)}/reopen`, {
+  const posted = await post(SUPPORT_PROXY_BASE, `/tickets/${encodeURIComponent(id)}/reopen`, {
     externalUserId: who.externalUserId,
     externalOrgId: who.externalOrgId,
   });
@@ -443,14 +467,17 @@ export interface CreateCustomerTicketInput {
     snapshot: HeyQOrderSnapshot;
     capturedAt: string;
   }[];
-  /** Files attached during ticket creation (uploaded atomically with the ticket). */
-  files?: File[];
 }
 
 /**
- * Create a ticket via the HeyQ customer surface and return the mapped
+ * Create a ticket via the Corporate support proxy and return the mapped
  * CustomerTicket. The Business+ (OMS) snapshot is translated to HeyQ's linked-
  * order shape here; the response comes back already customer-projected.
+ *
+ * Text-only — no attachments are ever sent (see the module docblock). Always
+ * carries a fresh `Idempotency-Key`, so a network-level retry of this exact
+ * call is deduplicated by Bridge's atomic RPC instead of creating a second
+ * ticket.
  */
 export async function apiCreateTicket(
   who: HeyQRequesterIdentity,
@@ -485,25 +512,8 @@ export async function apiCreateTicket(
     linkedTransactions,
   };
 
-  let res;
-  if (input.files?.length) {
-    // Creation WITH attachments — multipart so files upload atomically with the
-    // ticket. Scalar fields become form fields; linked transactions ride as JSON.
-    const form = new FormData();
-    form.append('externalUserId', payload.externalUserId);
-    form.append('externalOrgId', payload.externalOrgId);
-    form.append('name', payload.name);
-    form.append('email', payload.email);
-    form.append('concernType', payload.concernType);
-    form.append('subject', payload.subject);
-    form.append('description', payload.description);
-    if (trackingNumber) form.append('trackingNumber', trackingNumber);
-    if (linkedTransactions) form.append('linkedTransactions', JSON.stringify(linkedTransactions));
-    for (const f of input.files) form.append('files', f, f.name);
-    res = await postForm('/customer/tickets', form);
-  } else {
-    res = await postJson('/customer/tickets', payload);
-  }
+  const idempotencyKey = crypto.randomUUID();
+  const res = await postJson(SUPPORT_PROXY_BASE, '/tickets', payload, { 'Idempotency-Key': idempotencyKey });
   if (!res.ok) return { status: res.result };
   return { status: 'ok', data: toCustomerTicket(res.data as HeyQApiCustomerTicket) };
 }
@@ -527,7 +537,7 @@ export async function apiMintRealtimeToken(
   who: HeyQRequesterIdentity,
   ticketId: string,
 ): Promise<HeyQResult<RealtimeToken>> {
-  const res = await postJson('/customer/realtime/token', {
+  const res = await postJson(`${getHeyQApiBaseUrl()}/api`, '/customer/realtime/token', {
     externalUserId: who.externalUserId,
     externalOrgId: who.externalOrgId,
     ticketId,

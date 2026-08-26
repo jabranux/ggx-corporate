@@ -10,11 +10,11 @@ import { Card, CardContent, CardHeader, CardTitle } from '../components/ui/Card'
 import { Button } from '../components/ui/Button';
 import { Badge } from '../components/ui/Badge';
 import { Alert } from '../components/ui/Alert';
-import { AttachmentInput } from '../components/AttachmentInput';
 // The ticket lives in HeyQ; this page is a customer-visible mirror of it. The
-// conversation updates LIVE over HeyQ's realtime channel (useTicketConversation),
-// while every write (reply, reopen) still persists over HeyQ's REST API —
-// Business+ keeps no ticket state of its own. Order data comes from OMS.
+// conversation is kept current by a 5-second REST poll (useTicketConversation)
+// routed through the Corporate support proxy, and every write (reply, reopen)
+// persists the same way — Business+ keeps no ticket state of its own. Order
+// data comes from OMS.
 import {
   getTicketById, getLiveOrderStatus, getRequesterIdentity, buildAttachmentUrl,
   TICKET_STATUS_META, TICKET_PRIORITY_META,
@@ -108,7 +108,6 @@ function LiveTicketView({
   const convo = useTicketConversation(id, initialTicket);
   const { ticket, messages, pending, agentTyping, connection, sending } = convo;
   const [reply, setReply] = useState('');
-  const [files, setFiles] = useState<File[]>([]);
   // The signed-in requester identity — needed to build authorized attachment URLs.
   const [who, setWho] = useState<HeyQRequesterIdentity | null>(null);
 
@@ -132,10 +131,8 @@ function LiveTicketView({
   const handleSend = async () => {
     if (!reply.trim() || sending) return;
     const body = reply;
-    const toSend = files;
     setReply(''); // clear immediately; the message renders optimistically
-    setFiles([]);
-    await convo.send(body, toSend.length ? toSend : undefined);
+    await convo.send(body);
   };
 
   const handleReopen = async () => {
@@ -205,15 +202,16 @@ function LiveTicketView({
                   className="w-full h-24 px-3 py-2 rounded-lg border border-gray-300 text-sm focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent"
                   placeholder="Type your message to the support team..."
                   value={reply}
-                  onChange={(e) => { setReply(e.target.value); convo.notifyTyping(e.target.value); }}
-                  onBlur={convo.stopTyping}
+                  onChange={(e) => setReply(e.target.value)}
                   disabled={sending}
                 />
-                <AttachmentInput value={files} onChange={setFiles} disabled={sending} />
+                <p className="text-[11px] text-gray-400">
+                  Attachments aren’t available in this demo integration yet.
+                </p>
                 {connection === 'reconnecting' && (
                   <p className="text-[11px] text-amber-600 flex items-center gap-1.5">
                     <IconWifi className="w-3.5 h-3.5" />
-                    Reconnecting to live updates… you can still send — replies are delivered over a separate channel.
+                    Reconnecting… you can still send — it will go through on the next successful check.
                   </p>
                 )}
                 <div className="flex items-center justify-end gap-3">
@@ -227,7 +225,7 @@ function LiveTicketView({
                     {sending
                       ? <IconLoader2 className="w-4 h-4 mr-2 animate-spin" />
                       : <IconSend className="w-4 h-4 mr-2" />}
-                    {sending ? (files.length ? 'Uploading…' : 'Sending…') : 'Send Reply'}
+                    {sending ? 'Sending…' : 'Send Reply'}
                   </Button>
                 </div>
               </div>
@@ -297,17 +295,6 @@ function PendingBubble({ pending: p, onRetry, onDismiss }: { pending: PendingMes
       <div className="max-w-[80%] items-end text-right">
         <div className={`inline-block rounded-xl px-3.5 py-2.5 text-sm text-left ${failed ? 'bg-red-50 text-gray-800 ring-1 ring-red-200' : 'bg-blue-50/70 text-gray-500'}`}>
           {p.body}
-          {p.attachments && p.attachments.length > 0 && (
-            <div className="mt-2 space-y-1">
-              {p.attachments.map((a, i) => (
-                <div key={`${a.name}-${i}`} className="flex items-center gap-1.5 text-[12px] text-gray-400">
-                  <IconPaperclip className="w-3.5 h-3.5 flex-shrink-0" />
-                  <span className="truncate max-w-[180px]">{a.name}</span>
-                  <span>· {formatBytes(a.size)}</span>
-                </div>
-              ))}
-            </div>
-          )}
         </div>
         {failed ? (
           <p className="text-[11px] text-red-600 mt-1 flex items-center justify-end gap-2">

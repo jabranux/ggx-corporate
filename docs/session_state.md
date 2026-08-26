@@ -3,6 +3,46 @@
 > Lightweight resume/checkpoint file. Detailed June 2026 history was archived to
 > `docs/archive/session_log_2026-06.md`.
 
+## Most Recent Work — Corporate support proxy / BFF for QuadX Bridge (2026-08-26)
+
+Built the minimum server-side proxy so the browser stops calling QuadX
+Bridge/Railway/HeyQ directly and never holds `QUADX_BRIDGE_API_KEY`. Full
+write-up: `docs/migration/ggx-corporate-heyq-live-ticketing.md` §11.
+
+- **New:** `api/_lib/bridge.ts` + `api/support/tickets/{index,[id],[id]/messages,[id]/reopen}.ts`
+  — Vercel serverless functions (zero-config `/api/**`, no new deps) that
+  attach `X-Corporate-Internal-Key: $QUADX_BRIDGE_API_KEY` server-side and
+  forward to QuadX Bridge (`$QUADX_BRIDGE_URL`, unset by default — see below).
+- **Frontend:** `heyqCustomerApi.ts` now calls same-origin `/api/support/*`
+  instead of `${VITE_HEYQ_API_URL}/api/customer/*`. Ticket creation/reply lost
+  their `files` param (attachments disabled — Bridge is text-only);
+  `useTicketConversation.ts` no longer opens a WebSocket (REST 5s polling
+  only); reply retries now reuse a UUID `tempId` as `X-Bridge-Message-Id` so
+  Bridge's atomic RPC dedupes them; ticket creation sends a fresh
+  `Idempotency-Key` per call. `AttachmentInput` unwired from the report drawer
+  and reply composer.
+  **Dormant, not deleted:** the realtime WebSocket client and
+  `buildAttachmentUrl`/`getAttachmentUrl` — unused by the running app, still
+  pointed at the legacy Railway origin, kept in case a future Bridge contract
+  adds realtime/attachments.
+- **Validated:** `npm run typecheck`, `npm run build` (confirmed the key never
+  reaches `dist/`), `npm test` (70/70) all green; a throwaway manual smoke
+  script directly exercised all four route handlers (see §11.8 of the handoff).
+- **Not validated — no reachable Bridge URL found.** Neither this repo nor the
+  HeyQ repo documents a currently-deployed, reachable QuadX Bridge HTTP origin
+  (Railway was explicitly decommissioned per `HeyQ/.env.example`).
+  `QUADX_BRIDGE_URL` is left unset by default; the proxy fails closed until a
+  real one is supplied. A live end-to-end round trip (ticket in HeyQ, CSR
+  reply, idempotent retry, etc.) is therefore still outstanding — next step is
+  `CODEX_GGX_HEYQ_END_TO_END_REAUDIT` once that URL + the key are available in
+  a real deployment.
+- **Known Bridge-side gap (not fixed here, out of scope):** the explicit
+  "Reopen ticket" button proxies to `/tickets/:id/reopen`, which QuadX
+  Bridge's own implementation still runs against HeyQ's legacy in-memory
+  store rather than the Supabase RPC path — it will not find a Bridge-created
+  ticket. Replying to a resolved ticket already reopens it via the working RPC
+  path, so this only affects the standalone button.
+
 ## Most Recent Work — OMS-shaped sample order data (2026-08-24)
 
 Reworked the Transactions/order sample data to be patterned after a real OMS

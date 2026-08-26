@@ -1,0 +1,47 @@
+/**
+ * /api/support/tickets/:id/messages — GGX Corporate support proxy: reply.
+ *
+ * POST → append a customer reply (Bridge `POST /customer/tickets/:id/messages`).
+ * Forwards `X-Bridge-Message-Id` so a retried reply (the client reuses the
+ * same optimistic message id) is deduplicated by Bridge's atomic RPC instead
+ * of creating a second message.
+ */
+import {
+  bridgeFetch, readIdentity, hasAttachmentPayload, relay, failConfig, failUpstream, single,
+  BridgeConfigError, type ProxyRequest, type ProxyResponse,
+} from '../../../_lib/bridge.ts';
+
+export default async function handler(req: ProxyRequest, res: ProxyResponse): Promise<void> {
+  try {
+    if (req.method !== 'POST') {
+      res.setHeader('Allow', 'POST');
+      res.status(405).json({ error: 'Method not allowed' });
+      return;
+    }
+    const id = single(req.query.id);
+    if (!id) {
+      res.status(400).json({ error: 'Ticket id is required.' });
+      return;
+    }
+    const body = (req.body ?? {}) as Record<string, unknown>;
+    const identity = readIdentity(body);
+    if (!identity) {
+      res.status(400).json({ error: 'externalUserId and externalOrgId are required.' });
+      return;
+    }
+    if (hasAttachmentPayload(body)) {
+      res.status(400).json({ error: 'Attachments are not supported in this integration.' });
+      return;
+    }
+    const messageId = single(req.headers['x-bridge-message-id']);
+    const bridgeRes = await bridgeFetch(`/customer/tickets/${encodeURIComponent(id)}/messages`, {
+      method: 'POST',
+      body,
+      headers: messageId ? { 'X-Bridge-Message-Id': messageId } : undefined,
+    });
+    await relay(res, bridgeRes);
+  } catch (err) {
+    if (err instanceof BridgeConfigError) failConfig(res, err);
+    else failUpstream(res, 'POST /tickets/:id/messages', err);
+  }
+}
