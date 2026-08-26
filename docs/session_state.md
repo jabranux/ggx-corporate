@@ -3,6 +3,44 @@
 > Lightweight resume/checkpoint file. Detailed June 2026 history was archived to
 > `docs/archive/session_log_2026-06.md`.
 
+## Most Recent Work — public demo credentials removed from frontend (2026-08-26)
+
+Closed the last item from the production-auth audit: `Login.tsx` was
+publicly handing out the working demo password, and a leftover unused
+`DEMO_USERS`/`MOCK_AUTH_USERS` email→role→account table shipped a full
+identity directory in the bundle. Full write-up:
+`docs/migration/ggx-corporate-heyq-live-ticketing.md` §19.
+
+- Removed `DEMO_PASSWORD`, the demo quick-fill buttons, and the
+  credential-echoing alert from `Login.tsx`; generic "Invalid email or
+  password" message now. Removed the unused `DEMO_USERS` export from
+  `AuthContext.tsx`. Replaced `auth.mock.ts`'s email-keyed `MOCK_AUTH_USERS`
+  with `permissionsForRole(role)` (permissions are a function of role only,
+  not identity); `authService.ts` now builds the display user entirely from
+  `POST /api/auth/login`'s server-confirmed response instead of a local
+  lookup table. No change to server-side auth (`api/_lib/session.ts`,
+  `demoUsers.ts`, `bridge.ts` untouched — §18's work stands as-is).
+- Validated: `npm run typecheck` clean, `npm run build` clean, `npm test`
+  71/71, and a bundle credential scan (`grep` over a fresh `dist/`) confirms
+  the demo password string is fully gone; the one harmless remaining
+  match is a pre-existing, unrelated display fallback in `RootLayout.tsx`
+  (not a credential or identity mapping — see §19.4 for why it was left).
+- **New finding this pass**: this session had read access to the linked
+  Vercel project via the Vercel MCP plugin (unlike every prior session,
+  which had none at all) — confirmed the current production deployment is
+  built from `ed7a0ee`, one commit behind `1c0e237` (§18's server-auth fix)
+  and this session's own commit, so `/api/auth/login` 404s on production
+  today (route doesn't exist in that build yet — expected, not a bug).
+  Still **no tool available to read or set actual env var values** (no
+  env-var tool in the plugin, no Vercel CLI installed) — `SESSION_SECRET`/
+  `QUADX_BRIDGE_URL`/`QUADX_BRIDGE_API_KEY` on Production remain unverified.
+- **Still blocked**: per this project's "do not push unless instructed"
+  rule, `1c0e237` and this session's commit were NOT pushed. Operator needs
+  to: push to `origin/master`, set the three Production env vars in the
+  Vercel dashboard, confirm the resulting deploy is `READY`, then run
+  `E2E_BASE_URL=https://ggx-corporate.vercel.app npm run e2e:prod`. See
+  §19.5 for the full sequence.
+
 ## Most Recent Work — server-verified support identity (2026-08-26)
 
 Closed the last security blocker from the audit trail: the support proxy's

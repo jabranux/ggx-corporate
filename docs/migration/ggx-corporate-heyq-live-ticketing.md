@@ -1382,3 +1382,146 @@ against the new endpoint anyway. It:
 - **E2E_REPRODUCIBILITY**: PASS — `scripts/prod-e2e-validation.mjs` restored
   and self-verified against a real (simulated-Bridge) HTTP round trip (§18.5)
 
+## 19. Public Demo Credentials Removed From the Frontend (2026-08-26)
+
+Closes the last item from the production-auth audit of `1c0e237`: §18 made
+identity server-verifiable, but the Login screen itself still handed out a
+working password to any visitor, and a second, unused identity table left
+over from before §18 still shipped an email→role→account directory in the
+bundle. Neither required touching the session/cookie architecture from §18
+— this pass is UI/data-shape only.
+
+### 19.1 What was exposed
+
+- `src/app/pages/Login.tsx` had a `DEMO_PASSWORD` constant, two "Admin" /
+  "Manager" quick-fill buttons, and an invalid-credentials `alert()` that all
+  printed the real POC password (`!1234qwer`) in plaintext, in the rendered
+  page and in the production JS bundle (confirmed present in a pre-fix
+  `dist/` build via a plain string grep).
+- `src/app/contexts/AuthContext.tsx` exported `DEMO_USERS`, a
+  `Record<email, {name, role, accountId, accountName}>` — dead code, unused
+  anywhere else in the app since §18 moved credential/identity resolution
+  server-side, but still bundled into every page load. This is the
+  "privileged identity mapping" this task's objective explicitly calls out:
+  even without a password attached, it told a visitor exactly which email
+  address is the Admin account and which is scoped to which subaccount.
+- `src/app/data/mock/auth.mock.ts`'s `MOCK_AUTH_USERS` was the same shape
+  (email → identity/role/permissions), used only to enrich the display user
+  after a server-verified login — but still meant the full identity
+  directory shipped in the bundle regardless of whether anyone signed in.
+
+### 19.2 Fix
+
+- `Login.tsx` — removed `DEMO_PASSWORD`, the demo sign-in button block, and
+  the credential-echoing alert. Invalid-login feedback is now a generic
+  `Invalid email or password.` The email/password fields and `Sign in`
+  button are unchanged; a real visitor still authenticates the same way
+  (`loginMockUser` → `POST /api/auth/login`), they just aren't handed the
+  answer first.
+- `AuthContext.tsx` — removed the unused `DEMO_USERS` export entirely.
+- `data/mock/auth.mock.ts` — replaced the email-keyed `MOCK_AUTH_USERS` table
+  with `permissionsForRole(role)`, a pure function of role only (`admin` |
+  `manager` → its fixed permission set). This encodes what each role *can
+  do*, not *who holds which role* — safe to ship in the bundle.
+- `services/authService.ts` — `loginMockUser` now builds the display
+  `MockAuthUser` directly from `POST /api/auth/login`'s response body
+  (id/name/email/role/accountId/accountName, all server-confirmed) plus
+  `permissionsForRole`, instead of looking the email up in a local table.
+  `getCurrentUser()` does the same from the persisted `localStorage` session.
+  `assignedSubaccountIds` (previously a hardcoded per-email array, and
+  confirmed unused anywhere outside this module) is now derived as
+  `role === 'manager' ? [accountId] : []`.
+- `scripts/prod-e2e-validation.mjs` — updated a stale comment that pointed at
+  the Login screen as the source of the demo credentials it uses; corrected
+  to note they live only in `api/_lib/demoUsers.ts` now.
+
+No change to `api/_lib/demoUsers.ts`, `session.ts`, or `bridge.ts` — the
+server-side credential check, session minting, and identity derivation from
+§18 are untouched. The two POC accounts (`max@email.com` / `manager@email.com`,
+password `!1234qwer`) still exist server-side by design (this is still a POC,
+per this task's own instructions not to introduce a large IAM system) — they
+are simply no longer discoverable from the client.
+
+### 19.3 Logout: still stateless (unchanged from §18, restated per this task's checklist)
+
+Logout remains what §18.3 documented: `POST /api/auth/logout` clears the
+browser's cookie but does not revoke the signed token server-side (no
+revocation store). A copied cookie value remains valid until its 12h expiry
+even after the owning browser logs out. Per this task's instruction #9 ("do
+not overengineer this unless required for production clearance"), no
+revocation store was added — the POC's threat model (fixed 2-account demo
+directory, same-origin `httpOnly`/`SameSite=Lax` cookie) does not currently
+require it, but a real production deployment should add one before this
+stops being a POC.
+
+### 19.4 Validation
+
+- `npm run typecheck` — 0 errors.
+- `npm run build` — clean.
+- `npm test` — 71/71 passed (unchanged from §18; no test previously asserted
+  on the removed demo-login UI).
+- Bundle credential scan (`grep` over a fresh `dist/` build) — before the
+  fix: `!1234qwer`, `max@email.com`, `manager@email.com` all present
+  (`DEMO_PASSWORD` + `DEMO_USERS` + `MOCK_AUTH_USERS`). After the fix: the
+  password string is fully absent; the only remaining email-string match is
+  an unrelated, pre-existing display fallback in `RootLayout.tsx`
+  (`user?.name ?? 'Max Rodriguez'` / `user?.email ?? 'max@email.com'`, shown
+  only if the topbar somehow renders with no authenticated user at all) —
+  not a credential, not an identity mapping, not something that helps a
+  visitor authenticate, so left as-is to keep this change scoped.
+- Server-side checks from §18.4 (credential verification, forged-identity
+  rejection, cross-account isolation, fail-closed on missing config) are
+  unaffected — nothing in this pass touched `api/`.
+
+### 19.5 Production configuration — status this pass
+
+Unlike every prior session on this task (§16.5, §17, §18.4 — "no Vercel
+access in this environment"), this session had **read access** to the linked
+Vercel project via the Vercel MCP plugin (`ggx-corporate`,
+`prj_oU0l0VaMXPQhIhByZjSjoHAcru0K`) and confirmed:
+
+- The project is git-linked to `jamesabran/ggx-corporate` (`master`), auto-
+  deploying on push.
+- **The current production deployment is built from `ed7a0ee`** — one commit
+  behind this repo's `HEAD` at the time (`1c0e237`, §18's fix) and behind
+  this session's own uncommitted §19 fix. Confirmed live:
+  `POST https://ggx-corporate.vercel.app/api/auth/login` currently returns a
+  plain `404` (route doesn't exist in that build — expected, since
+  `api/auth/login.ts` was added in `1c0e237`).
+- `get_runtime_errors` over the last 7 days shows no `SESSION_SECRET`/
+  `QUADX_BRIDGE_*`-related fatal errors, but that's not meaningful evidence
+  either way yet since the deployed build predates the code that would throw
+  them.
+- **No available tool can read or set the actual env var values** —
+  `get_project`/`list_projects` return project metadata only, there's no
+  env-var tool in this Vercel MCP plugin's surface, and the Vercel CLI isn't
+  installed in this environment (confirmed via the harness's own
+  session-start notice) so `vercel env` isn't usable either. Whether
+  `SESSION_SECRET`, `QUADX_BRIDGE_URL`, and `QUADX_BRIDGE_API_KEY` are set on
+  Production **could not be verified or configured this pass** — this
+  remains a genuine operator step, not a tooling oversight this session could
+  work around.
+
+**Operator steps still required, in order:**
+1. Push `1c0e237` and this session's commit to `origin/master` (this repo is
+   currently 1 commit ahead of `origin/master`; not pushed automatically —
+   see this task's "do not push unless instructed" project rule).
+2. In the Vercel dashboard (or `vercel env add`) for the `ggx-corporate`
+   project, Production environment, set: `SESSION_SECRET` (fresh random
+   value, e.g. `openssl rand -base64 48`), `QUADX_BRIDGE_URL`, and
+   `QUADX_BRIDGE_API_KEY` (the latter two per §15/§16 — get the matching
+   Bridge key from whoever holds it, never recorded in this repo).
+3. Confirm the resulting deploy is `READY` and built from the pushed commit.
+4. Run `E2E_BASE_URL=https://ggx-corporate.vercel.app npm run e2e:prod`
+   against it.
+
+### 19.6 Response status summary
+
+- **PUBLIC_CREDENTIALS_REMOVED**: PASS (§19.1–19.2, §19.4's bundle scan)
+- **SERVER_AUTH**: PASS (unchanged from §18 — this pass didn't touch it;
+  re-confirmed via the unchanged 71/71 test pass and clean typecheck/build)
+- **SUPPORT_AUTH**: PASS (unchanged from §18, same reasoning)
+- **PRODUCTION_E2E**: BLOCKED — production deployment predates this fix
+  (§19.5), and Production env vars cannot be verified or set with the tools
+  available in this session; needs the operator steps in §19.5
+

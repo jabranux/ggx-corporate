@@ -2,15 +2,17 @@ import { createContext, useContext, useState, type ReactNode } from 'react';
 import { loadState } from '../lib/storage';
 import { logoutMockUser } from '../services/authService';
 
-// Mock authentication (frontend/demo only). No real auth/session backend.
-// The auth user is the single source of truth for role + scoped account id,
-// consumed by route guards, nav, and notification visibility.
+// Credentials are verified server-side (`POST /api/auth/login`, see
+// `services/authService.ts` and `api/auth/login.ts`), which also sets the
+// signed, httpOnly session cookie `/api/support/**` derives identity from.
+// This context only holds the resulting UI-display state: role + scoped
+// account id, consumed by route guards, nav, and notification visibility —
+// forgeable like any client state, but not a security boundary.
 //
 // Session persistence is owned by `authService` (loginMockUser persists on a
 // successful login; logoutMockUser clears it). This context keeps the React
 // state + a synchronous localStorage read on init (avoids an auth-hydration
-// flicker on refresh). The synchronous init read is a deliberate frontend-only
-// shortcut to revisit when real async backend auth lands.
+// flicker on refresh).
 
 export type UserRole = 'admin' | 'manager';
 
@@ -23,12 +25,6 @@ export interface AuthUser {
   /** Display name for the scoped account. */
   accountName: string;
 }
-
-// Demo users — Admin (parent) and a Manager assigned to one subaccount.
-export const DEMO_USERS: Record<string, AuthUser> = {
-  'max@email.com':     { name: 'Max Rodriguez', email: 'max@email.com',     role: 'admin',   accountId: 'main',        accountName: 'Main Account' },
-  'manager@email.com': { name: 'Rina Lopez',    email: 'manager@email.com', role: 'manager', accountId: 'acme-luzon',  accountName: 'Acme Luzon' },
-};
 
 interface AuthContextType {
   user: AuthUser | null;

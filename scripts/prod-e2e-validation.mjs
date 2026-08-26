@@ -11,10 +11,11 @@
 // reality mismatch, not a deleted script (confirmed via `git log --all` on
 // this path). This is the harness that entry should have pointed at.
 //
-// Credentials: the two accounts below are the app's own POC demo accounts —
-// already shown on the Login screen itself as a sign-in hint
-// (src/app/pages/Login.tsx) and duplicated server-side in
-// api/_lib/demoUsers.ts. They are NOT production secrets; nothing here reads
+// Credentials: the two accounts below are the app's own POC demo accounts,
+// defined server-side only in api/_lib/demoUsers.ts (no longer surfaced
+// anywhere in the frontend/Login UI — see
+// docs/migration/ggx-corporate-heyq-live-ticketing.md, "Public demo
+// credentials removed"). They are NOT production secrets; nothing here reads
 // QUADX_BRIDGE_API_KEY, SESSION_SECRET, or any service-role key, and the
 // script never could — those are server-only env vars this process has no
 // access to even if it wanted them. Override via env if your deployment uses

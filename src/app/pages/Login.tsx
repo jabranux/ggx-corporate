@@ -10,8 +10,6 @@ import { Alert } from '../components/ui/Alert';
 import { useAuth } from '../contexts/AuthContext';
 import { loginMockUser } from '../services/authService';
 
-const DEMO_PASSWORD = '!1234qwer';
-
 export function Login() {
   const navigate = useNavigate();
   const { isAuthenticated, login } = useAuth();
@@ -35,7 +33,7 @@ export function Login() {
 
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
-    // Credential validation is owned by authService (mock today, real API later).
+    // Credential validation happens server-side (see authService/api/auth/login.ts).
     const result = await loginMockUser(email.trim().toLowerCase(), password);
     if (result.success && result.user) {
       const u = result.user;
@@ -49,13 +47,8 @@ export function Login() {
       });
       navigate('/dashboard');
     } else {
-      alert('Invalid credentials. Use max@email.com (Admin) or manager@email.com (Manager), password !1234qwer');
+      alert('Invalid email or password.');
     }
-  };
-
-  const demoLogin = (demoEmail: string) => {
-    setEmail(demoEmail);
-    setPassword(DEMO_PASSWORD);
   };
 
   const handleRegister = (e: React.FormEvent) => {
@@ -152,15 +145,6 @@ export function Login() {
                   )}
 
                   <Button type="submit" className="w-full">Sign in</Button>
-
-                  <div className="rounded-lg border border-gray-200 bg-gray-50 p-3">
-                    <p className="text-xs font-medium text-gray-600 mb-2">Demo sign-in</p>
-                    <div className="grid grid-cols-2 gap-2">
-                      <Button type="button" variant="outline" size="sm" onClick={() => demoLogin('max@email.com')}>Admin</Button>
-                      <Button type="button" variant="outline" size="sm" onClick={() => demoLogin('manager@email.com')}>Manager</Button>
-                    </div>
-                    <p className="text-[11px] text-gray-400 mt-2">Fills demo credentials, then click Sign in. Password: {DEMO_PASSWORD}</p>
-                  </div>
 
                   <div className="relative">
                     <div className="absolute inset-0 flex items-center">
