@@ -50,8 +50,8 @@ export default async function handler(req: ProxyRequest, res: ProxyResponse): Pr
 
     res.setHeader('Allow', 'GET, POST');
     res.status(405).json({ error: 'Method not allowed' });
-  } catch (err) {
-    if (err instanceof BridgeConfigError) failConfig(res, err);
+  } catch (err: any) {
+    if (err instanceof BridgeConfigError || err?.name === 'BridgeConfigError' || String(err?.message || '').includes('QUADX_BRIDGE')) failConfig(res, err);
     else failUpstream(res, 'GET/POST /tickets', err);
   }
 }

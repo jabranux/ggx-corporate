@@ -172,7 +172,7 @@ export async function relay(res: ProxyResponse, bridgeRes: Response): Promise<vo
 /** Missing/invalid server config → 500 with a clear, actionable message. Never
  * exposes the key; only whether it/the base URL is configured. */
 export function failConfig(res: ProxyResponse, err: unknown): void {
-  const message = err instanceof BridgeConfigError ? err.message : 'Support proxy misconfigured.';
+  const message = (err && typeof err === 'object' && 'message' in err) ? String((err as { message: unknown }).message) : 'Support proxy misconfigured.';
   console.error('[support proxy]', message);
   res.status(500).json({ error: message });
 }
