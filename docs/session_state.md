@@ -43,6 +43,27 @@ write-up: `docs/migration/ggx-corporate-heyq-live-ticketing.md` §11.
   ticket. Replying to a resolved ticket already reopens it via the working RPC
   path, so this only affects the standalone button.
 
+### Follow-up re-audit — NOT CLEARED (2026-08-26)
+
+- Re-ran `npm run typecheck`, a dedicated TypeScript check over every `api/**`
+  function, `npm run build` (including a `dist/` secret/header-token scan),
+  and `npm test` (**70/70 green**). Vercel's current documentation confirms
+  that filesystem functions take precedence over a catch-all rewrite, so the
+  `/api/support/**` route layout is valid.
+- This environment has neither `QUADX_BRIDGE_URL` nor
+  `QUADX_BRIDGE_API_KEY`; no live proxy/Bridge round trip or cross-account
+  negative test could run.
+- Release remains blocked even after configuration is supplied: the proxy
+  accepts `externalUserId` and `externalOrgId` from browser query/body fields.
+  It therefore does not derive requester scope from a server-verified session;
+  a caller can select a different identity when invoking the same-origin proxy.
+  This is a P1 authorization gap, not merely a missing live-test input.
+- The visible explicit Reopen action is also not release-ready: it calls the
+  documented legacy in-memory Bridge route and cannot reopen a
+  Supabase/Bridge-created ticket. Hide/remove that action until HeyQ provides
+  an authoritative reopen route; replying remains the supported reopen path.
+- Full disposition and release gates: `docs/migration/ggx-corporate-heyq-live-ticketing.md` §12.
+
 ## Most Recent Work — OMS-shaped sample order data (2026-08-24)
 
 Reworked the Transactions/order sample data to be patterned after a real OMS

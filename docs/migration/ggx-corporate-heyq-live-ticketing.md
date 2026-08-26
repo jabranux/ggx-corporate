@@ -376,3 +376,74 @@ a real production pass:
 `QUADX_BRIDGE_API_KEY` and a confirmed, reachable `QUADX_BRIDGE_URL` are
 available in a real deployment environment to re-run the live round trip this
 task could not execute.
+
+---
+
+## 12. Follow-up Re-audit — 2026-08-26
+
+**Verdict: REQUEST CHANGES — NOT CLEARED FOR INTEGRATED RELEASE.**
+
+This re-audit reviewed commit `b9795cb` directly. It does not change the
+implementation.
+
+### 12.1 Evidence collected
+
+- `npm run typecheck` passed.
+- A separate TypeScript check over all five `api/**` files passed. Those files
+  are outside the app `tsconfig` and need this explicit check.
+- `npm run build` passed. A scan of `dist/` found neither
+  `QUADX_BRIDGE_API_KEY` nor `X-Corporate-Internal-Key`.
+- `npm test` passed: **70/70** tests.
+- Vercel's current project-configuration documentation states that the
+  filesystem is considered before rewrites. The root `api/**` functions
+  therefore take precedence over this project's `/(.*) → /index.html` SPA
+  catch-all. This still needs deployment smoke coverage, but it is no longer
+  an unsupported routing assumption.
+- This environment has neither `QUADX_BRIDGE_URL` nor
+  `QUADX_BRIDGE_API_KEY` configured. A live ticket create/list/reply/CSR-reply
+  round trip, idempotent retry, and cross-account negative test could not run.
+
+### 12.2 P1 — requester identity remains forgeable
+
+The proxy correctly keeps `QUADX_BRIDGE_API_KEY` server-side and constrains
+the browser to fixed support routes. However, every route reads
+`externalUserId` and `externalOrgId` directly from browser-controlled query
+parameters or JSON (`api/_lib/bridge.ts:readIdentity` and its callers). A
+caller can invoke the same-origin route with a different identity value; the
+proxy forwards it while authenticating to Bridge with the Corporate internal
+key. No server session, signed token, or server-side scope lookup binds those
+values to the requester.
+
+That means the BFF is a secret-hiding proxy, not the session-authenticated BFF
+required by the previous P1 audit. A live cross-account test is still needed,
+but the source alone establishes that Corporate cannot prevent the attempted
+identity substitution. Do not release this customer-ticket surface until the
+proxy derives both identity values from a verified server-side session (and
+does not accept client overrides).
+
+### 12.3 P2 — explicit reopen is knowingly non-functional
+
+`SupportTicketDetail` still exposes the explicit Reopen action whenever the
+ticket allows it. That action reaches `/api/support/tickets/:id/reopen`, which
+intentionally forwards to Bridge's legacy in-memory HeyQ handler. Per §11.7,
+that handler cannot find a ticket created through Bridge's Supabase RPC path.
+
+Do one of the following before release:
+
+1. Hide/remove the explicit Reopen control and adjust its copy to say that a
+   reply reopens the ticket; or
+2. Have HeyQ ship an authoritative Bridge-backed reopen endpoint, then update
+   Corporate to use it and cover it in the live round trip.
+
+### 12.4 Remaining live-release gates
+
+1. Deploy Corporate with a confirmed reachable `QUADX_BRIDGE_URL` and the
+   server-only `QUADX_BRIDGE_API_KEY`.
+2. Implement server-verified Corporate auth/session hydration and derive
+   Bridge identity and account scope inside the proxy.
+3. Verify live: create a ticket, list/read it, reply, retry the same reply
+   idempotently, receive a CSR reply through the five-second poll, and verify
+   that a separate account receives no ticket content or write access.
+4. Smoke-test the Vercel deployment's `/api/support/**` routes rather than
+   relying only on local handler stubs.
+5. Resolve or remove the explicit reopen affordance.
