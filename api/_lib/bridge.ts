@@ -32,7 +32,7 @@
  * exact boundary). Real session-derived identity is deferred to production
  * (see the handoff doc's "Production auth" section).
  */
-import { resolveDemoIdentity, type BridgeIdentity } from './demoIdentity';
+import { resolveDemoIdentity, type BridgeIdentity } from './demoIdentity.js';
 
 export class BridgeConfigError extends Error {}
 
