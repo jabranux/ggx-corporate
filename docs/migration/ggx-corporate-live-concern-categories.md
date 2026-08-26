@@ -7,6 +7,11 @@ ticket-creation flow. This was a **Corporate-side-only** task per its brief;
 two pre-existing Bridge-side gaps were found during the audit and are
 documented (not fixed) below — see "Known Bridge-side limitations."
 
+**2026-08-27 follow-up:** the one remaining audit finding — the live category
+fetch had no explicit HTTP-level cache directive, so a browser or intermediate
+HTTP cache (distinct from this app's own "no in-memory caching" code) could in
+principle have served a stale category list — is fixed. See §14.
+
 ## 1. Old category flow (before this task)
 
 The report drawer's "What's the issue?" selector was driven entirely by a
@@ -321,3 +326,67 @@ None blocking this task's own completion. Two Bridge-side gaps are
 its own side. The live round-trip (§11) remains unverified only because no
 reachable Bridge URL/key exists in this environment, consistent with every
 prior session's blocker on this same project.
+
+## 14. Follow-up audit fix (2026-08-27) — explicit no-store on the live fetch
+
+**Finding:** the live category fetch relied only on this app's own code never
+caching a result — it never told the HTTP layer itself (the browser's fetch
+cache, or any intermediate cache between the browser and Corporate) not to
+cache the response. A browser could in principle have served a previously-
+cached `200` for `GET /api/support/categories` without making a new request at
+all, which would silently defeat the "always fetch fresh" guarantee §2/§6
+describe, independent of any application-level logic.
+
+**Fix — client side** (`src/app/services/heyqCustomerApi.ts`):
+`apiListConcernCategories` now passes `cache: 'no-store'` on its `fetch` call.
+The shared `getJson` helper (also used by ticket list/detail reads) gained an
+optional `cache` parameter that only this call uses — every other caller is
+passed unchanged, so ticket read behavior is untouched.
+
+**Fix — server side** (`api/support/categories.ts`): the handler now sets
+`Cache-Control: no-store` unconditionally, as the very first line of the
+handler — before the method check, the session check, or the Bridge call —
+so every response this route can produce (`200` relay, `401` unauthenticated,
+`405` wrong method, `500`/`502` on failure) carries it. `relay()` (shared with
+every other `/api/support/*` route) was left untouched — it only ever sets
+`Content-Type`, so it doesn't clobber this header; no shared/unrelated proxy
+logic was changed, and the ticket-creation `categoryId` re-verification added
+previously (§3) is unmodified.
+
+**Regression tests added:**
+
+- `tests/heyq-adapter.test.mjs` — the `withStub` harness now also captures
+  the `cache` option passed to `window.fetch`; a new test in the "live Concern
+  Categories" describe block asserts `listConcernCategories()`'s single
+  `/api/support/categories` request carries `cache: 'no-store'`.
+- `tests/api-support-categories.test.mjs` (new, committed) — bundles
+  `api/support/categories.ts` and `api/_lib/session.ts` with esbuild (now an
+  explicit `devDependency`, previously only a transitive one via Vite) and
+  calls the real handler against a local fake Bridge HTTP server. Asserts
+  `Cache-Control: no-store` is present on both a successful `200` response and
+  an unauthenticated `401` response (proving it's set unconditionally, not
+  only on the success path). Added to the `test` npm script.
+
+**Validation:**
+
+- Focused: `node --test tests/api-support-categories.test.mjs` — **2/2**
+  passing. `node --test tests/heyq-adapter.test.mjs` — **39/39** passing
+  (including the new `cache: 'no-store'` assertion).
+- Full suite: `npm test` — **82/82** passing (up from 79; +1 client-side +
+  2 server-side regression tests for this fix).
+- `npm run typecheck` — clean.
+- `npm run build` — clean; `dist/` re-scanned for `QUADX_BRIDGE_API_KEY` /
+  `X-Corporate-Internal-Key` — no matches.
+- No lint step: this repo has no ESLint config/dependency/script (unchanged
+  from before this task).
+- Not deployed; not re-run against a live Bridge — same environment
+  constraint as §11/§13 (no `QUADX_BRIDGE_URL`/`QUADX_BRIDGE_API_KEY`
+  available here). This fix is HTTP-header/fetch-option-level only and does
+  not change what data flows through the existing, already-validated
+  request/response path.
+
+**Files changed this pass:** `src/app/services/heyqCustomerApi.ts`,
+`api/support/categories.ts`, `tests/heyq-adapter.test.mjs`,
+`tests/api-support-categories.test.mjs` (new), `package.json` (new `esbuild`
+devDependency + `test` script entry), `package-lock.json`,
+`docs/migration/ggx-corporate-live-concern-categories.md` (this file).

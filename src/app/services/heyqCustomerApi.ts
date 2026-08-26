@@ -352,15 +352,20 @@ function resultForStatus(status: number): 'forbidden' | 'not_found' | 'unavailab
 /**
  * GET JSON from `${base}${path}`. `base` is either `SUPPORT_PROXY_BASE` (every
  * live ticket read) or `${getHeyQApiBaseUrl()}/api` (the dormant realtime/
- * attachment paths only — see the module docblock).
+ * attachment paths only — see the module docblock). `cache`, when given, is
+ * passed straight to `fetch` (e.g. `'no-store'` for the live category read —
+ * see `apiListConcernCategories` — so neither the browser's HTTP cache nor an
+ * intermediate cache can serve a stale category list); omitted for every other
+ * caller, leaving their existing (default) caching behavior unchanged.
  */
-async function getJson(base: string, path: string): Promise<
+async function getJson(base: string, path: string, cache?: RequestCache): Promise<
   { ok: true; data: unknown } | { ok: false; result: 'forbidden' | 'not_found' | 'unavailable' }
 > {
   try {
     const res = await fetch(`${base}${path}`, {
       method: 'GET',
       headers: { Accept: 'application/json' },
+      ...(cache ? { cache } : {}),
     });
     if (!res.ok) return { ok: false, result: resultForStatus(res.status) };
     return { ok: true, data: await res.json() };
@@ -545,12 +550,15 @@ export async function apiCreateTicket(
  * The live, active Concern Category taxonomy from Bridge, for the ticket-
  * creation category selector. Always fetched fresh — no caching in this
  * module, matching Bridge's own "no caching anywhere in the path" contract.
+ * `cache: 'no-store'` on the request itself so neither the browser's HTTP
+ * cache nor any intermediate cache can serve a stale list, closing the gap
+ * that this module's own lack of an in-memory cache didn't cover on its own.
  * An empty array is a valid, distinct outcome from a fetch failure: the
  * caller must tell "zero categories configured" apart from "couldn't reach
  * Bridge" (see the module docblock and the handoff doc's UI-states section).
  */
 export async function apiListConcernCategories(): Promise<HeyQResult<ConcernCategory[]>> {
-  const res = await getJson(SUPPORT_PROXY_BASE, '/categories');
+  const res = await getJson(SUPPORT_PROXY_BASE, '/categories', 'no-store');
   if (!res.ok) return { status: res.result };
   if (!Array.isArray(res.data)) return { status: 'unavailable' };
   const categories = (res.data as Partial<ConcernCategory>[])

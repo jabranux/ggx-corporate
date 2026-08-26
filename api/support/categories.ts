@@ -11,6 +11,11 @@
  * this route still requires a verified Corporate session, consistent with every
  * other /api/support/* route: an unauthenticated caller gets no data from this
  * app's API surface at all. The resolved identity is otherwise unused here.
+ *
+ * `Cache-Control: no-store` on every response (set unconditionally, before any
+ * early return) so no browser/intermediate HTTP cache can serve a stale
+ * category list — the module-level "no caching" contract otherwise only
+ * covered this app's own code, not the HTTP layer underneath it.
  */
 import {
   bridgeFetch, requireSessionIdentity, relay, failConfig, failUpstream,
@@ -18,6 +23,7 @@ import {
 } from '../_lib/bridge.js';
 
 export default async function handler(req: ProxyRequest, res: ProxyResponse): Promise<void> {
+  res.setHeader('Cache-Control', 'no-store');
   try {
     if (req.method !== 'GET') {
       res.setHeader('Allow', 'GET');

@@ -80,7 +80,7 @@ const withStub = (fn, { response = null, status = 200, reject = false } = {}) =>
       const calls = [];
       const orig = window.fetch;
       window.fetch = async (url, init) => {
-        calls.push({ url: String(url), method: init?.method ?? 'GET', body: init?.body ?? null });
+        calls.push({ url: String(url), method: init?.method ?? 'GET', body: init?.body ?? null, cache: init?.cache });
         if (reject) throw new TypeError('Failed to fetch');
         return new Response(JSON.stringify(response), {
           status,
@@ -462,6 +462,13 @@ describe('live Concern Categories (report drawer selector)', () => {
     assert.equal(reads.length, 1);
     assert.doesNotMatch(reads[0].url, /^https?:\/\//);
     assert.deepEqual(result.data.map((c) => c.id), ['cat-general', 'cat-delivery']);
+  });
+
+  it('requests the live list with cache: "no-store" — no browser/HTTP cache may serve a stale list', async () => {
+    const { calls } = await withStub((svc) => svc.listConcernCategories(), { response: CATEGORIES });
+    const reads = calls.filter((c) => c.method === 'GET' && c.url.includes('/api/support/categories'));
+    assert.equal(reads.length, 1);
+    assert.equal(reads[0].cache, 'no-store');
   });
 
   it('carries requiresTracking/requiresOrderRef and subcategories through untouched', async () => {

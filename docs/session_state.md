@@ -3,6 +3,32 @@
 > Lightweight resume/checkpoint file. Detailed June 2026 history was archived to
 > `docs/archive/session_log_2026-06.md`.
 
+## Most Recent Work — live Concern Categories: HTTP no-store audit fix (2026-08-27)
+
+Closed the single remaining audit finding on the live Concern Categories work
+below: the live category fetch had no explicit HTTP-level cache directive.
+Full write-up: `docs/migration/ggx-corporate-live-concern-categories.md` §14.
+
+- `heyqCustomerApi.ts`'s `apiListConcernCategories` now sends `cache:
+  'no-store'` on its fetch (via a new optional param on the shared `getJson`
+  helper — every other caller unaffected). `api/support/categories.ts` now
+  sets `Cache-Control: no-store` unconditionally as the handler's first line,
+  covering every response it can produce (200/401/405/500/502). Ticket
+  creation's server-side category re-verification and every other
+  support/Bridge route were left untouched.
+- **New committed regression tests**: `tests/api-support-categories.test.mjs`
+  (esbuild-bundles the real handler + session lib, calls it against a local
+  fake Bridge, asserts the header on both a 200 and a 401) + one new
+  `heyq-adapter.test.mjs` assertion on the client fetch's `cache` option.
+  `esbuild` (previously only a transitive Vite dep) is now an explicit
+  `devDependency`, pinned to its already-resolved `0.25.12`.
+- **Validated:** focused (`tests/api-support-categories.test.mjs` 2/2,
+  `heyq-adapter.test.mjs` 39/39), full suite `npm test` **82/82** (up from
+  79), `npm run typecheck` clean, `npm run build` clean (dist/ re-scanned, no
+  secret). No lint step (repo has none). Not deployed; live round-trip still
+  blocked on the same missing `QUADX_BRIDGE_URL`/`QUADX_BRIDGE_API_KEY` as
+  every prior session on this project.
+
 ## Most Recent Work — live Concern Categories wired end-to-end (2026-08-26)
 
 Completed the Corporate-side integration of QuadX Bridge's live Concern
