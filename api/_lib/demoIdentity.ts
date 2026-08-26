@@ -39,20 +39,16 @@
  * "Production auth — still deferred" section) — building that is explicitly
  * out of scope for this pass.
  */
-import { MOCK_AUTH_USERS } from '../../src/app/data/mock/auth.mock';
-
 export interface BridgeIdentity {
   externalUserId: string;
   externalOrgId: string;
 }
 
-/** id → Bridge identity, built once from the app's own demo user dataset. */
-const ALLOWLIST: ReadonlyMap<string, BridgeIdentity> = new Map(
-  Object.values(MOCK_AUTH_USERS).map((u) => [
-    u.id,
-    { externalUserId: u.email, externalOrgId: u.accountId },
-  ]),
-);
+/** id → Bridge identity, self-contained for serverless execution. */
+const ALLOWLIST: ReadonlyMap<string, BridgeIdentity> = new Map([
+  ['user-admin-001', { externalUserId: 'max@email.com', externalOrgId: 'main' }],
+  ['user-mgr-001', { externalUserId: 'manager@email.com', externalOrgId: 'acme-luzon' }],
+]);
 
 /**
  * Resolve a browser-supplied `demoAccountId` to the Bridge identity it maps
