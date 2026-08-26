@@ -6,7 +6,7 @@
  * conversation poll (`useTicketConversation`).
  */
 import {
-  bridgeFetch, readIdentity, relay, failConfig, failUpstream, single,
+  bridgeFetch, requireDemoIdentity, relay, failConfig, failUpstream, single,
   BridgeConfigError, type ProxyRequest, type ProxyResponse,
 } from '../../_lib/bridge.ts';
 
@@ -22,15 +22,9 @@ export default async function handler(req: ProxyRequest, res: ProxyResponse): Pr
       res.status(400).json({ error: 'Ticket id is required.' });
       return;
     }
-    const identity = readIdentity({
-      externalUserId: single(req.query.externalUserId),
-      externalOrgId: single(req.query.externalOrgId),
-    });
-    if (!identity) {
-      res.status(400).json({ error: 'externalUserId and externalOrgId are required.' });
-      return;
-    }
-    const qs = new URLSearchParams(identity).toString();
+    const identity = requireDemoIdentity(res, single(req.query.demoAccountId));
+    if (!identity) return; // 400 already written
+    const qs = new URLSearchParams([['externalUserId', identity.externalUserId], ['externalOrgId', identity.externalOrgId]]).toString();
     const bridgeRes = await bridgeFetch(`/customer/tickets/${encodeURIComponent(id)}?${qs}`, { method: 'GET' });
     await relay(res, bridgeRes);
   } catch (err) {

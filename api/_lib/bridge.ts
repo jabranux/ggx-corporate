@@ -15,17 +15,24 @@
  *
  * ── POC identity assumption (deliberate, documented) ───────────────────────
  * GGX Corporate has no server-side session yet — it is a mock/demo app whose
- * "signed-in user" lives in browser localStorage (`authService`). The
- * requester identity (`externalUserId`/`externalOrgId`) is therefore resolved
- * CLIENT-SIDE (`heyqService.getRequesterIdentity`) and sent to this proxy like
- * any other request field, exactly as it already was sent directly to the
- * Bridge before this proxy existed. This proxy narrows what the browser can do
- * — it can only call these fixed Corporate routes with a JSON body, never an
- * arbitrary Bridge path, header, or the secret itself — but it does NOT
- * verify the identity against a real session. That verification is explicitly
- * deferred to production (see the handoff doc's "Production auth deferred"
- * section) and must not be assumed to be a real authorization boundary.
+ * "signed-in user" lives in browser localStorage (`authService`). The browser
+ * therefore cannot be trusted to state its own `externalUserId`/`externalOrgId`
+ * (a caller could invoke this proxy with someone else's identity and it would
+ * be forwarded to Bridge as-is — this was flagged as a P1 in the handoff doc's
+ * §12.2 re-audit). Fix: the browser sends only an opaque `demoAccountId`
+ * (`heyqService.getDemoAccountId()`), and `resolveDemoIdentity`
+ * (`api/_lib/demoIdentity.ts`) is the ONLY place that maps it to a Bridge
+ * identity, by looking it up in the app's existing fixed demo-user dataset.
+ * Every route below MUST call `requireDemoIdentity` and use ONLY its result —
+ * never read `externalUserId`/`externalOrgId` directly off the request.
+ * This narrows what the browser can do — it can only select one of a small,
+ * fixed set of demo accounts this deployment ships, and only through a
+ * server-owned lookup, never by asserting arbitrary identity fields — but it
+ * is still NOT a verified session (see `demoIdentity.ts`'s docblock for the
+ * exact boundary). Real session-derived identity is deferred to production
+ * (see the handoff doc's "Production auth" section).
  */
+import { resolveDemoIdentity, type BridgeIdentity } from './demoIdentity.ts';
 
 export class BridgeConfigError extends Error {}
 
@@ -94,17 +101,25 @@ export async function bridgeFetch(path: string, init: BridgeFetchInit): Promise<
 }
 
 /**
- * The only client-supplied identity validation this POC performs: both fields
- * must be present, non-empty strings. This is input validation, not
- * authentication/authorization — see the module docblock.
+ * Resolve `demoAccountId` to a Bridge identity via the app's fixed demo-user
+ * allowlist (`demoIdentity.ts`), or write a fail-closed `400` and return
+ * `null`. This is the ONLY identity path a route may use — never read
+ * `externalUserId`/`externalOrgId` directly off the request, even if present
+ * (a caller sending those fields must have no effect: they are ignored, not
+ * merged or used as a fallback).
+ *
+ * Callers MUST `return` immediately when this returns `null` — the 400 is
+ * already written to `res`.
  */
-export function readIdentity(
-  source: Record<string, unknown> | undefined | null,
-): { externalUserId: string; externalOrgId: string } | null {
-  const externalUserId = typeof source?.externalUserId === 'string' ? source.externalUserId.trim() : '';
-  const externalOrgId = typeof source?.externalOrgId === 'string' ? source.externalOrgId.trim() : '';
-  if (!externalUserId || !externalOrgId) return null;
-  return { externalUserId, externalOrgId };
+export function requireDemoIdentity(res: ProxyResponse, demoAccountId: unknown): BridgeIdentity | null {
+  const identity = resolveDemoIdentity(demoAccountId);
+  if (!identity) {
+    res.status(400).json({
+      error: 'Unknown or missing demo account. Sign in with one of this app’s demo accounts and try again.',
+    });
+    return null;
+  }
+  return identity;
 }
 
 /**

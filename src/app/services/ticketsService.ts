@@ -22,7 +22,6 @@ import {
   listMyTickets,
   getMyTicket,
   replyToMyTicket,
-  reopenMyTicket,
   TICKET_STATUS_META,
   TICKET_PRIORITY_META,
   TICKET_STATUS_OPTIONS,
@@ -156,14 +155,13 @@ export async function getTicketById(id: string): Promise<HeyQResult<CustomerTick
   return getMyTicket(id);
 }
 
-/** Post a public reply (text-only). In HeyQ this reopens a resolved/closed
- * ticket. `messageId`, when given, is the Bridge idempotency identifier for
- * this reply (see `heyqService.replyToMyTicket`). */
+/**
+ * Post a public reply (text-only). Replying to a resolved/closed ticket
+ * reopens it in HeyQ — the only supported reopen path (there is no separate
+ * explicit reopen call any more; see docs/migration/ggx-corporate-heyq-live-ticketing.md
+ * "Reopen removal"). `messageId`, when given, is the Bridge idempotency
+ * identifier for this reply (see `heyqService.replyToMyTicket`).
+ */
 export async function replyToTicket(id: string, body: string, messageId?: string): Promise<HeyQResult<CustomerTicket>> {
   return replyToMyTicket(id, body, messageId);
-}
-
-/** Reopen a resolved/closed ticket. */
-export async function reopenTicket(id: string): Promise<HeyQResult<CustomerTicket>> {
-  return reopenMyTicket(id);
 }

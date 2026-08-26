@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { useNavigate, useParams, Link } from 'react-router';
 import {
   IconArrowLeft, IconSend, IconUser, IconHeadset, IconPackage, IconCalendar,
-  IconUsersGroup, IconRefresh, IconInfoCircle, IconRotateClockwise,
+  IconUsersGroup, IconRefresh, IconInfoCircle,
   IconPaperclip, IconAlertTriangle, IconLoader2, IconReload, IconX, IconWifi,
   IconDownload,
 } from '@tabler/icons-react';
@@ -135,10 +135,6 @@ function LiveTicketView({
     await convo.send(body);
   };
 
-  const handleReopen = async () => {
-    await convo.reopen();
-  };
-
   return (
     <div className="p-6 space-y-6">
       {back}
@@ -160,7 +156,7 @@ function LiveTicketView({
 
       {ticket.status === 'resolved' && (
         <Alert variant="success" title="This ticket has been resolved">
-          If this isn’t sorted, replying below or reopening will bring it back to our support team.
+          If this isn’t sorted, replying below will bring it back to our support team.
         </Alert>
       )}
       {ticket.reopenedAt && ticket.status !== 'resolved' && ticket.status !== 'closed' && (
@@ -215,12 +211,6 @@ function LiveTicketView({
                   </p>
                 )}
                 <div className="flex items-center justify-end gap-3">
-                  {ticket.canReopen && (
-                    <Button variant="outline" onClick={handleReopen} disabled={sending}>
-                      <IconRotateClockwise className="w-4 h-4 mr-2" />
-                      Reopen ticket
-                    </Button>
-                  )}
                   <Button disabled={!reply.trim() || sending} onClick={handleSend}>
                     {sending
                       ? <IconLoader2 className="w-4 h-4 mr-2 animate-spin" />

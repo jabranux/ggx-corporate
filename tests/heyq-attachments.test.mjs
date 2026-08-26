@@ -122,7 +122,7 @@ describe('create and reply never send a multipart body — attachments are disab
   it('apiCreateTicket has no files parameter and always posts plain JSON to the support proxy', async () => {
     const { calls } = await withStub(async (WHO) => {
       const api = await import('/src/app/services/heyqCustomerApi.ts');
-      return api.apiCreateTicket(WHO, { name: 'Max', email: WHO.externalUserId, concernType: 'delivery_delay', subject: 's', description: 'd' });
+      return api.apiCreateTicket('user-admin-001', { name: 'Max', email: WHO.externalUserId, concernType: 'delivery_delay', subject: 's', description: 'd' });
     }, { response: TICKET_RESPONSE() });
     const create = calls.find((c) => c.method === 'POST' && c.url.endsWith('/api/support/tickets'));
     assert.ok(create, 'a create POST must be issued');
@@ -130,9 +130,9 @@ describe('create and reply never send a multipart body — attachments are disab
   });
 
   it('apiReplyToMyTicket has no files parameter and always posts plain JSON to the support proxy', async () => {
-    const { calls } = await withStub(async (WHO) => {
+    const { calls } = await withStub(async () => {
       const api = await import('/src/app/services/heyqCustomerApi.ts');
-      return api.apiReplyToMyTicket(WHO, 'tkt_att', 'here is my update, no file needed');
+      return api.apiReplyToMyTicket('user-admin-001', 'tkt_att', 'here is my update, no file needed');
     }, { response: TICKET_RESPONSE() });
     const reply = calls.find((c) => c.method === 'POST' && /\/api\/support\/tickets\/tkt_att\/messages$/.test(c.url));
     assert.ok(reply, 'a reply POST must be issued');

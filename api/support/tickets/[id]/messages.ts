@@ -7,7 +7,7 @@
  * of creating a second message.
  */
 import {
-  bridgeFetch, readIdentity, hasAttachmentPayload, relay, failConfig, failUpstream, single,
+  bridgeFetch, requireDemoIdentity, hasAttachmentPayload, relay, failConfig, failUpstream, single,
   BridgeConfigError, type ProxyRequest, type ProxyResponse,
 } from '../../../_lib/bridge.ts';
 
@@ -24,19 +24,18 @@ export default async function handler(req: ProxyRequest, res: ProxyResponse): Pr
       return;
     }
     const body = (req.body ?? {}) as Record<string, unknown>;
-    const identity = readIdentity(body);
-    if (!identity) {
-      res.status(400).json({ error: 'externalUserId and externalOrgId are required.' });
-      return;
-    }
-    if (hasAttachmentPayload(body)) {
+    const { demoAccountId, externalUserId: _ignoredUserId, externalOrgId: _ignoredOrgId, ...rest } = body;
+    const identity = requireDemoIdentity(res, demoAccountId);
+    if (!identity) return; // 400 already written
+
+    if (hasAttachmentPayload(rest)) {
       res.status(400).json({ error: 'Attachments are not supported in this integration.' });
       return;
     }
     const messageId = single(req.headers['x-bridge-message-id']);
     const bridgeRes = await bridgeFetch(`/customer/tickets/${encodeURIComponent(id)}/messages`, {
       method: 'POST',
-      body,
+      body: { ...rest, ...identity }, // server-resolved identity always wins
       headers: messageId ? { 'X-Bridge-Message-Id': messageId } : undefined,
     });
     await relay(res, bridgeRes);

@@ -4,26 +4,23 @@
  *   GET  → the signed-in requester's tickets (Bridge `GET /customer/tickets`).
  *   POST → create a ticket (Bridge `POST /customer/tickets`).
  *
- * See `api/_lib/bridge.ts` for the security boundary and the POC identity
- * assumption this proxy relies on.
+ * See `api/_lib/bridge.ts` for the security boundary and `demoIdentity.ts`
+ * for the POC identity mapping this proxy relies on. Both routes resolve
+ * identity from `demoAccountId` ONLY — any `externalUserId`/`externalOrgId`
+ * the caller also sends is discarded, never forwarded to Bridge.
  */
 import {
-  bridgeFetch, readIdentity, hasAttachmentPayload, relay, failConfig, failUpstream, single,
+  bridgeFetch, requireDemoIdentity, hasAttachmentPayload, relay, failConfig, failUpstream, single,
   BridgeConfigError, type ProxyRequest, type ProxyResponse,
 } from '../../_lib/bridge.ts';
 
 export default async function handler(req: ProxyRequest, res: ProxyResponse): Promise<void> {
   try {
     if (req.method === 'GET') {
-      const identity = readIdentity({
-        externalUserId: single(req.query.externalUserId),
-        externalOrgId: single(req.query.externalOrgId),
-      });
-      if (!identity) {
-        res.status(400).json({ error: 'externalUserId and externalOrgId are required.' });
-        return;
-      }
-      const qs = new URLSearchParams(identity).toString();
+      const identity = requireDemoIdentity(res, single(req.query.demoAccountId));
+      if (!identity) return; // 400 already written
+
+      const qs = new URLSearchParams([['externalUserId', identity.externalUserId], ['externalOrgId', identity.externalOrgId]]).toString();
       const bridgeRes = await bridgeFetch(`/customer/tickets?${qs}`, { method: 'GET' });
       await relay(res, bridgeRes);
       return;
@@ -31,21 +28,20 @@ export default async function handler(req: ProxyRequest, res: ProxyResponse): Pr
 
     if (req.method === 'POST') {
       const body = (req.body ?? {}) as Record<string, unknown>;
-      const identity = readIdentity(body);
-      if (!identity) {
-        res.status(400).json({ error: 'externalUserId and externalOrgId are required.' });
-        return;
-      }
+      const { demoAccountId, externalUserId: _ignoredUserId, externalOrgId: _ignoredOrgId, ...rest } = body;
+      const identity = requireDemoIdentity(res, demoAccountId);
+      if (!identity) return; // 400 already written
+
       // Text-only Bridge: refuse attachment payloads here rather than round-
       // tripping to Bridge — no upload/storage handling is built in this proxy.
-      if (hasAttachmentPayload(body)) {
+      if (hasAttachmentPayload(rest)) {
         res.status(400).json({ error: 'Attachments are not supported in this integration.' });
         return;
       }
       const idempotencyKey = single(req.headers['idempotency-key']);
       const bridgeRes = await bridgeFetch('/customer/tickets', {
         method: 'POST',
-        body,
+        body: { ...rest, ...identity }, // server-resolved identity always wins
         headers: idempotencyKey ? { 'Idempotency-Key': idempotencyKey } : undefined,
       });
       await relay(res, bridgeRes);

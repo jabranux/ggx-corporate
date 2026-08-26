@@ -17,12 +17,25 @@
  * status) is read through `transactionService`, never from HeyQ and never from
  * page state.
  *
- * Corporate proxy routes used (requester-scoped, all same-origin):
+ * Corporate proxy routes used (all same-origin):
  *   GET  /api/support/tickets                → listMyTickets
  *   GET  /api/support/tickets/:id             → getMyTicket
  *   POST /api/support/tickets                 → submitOrderReport (create)
  *   POST /api/support/tickets/:id/messages    → replyToMyTicket
- *   POST /api/support/tickets/:id/reopen      → reopenMyTicket
+ *
+ * Every one of those calls is scoped by `demoAccountId` (`getDemoAccountId`
+ * below), NOT `externalUserId`/`externalOrgId` — the proxy derives Bridge
+ * identity itself from an allowlisted POC demo-account mapping
+ * (`api/_lib/demoIdentity.ts`) and ignores anything else the caller sends.
+ * See that file's docblock and the handoff doc's "POC identity mapping"
+ * section for the full design and its explicit limits (NOT production auth).
+ *
+ * There is no explicit reopen route/action any more (removed — see the
+ * handoff doc's "Reopen removal" section): the legacy Bridge reopen endpoint
+ * only worked against HeyQ's in-memory store, never a Bridge/Supabase-created
+ * ticket. Replying to a resolved/on_hold ticket still reopens it automatically
+ * through Bridge's working RPC path (`replyToMyTicket`) — that remains the
+ * supported way to bring a ticket back.
  *
  * ── What this adapter deliberately does NOT do ─────────────────────────────
  * It exposes no agent/internal surface. Internal notes, assignee identity, team
@@ -40,7 +53,6 @@ import {
   apiListMyTickets,
   apiGetMyTicket,
   apiReplyToMyTicket,
-  apiReopenMyTicket,
   apiCreateTicket,
   apiMintRealtimeToken,
   buildAttachmentUrl,
@@ -270,9 +282,16 @@ export const REPORT_CONCERN_OPTIONS: { value: HeyQConcernType; label: string }[]
 // ── Identity ─────────────────────────────────────────────────────────────────
 
 /**
- * The signed-in Business+ user, as HeyQ's requester identity. In production the
- * handoff carries a verifiable session (e.g. a signed token) that resolves to
- * this on HeyQ's side; today we pass the external ids explicitly.
+ * The signed-in Business+ user's OMS/account scope, as `{externalUserId,
+ * externalOrgId}`. LOCAL USE ONLY — order authorization against
+ * `transactionService` (`getAuthorizedOrder`, `listAuthorizedTransactions`,
+ * `getLiveOrderStatus`) and the dormant realtime/attachment helpers (see
+ * `heyqCustomerApi`'s docblock). This is deliberately NOT sent to the Corporate
+ * support proxy for any ticket read/write any more — a browser-stated
+ * `externalUserId`/`externalOrgId` was a P1 authorization gap (handoff doc
+ * §12.2): the proxy now derives Bridge identity itself from `getDemoAccountId`
+ * below. If you're adding a call to the Bridge-facing proxy, use
+ * `getDemoAccountId`, not this.
  */
 export async function getRequesterIdentity(): Promise<HeyQRequesterIdentity | null> {
   const session = await getSessionContext();
@@ -281,6 +300,26 @@ export async function getRequesterIdentity(): Promise<HeyQRequesterIdentity | nu
     externalUserId: session.user.email,
     externalOrgId: session.accountId,
   };
+}
+
+/**
+ * The opaque POC/demo account identifier sent to the Corporate support proxy
+ * for every ticket read/write. It is the stable `id` already on the app's
+ * mock session user (`MockAuthUser.id`, e.g. `user-admin-001`) — NOT
+ * `externalUserId`/`externalOrgId`. The proxy (`api/_lib/demoIdentity.ts`)
+ * is the only place that maps it to a Bridge identity, by looking it up in
+ * the SAME fixed demo-user dataset `authService` is backed by; an unknown
+ * value (which can't happen from this function, but could from a
+ * hand-crafted request) fails closed there. Returns null when signed out.
+ *
+ * This is a POC-appropriate mapping, not production authentication — see
+ * `demoIdentity.ts`'s docblock and the handoff doc's "POC identity mapping"
+ * section for the exact boundary and what real production auth still needs.
+ */
+export async function getDemoAccountId(): Promise<string | null> {
+  const session = await getSessionContext();
+  if (!session.isAuthenticated || !session.user) return null;
+  return session.user.id;
 }
 
 // ── OMS order authorization + snapshot ───────────────────────────────────────
@@ -454,10 +493,13 @@ export async function getAttachmentUrl(ticketId: string, attachmentId: string, i
 export async function submitOrderReport(input: OrderReportInput): Promise<HeyQResult<CustomerTicket>> {
   const session = await getSessionContext();
   if (!session.isAuthenticated || !session.user || !session.accountId) return { status: 'forbidden' };
+  // Local OMS authorization scope (never sent to Bridge — see getRequesterIdentity's docblock).
   const who: HeyQRequesterIdentity = {
     externalUserId: session.user.email,
     externalOrgId: session.accountId,
   };
+  // What actually goes to the Corporate support proxy for the Bridge create call.
+  const demoAccountId = session.user.id;
 
   const capturedAt = new Date().toISOString();
   // Snapshot is REQUIRED on each entry here (unlike the display-only HeyQLinkedOrder,
@@ -479,7 +521,7 @@ export async function submitOrderReport(input: OrderReportInput): Promise<HeyQRe
     });
   }
 
-  return apiCreateTicket(who, {
+  return apiCreateTicket(demoAccountId, {
     name: session.user.name,
     email: session.user.email,
     concernType: input.concernType,
@@ -491,41 +533,35 @@ export async function submitOrderReport(input: OrderReportInput): Promise<HeyQRe
 
 // ── Requester-facing ticket reads + writes (HeyQ customer API) ────────────────
 
-/** The signed-in user's tickets. Scoped by HeyQ to their identity. */
+/** The signed-in user's tickets. Scoped by the support proxy to their demo account. */
 export async function listMyTickets(): Promise<CustomerTicket[]> {
-  const who = await getRequesterIdentity();
-  if (!who) return [];
-  return apiListMyTickets(who);
+  const demoAccountId = await getDemoAccountId();
+  if (!demoAccountId) return [];
+  return apiListMyTickets(demoAccountId);
 }
 
 /** One of the signed-in user's tickets. Another user's ticket is `not_found`. */
 export async function getMyTicket(id: string): Promise<HeyQResult<CustomerTicket>> {
-  const who = await getRequesterIdentity();
-  if (!who) return { status: 'forbidden' };
-  return apiGetMyTicket(who, id);
+  const demoAccountId = await getDemoAccountId();
+  if (!demoAccountId) return { status: 'forbidden' };
+  return apiGetMyTicket(demoAccountId, id);
 }
 
 /**
  * Post a public reply (text-only — see the module docblock). Replying to a
- * resolved/closed ticket reopens it in HeyQ. `messageId`, when given, is
- * forwarded as the Bridge idempotency identifier for this reply — the caller
- * reuses the same id across a retry of the same logical send.
+ * resolved/closed ticket reopens it in HeyQ (the only supported reopen path —
+ * see the module docblock). `messageId`, when given, is forwarded as the
+ * Bridge idempotency identifier for this reply — the caller reuses the same
+ * id across a retry of the same logical send.
  */
 export async function replyToMyTicket(
   id: string,
   body: string,
   messageId?: string,
 ): Promise<HeyQResult<CustomerTicket>> {
-  const who = await getRequesterIdentity();
-  if (!who) return { status: 'forbidden' };
-  return apiReplyToMyTicket(who, id, body, messageId);
-}
-
-/** Reopen a resolved/closed ticket. HeyQ owns the resulting state transition. */
-export async function reopenMyTicket(id: string): Promise<HeyQResult<CustomerTicket>> {
-  const who = await getRequesterIdentity();
-  if (!who) return { status: 'forbidden' };
-  return apiReopenMyTicket(who, id);
+  const demoAccountId = await getDemoAccountId();
+  if (!demoAccountId) return { status: 'forbidden' };
+  return apiReplyToMyTicket(demoAccountId, id, body, messageId);
 }
 
 // ── Realtime (DORMANT — live ticket conversation over the HeyQ WebSocket) ─────

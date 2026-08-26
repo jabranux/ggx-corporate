@@ -1,14 +1,17 @@
 # GGX Corporate ⇄ QuadX Bridge / HeyQ Live Ticketing Integration
 
-**Status:** BFF IMPLEMENTED — PENDING LIVE-BRIDGE RE-AUDIT (see §11)  
+**Status:** POC IDENTITY CORRECTED, REOPEN REMOVED — PENDING LIVE-BRIDGE RE-AUDIT (see §13)  
 **Integration Boundary:** `GGX Corporate Browser → Corporate /api/support/* proxy → QuadX Bridge → HeyQ/Supabase`  
 **Handoff File:** `docs/migration/ggx-corporate-heyq-live-ticketing.md`
 
 > §§1–10 below are the PRIOR handoff (browser called Bridge directly — this is
 > what the 2026-08-26 cross-application audit correctly flagged as insufficient).
 > §11 documents the lightweight Corporate support proxy (BFF) built to close
-> that gap. Read §11 first; §§1–10 remain for the ticket lifecycle/contract
-> details, which are unchanged.
+> that gap. §12 is a follow-up re-audit that found the proxy still trusted a
+> browser-stated identity (P1) and that the explicit Reopen action was
+> knowingly non-functional (P2). §13 documents the corrective pass for both.
+> Read §13 first for current status; §§1–10 remain for the ticket
+> lifecycle/contract details, which are unchanged.
 
 ---
 
@@ -447,3 +450,181 @@ Do one of the following before release:
 4. Smoke-test the Vercel deployment's `/api/support/**` routes rather than
    relying only on local handler stubs.
 5. Resolve or remove the explicit reopen affordance.
+
+---
+
+## 13. POC Identity Correction & Reopen Removal (2026-08-26)
+
+Narrow corrective pass responding to §12.2 (P1: forgeable requester identity)
+and §12.3 (P2: knowingly non-functional Reopen). Scope was deliberately
+narrow, per instruction: fix only these two applicable Corporate issues. No
+production auth/session system was built, Corporate account management was
+not redesigned, HeyQ/the deployed Bridge's security model were not touched,
+attachments remain unimplemented, and no new ticket-lifecycle behavior was
+added.
+
+### 13.1 POC server-side identity mapping (fixes §12.2)
+
+**Before:** every `/api/support/*` route read `externalUserId`/`externalOrgId`
+directly off the browser-controlled query/body and forwarded them to Bridge
+as-is. A caller could invoke the same-origin route with a different identity
+and the proxy would authenticate it to Bridge with the Corporate secret
+regardless — a secret-hiding proxy, not an identity-authorizing one.
+
+**After:** the browser sends only an opaque `demoAccountId` — the stable `id`
+field already on the app's mock session user (`MockAuthUser.id`, e.g.
+`user-admin-001`), returned by the new `heyqService.getDemoAccountId()`
+(reads `authService.getSessionContext().user.id`). It is NOT
+`externalUserId`/`externalOrgId`, and carries no more information than "which
+of the app's two fixed demo accounts is currently signed in."
+
+**Server-side mapping — new file `api/_lib/demoIdentity.ts`:**
+
+```ts
+resolveDemoIdentity(demoAccountId: unknown): { externalUserId; externalOrgId } | null
+```
+
+It builds a `Map<id, {externalUserId, externalOrgId}>` from
+`MOCK_AUTH_USERS` — the SAME dataset `src/app/services/authService.ts` is
+already backed by (imported directly, not duplicated, so a demo account added
+there is automatically valid here with nothing else to keep in sync). Today
+that's exactly two entries:
+
+| `demoAccountId` | → `externalUserId` | → `externalOrgId` | Demo role |
+|---|---|---|---|
+| `user-admin-001` | `max@email.com` | `main` | Admin |
+| `user-mgr-001` | `manager@email.com` | `acme-luzon` | Manager |
+
+**`api/_lib/bridge.ts:requireDemoIdentity(res, demoAccountId)`** is now the
+ONLY identity path every route may use: it calls `resolveDemoIdentity` and
+either returns the resolved `{externalUserId, externalOrgId}` or writes a
+`400` and returns `null` (caller returns immediately). Every route
+(`api/support/tickets/index.ts`, `[id].ts`, `[id]/messages.ts`) explicitly
+destructures and **discards** any `demoAccountId`/`externalUserId`/
+`externalOrgId` the request body also carries before building the Bridge
+payload — the server-resolved identity is spread in last, so it always wins;
+nothing from the client can override or merge into it.
+
+**Client side:** `heyqCustomerApi.ts`'s `apiListMyTickets`, `apiGetMyTicket`,
+`apiReplyToMyTicket`, `apiCreateTicket` now take `demoAccountId: string`
+instead of a `HeyQRequesterIdentity` object; `heyqService.ts`'s
+`listMyTickets`/`getMyTicket`/`replyToMyTicket`/`submitOrderReport` resolve it
+via `getDemoAccountId()`. `heyqService.getRequesterIdentity()` (the old
+`{externalUserId, externalOrgId}` shape) still exists but is now scoped to
+**local-only** uses that never cross the wire to Bridge: OMS order
+authorization (`getAuthorizedOrder`, `listAuthorizedTransactions`,
+`getLiveOrderStatus`) and the dormant realtime/attachment helpers (unchanged,
+out of scope — see §11.4).
+
+**Explicitly NOT production authentication** (per instruction, not built):
+there is no session token, signature, or expiry on `demoAccountId` — it is
+exactly as forgeable as `externalUserId` was; a caller can still send a
+*different demo account's* id and act as them. What changed is narrower: the
+browser can no longer invent a Bridge identity that isn't one of this
+deployment's fixed demo accounts, and the mapping now happens server-side
+against a server-owned table instead of being echoed back from the request.
+This is sufficient **only** for a controlled demo environment with a small,
+fixed, non-sensitive account set. Real production identity still requires a
+verified server-side session (replacing `authService.ts`'s
+browser-localStorage mock) feeding `api/_lib/demoIdentity.ts`'s role — see
+`demoIdentity.ts`'s own docblock for the full boundary statement.
+
+### 13.2 Reopen removal (fixes §12.3)
+
+Per §12.3/§11.7, `POST /tickets/:id/reopen` only works against HeyQ's legacy
+in-memory store, never a Bridge/Supabase-created ticket — the explicit
+"Reopen ticket" button was knowingly non-functional for every real ticket.
+Rather than leave it or modify Bridge/HeyQ to preserve it (out of scope), it
+was removed:
+
+- **Deleted:** `api/support/tickets/[id]/reopen.ts` (the proxy route),
+  `apiReopenMyTicket` (`heyqCustomerApi.ts`), `reopenMyTicket`
+  (`heyqService.ts`), `reopenTicket` (`ticketsService.ts`), the `reopen`
+  callback and its entry in `TicketConversation` (`useTicketConversation.ts`),
+  and the "Reopen ticket" button + `handleReopen` + unused
+  `IconRotateClockwise` import (`SupportTicketDetail.tsx`).
+- **Preserved — the actual supported lifecycle:** replying to a
+  `resolved`/`on_hold` ticket still reopens it automatically, because that
+  goes through Bridge's atomic `add_customer_message_bridge` RPC (the working
+  Supabase-backed path) rather than the broken legacy route. The resolved-
+  ticket banner now reads "…replying below will bring it back to our support
+  team" (dropped "…or reopening"). The `canReopen` field is still read from
+  Bridge and mapped through (`CustomerTicket.canReopen`) — it's just no
+  longer wired to a UI action, since it was reused as pure data rather than
+  stripped from the type.
+- HeyQ/the deployed Bridge were not modified — this is a Corporate-only
+  removal of a non-functional affordance, not a workaround built to keep it
+  alive.
+
+### 13.3 Environment readiness (unchanged from §11.3, restated)
+
+`QUADX_BRIDGE_URL` / `QUADX_BRIDGE_API_KEY` remain server-only env vars
+(`.env.example`), never hardcoded, never `VITE_`-prefixed. This environment
+still has neither configured, so automated tests remain mocked/stubbed at the
+`window.fetch` layer (client-side) and at `global.fetch` (a throwaway
+Node smoke script directly invoking the real route handlers — see §13.4).
+**Live E2E against the deployed Bridge was NOT executed and must not be
+reported as such** — it requires those two values from whoever operates the
+real deployment.
+
+### 13.4 Validation performed
+
+- `npm run typecheck` — 0 errors.
+- A dedicated TypeScript check over `api/_lib/*.ts` + all three remaining
+  `api/support/tickets/**` route files (`--strict --jsx react-jsx`, since
+  `demoIdentity.ts` now reaches into `src/app/data/mock/auth.mock.ts`) — 0
+  errors. This directory is still outside `tsconfig.app.json`'s `include` by
+  design (a separate Vercel-built target), so it needs this explicit check.
+- `npm run build` — succeeds; `grep -rl QUADX_BRIDGE_API_KEY dist/` and
+  `grep -rl X-Corporate-Internal-Key dist/` both return nothing.
+- `npm test` — **71/71 passing**, including:
+  - the read/write URL now carries `demoAccountId` (`user-admin-001` for the
+    admin session), never `externalUserId`/`externalOrgId`;
+  - signing in as the manager demo account maps to its own `demoAccountId`
+    (`user-mgr-001`) on the same read call — "switching among legitimately
+    supported demo accounts still works" (validation item 5);
+  - the create POST body carries `demoAccountId` and explicitly does NOT
+    carry `externalUserId`/`externalOrgId`;
+  - idempotency coverage (`Idempotency-Key` per create,
+    `X-Bridge-Message-Id` reused on reply retry) re-verified against the new
+    `demoAccountId`-based call signatures;
+  - a resolved, `canReopen: true` fixture ticket (`HQ-10230`) renders no
+    button matching `/reopen/i` and no "…or reopening" banner text.
+- **Manual smoke test** (throwaway script, `--experimental-strip-types`, not
+  committed) directly invoked the real route handlers with a stubbed
+  `global.fetch` and confirmed: a known `demoAccountId` (admin) resolves to
+  `max@email.com`/`main` while spoofed `externalUserId`/`externalOrgId` query
+  params alongside it are ignored; the manager account resolves to its own
+  identity; an unknown `demoAccountId` → `400`, Bridge never called; a
+  *missing* `demoAccountId` → `400`, Bridge never called; a POST create with
+  a spoofed identity in the body still resolves the identity server-side, the
+  spoofed fields are dropped, `demoAccountId` itself never leaks into the
+  Bridge payload, and `Idempotency-Key` is still forwarded; the same holds for
+  GET-one and POST-reply (`X-Bridge-Message-Id` still forwarded); and
+  `api/support/tickets/[id]/reopen.ts` no longer exists as a module at all.
+- **Not performed — live Bridge round trip.** Same blocker as §11.8/§12.1:
+  this environment has neither `QUADX_BRIDGE_URL` nor `QUADX_BRIDGE_API_KEY`
+  configured, and no reachable Bridge origin is documented anywhere in either
+  repo. A live cross-account negative test (§12.4 item 3) — confirming a
+  *live* Bridge actually refuses a mismatched identity, not just that
+  Corporate no longer offers one — remains outstanding and requires those
+  values from a real deployment.
+
+### 13.5 Remaining gates (supersedes §12.4 items 2 and 5)
+
+1. Deploy Corporate with a confirmed reachable `QUADX_BRIDGE_URL` and
+   `QUADX_BRIDGE_API_KEY` (unchanged from §12.4 item 1).
+2. ~~Implement server-verified Corporate auth/session hydration~~ — narrowed
+   by this pass to the extent in scope: the proxy no longer trusts a
+   browser-stated identity, via the POC demo-account allowlist in §13.1. A
+   REAL production session (replacing `authService.ts`'s mock) is still a
+   separate, larger piece of future work — deliberately not built here.
+3. Verify live (unchanged from §12.4 item 3): create, list/read, reply, retry
+   idempotently, receive a CSR reply through the five-second poll, and verify
+   a separate account receives no content/write access to another's ticket —
+   this time also confirming Bridge itself rejects a mismatched
+   `externalUserId`/`externalOrgId`, since Corporate can no longer construct
+   one in the first place to test the negative case client-side.
+4. Smoke-test the Vercel deployment's `/api/support/**` routes (unchanged
+   from §12.4 item 4).
+5. ~~Resolve or remove the explicit reopen affordance~~ — DONE (§13.2).

@@ -207,6 +207,18 @@ describe('Support Tickets page (reads the HeyQ customer API)', () => {
     // No new external handoff was triggered — the portal token action is gone.
     assert.equal((await handoffs()).length, before, 'View must not open an external HeyQ tab');
   });
+
+  it('does not present an explicit Reopen action on a resolved (canReopen) ticket', async () => {
+    // HQ-10230 is resolved with canReopen: true in the fixture — exactly the
+    // case the removed explicit Reopen button used to render for.
+    await page.goto(`${server.base}/dashboard/support-tickets/HQ-10230`, { waitUntil: 'networkidle' });
+    await page.getByText('COD amount remitted does not match the order').first().waitFor({ timeout: 10_000 });
+    await page.getByText('This ticket has been resolved').waitFor({ timeout: 10_000 });
+    // No standalone Reopen control anywhere on the page — replying is the only
+    // supported way to bring a resolved ticket back (see the handoff doc).
+    assert.equal(await page.getByRole('button', { name: /reopen/i }).count(), 0, 'no explicit Reopen button may be presented');
+    assert.equal(await page.getByText(/or reopening/i).count(), 0, 'the resolved banner must not mention a reopen action that no longer exists');
+  });
 });
 
 describe('responsive', () => {

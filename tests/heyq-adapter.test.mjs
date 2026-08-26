@@ -146,13 +146,41 @@ describe('configuration', () => {
   });
 });
 
-describe('requester identity', () => {
-  it('scopes the read to the signed-in identity via query params', async () => {
+describe('requester identity (POC demo-account mapping — handoff doc §12.2/§13)', () => {
+  it('scopes the read by an opaque demoAccountId — never externalUserId/externalOrgId', async () => {
     const { calls } = await withStub((svc) => svc.listMyTickets(), { response: [] });
     const url = new URL(customerReads(calls)[0].url, 'http://x');
-    // Admin session: max@email.com / main (the account scope).
-    assert.equal(url.searchParams.get('externalUserId'), 'max@email.com');
-    assert.equal(url.searchParams.get('externalOrgId'), 'main');
+    // Admin session's stable mock user id (MOCK_AUTH_USERS['max@email.com'].id).
+    assert.equal(url.searchParams.get('demoAccountId'), 'user-admin-001');
+    // The browser must not be able to state a Bridge identity directly any more.
+    assert.equal(url.searchParams.get('externalUserId'), null);
+    assert.equal(url.searchParams.get('externalOrgId'), null);
+  });
+
+  it('a different signed-in demo account maps to its own demoAccountId', async () => {
+    const mgr = await signIn(server.base, 'manager');
+    try {
+      const { calls } = await mgr.page.evaluate(async () => {
+        const calls = [];
+        const orig = window.fetch;
+        window.fetch = async (url, init) => {
+          calls.push({ url: String(url), method: init?.method ?? 'GET' });
+          return new Response(JSON.stringify([]), { status: 200, headers: { 'Content-Type': 'application/json' } });
+        };
+        try {
+          const svc = await import('/src/app/services/heyqService.ts');
+          await svc.listMyTickets();
+          return { calls };
+        } finally {
+          window.fetch = orig;
+        }
+      });
+      const read = calls.find((c) => c.method === 'GET' && c.url.includes('/api/support/tickets'));
+      const url = new URL(read.url, 'http://x');
+      assert.equal(url.searchParams.get('demoAccountId'), 'user-mgr-001');
+    } finally {
+      await mgr.browser.close();
+    }
   });
 });
 
@@ -236,13 +264,6 @@ describe('requester writes go through the support proxy, then re-read the custom
     assert.ok(reread, 'the customer view must be re-read after the reply');
   });
 
-  it('reopen posts to /api/support/tickets/:id/reopen then re-reads the customer view', async () => {
-    const { result, calls } = await withStub((svc) => svc.reopenMyTicket('tkt_abc123'), { response: HEYQ_TICKET });
-    assert.equal(result.status, 'ok');
-    assert.ok(calls.find((c) => c.method === 'POST' && /\/api\/support\/tickets\/tkt_abc123\/reopen$/.test(c.url)));
-    assert.ok(calls.find((c) => c.method === 'GET' && /\/api\/support\/tickets\/tkt_abc123\?/.test(c.url)));
-  });
-
   it('a failed reply surfaces the failure without re-reading', async () => {
     const { result, calls } = await withStub((svc) => svc.replyToMyTicket('tkt_x', 'hi'), {
       response: { error: 'forbidden' },
@@ -267,18 +288,18 @@ describe('idempotency headers reach the proxy', () => {
         };
         try {
           const api = await import('/src/app/services/heyqCustomerApi.ts');
-          const who = { externalUserId: 'max@email.com', externalOrgId: 'main' };
+          const demoAccountId = 'user-admin-001';
           // eslint-disable-next-line no-new-func
-          await new Function('api', 'who', `return (${src})(api, who);`)(api, who);
+          await new Function('api', 'demoAccountId', `return (${src})(api, demoAccountId);`)(api, demoAccountId);
           return calls;
         } finally {
           window.fetch = orig;
         }
       },
       {
-        src: ((api, who) => Promise.all([
-          api.apiCreateTicket(who, { name: 'Max', email: 'max@email.com', concernType: 'general_inquiry', subject: 's1', description: 'd1' }),
-          api.apiCreateTicket(who, { name: 'Max', email: 'max@email.com', concernType: 'general_inquiry', subject: 's2', description: 'd2' }),
+        src: ((api, demoAccountId) => Promise.all([
+          api.apiCreateTicket(demoAccountId, { name: 'Max', email: 'max@email.com', concernType: 'general_inquiry', subject: 's1', description: 'd1' }),
+          api.apiCreateTicket(demoAccountId, { name: 'Max', email: 'max@email.com', concernType: 'general_inquiry', subject: 's2', description: 'd2' }),
         ])).toString(),
         response: { id: 'tkt-x', reference: 'HQ-9', subject: 's', issueType: 'General', status: 'open', priority: 'normal', supportTeam: 'CS', createdAt: '2026-01-01T00:00:00Z', updatedAt: '2026-01-01T00:00:00Z', canReopen: false, messages: [] },
       },
@@ -301,18 +322,18 @@ describe('idempotency headers reach the proxy', () => {
         };
         try {
           const api = await import('/src/app/services/heyqCustomerApi.ts');
-          const who = { externalUserId: 'max@email.com', externalOrgId: 'main' };
+          const demoAccountId = 'user-admin-001';
           // eslint-disable-next-line no-new-func
-          await new Function('api', 'who', `return (${src})(api, who);`)(api, who);
+          await new Function('api', 'demoAccountId', `return (${src})(api, demoAccountId);`)(api, demoAccountId);
           return calls;
         } finally {
           window.fetch = orig;
         }
       },
       {
-        src: ((api, who) => Promise.all([
-          api.apiReplyToMyTicket(who, 'tkt1', 'hi', 'msg-uuid-1'),
-          api.apiReplyToMyTicket(who, 'tkt1', 'hi again (retry)', 'msg-uuid-1'),
+        src: ((api, demoAccountId) => Promise.all([
+          api.apiReplyToMyTicket(demoAccountId, 'tkt1', 'hi', 'msg-uuid-1'),
+          api.apiReplyToMyTicket(demoAccountId, 'tkt1', 'hi again (retry)', 'msg-uuid-1'),
         ])).toString(),
         response: HEYQ_TICKET,
       },
@@ -353,8 +374,9 @@ describe('submitting an order report (create via the customer API)', () => {
     const posts = creates(calls);
     assert.equal(posts.length, 1, 'exactly one create must be issued');
     const body = JSON.parse(posts[0].body);
-    assert.equal(body.externalUserId, 'max@email.com');
-    assert.equal(body.externalOrgId, 'main');
+    assert.equal(body.demoAccountId, 'user-admin-001');
+    assert.equal(body.externalUserId, undefined, 'the client must not send externalUserId directly');
+    assert.equal(body.externalOrgId, undefined, 'the client must not send externalOrgId directly');
     assert.equal(body.concernType, 'delivery_delay'); // mapped from failed_delivery
     assert.equal(body.subject, 'Delivery failed');
     // Multi-transaction wire shape: a linkedTransactions array (one entry here).

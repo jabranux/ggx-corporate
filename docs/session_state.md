@@ -3,6 +3,36 @@
 > Lightweight resume/checkpoint file. Detailed June 2026 history was archived to
 > `docs/archive/session_log_2026-06.md`.
 
+## Most Recent Work — POC identity correction + Reopen removal (2026-08-26)
+
+Narrow corrective pass on the Corporate support proxy responding to a Codex
+re-audit of `b9795cb`. Full write-up: `docs/migration/ggx-corporate-heyq-live-ticketing.md` §13.
+
+- **P1 fixed — requester identity was browser-forgeable.** Every
+  `/api/support/*` route used to read `externalUserId`/`externalOrgId`
+  straight off the browser-controlled request and forward them to Bridge
+  as-is. Now the browser sends only an opaque `demoAccountId` (the app's
+  existing mock-session user id, e.g. `user-admin-001`); a new
+  `api/_lib/demoIdentity.ts` maps it to a Bridge identity via an allowlist
+  built from `MOCK_AUTH_USERS` (the SAME dataset `authService.ts` already
+  uses — imported, not duplicated), and every route discards + ignores any
+  `externalUserId`/`externalOrgId`/`demoAccountId` the request also carries
+  before building the Bridge payload. Unknown/missing `demoAccountId` → `400`,
+  Bridge never called. Explicitly NOT production auth — still deferred.
+- **P2 fixed — explicit Reopen was knowingly non-functional.** It called
+  Bridge's legacy in-memory reopen route, which can't find a Bridge-created
+  ticket. Removed entirely (proxy route, `apiReopenMyTicket`,
+  `reopenMyTicket`, `reopenTicket`, the hook's `reopen`, the UI button).
+  Replying to a resolved ticket still reopens it automatically via the
+  working Supabase RPC path — unchanged, still the supported way.
+- **Validated:** `npm run typecheck`, a dedicated `api/**` TS check, `npm run
+  build` (secret still absent from `dist/`), `npm test` (71/71) all green; a
+  throwaway manual smoke script directly confirmed identity resolution,
+  fail-closed behavior, and spoofed-field rejection against the real handlers.
+- **Still not run — live E2E.** No `QUADX_BRIDGE_URL`/`QUADX_BRIDGE_API_KEY`
+  configured in this environment; a live round trip and a live cross-account
+  negative test against the real Bridge remain outstanding.
+
 ## Most Recent Work — Corporate support proxy / BFF for QuadX Bridge (2026-08-26)
 
 Built the minimum server-side proxy so the browser stops calling QuadX

@@ -29,10 +29,8 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   getTicketById,
   replyToTicket,
-  reopenTicket,
   type CustomerTicket,
   type CustomerTicketMessage,
-  type HeyQResult,
 } from '../services/ticketsService';
 import type { RealtimeStatus } from '../services/heyqRealtimeClient';
 
@@ -64,8 +62,6 @@ export interface TicketConversation {
   retry: (tempId: string) => Promise<void>;
   /** Discard a failed reply the requester no longer wants to send. */
   dismissFailed: (tempId: string) => void;
-  /** Reopen a resolved/closed ticket. */
-  reopen: () => Promise<HeyQResult<CustomerTicket>['status']>;
   /** No-op (dormant — see the module docblock). Kept so the reply composer's
    * wiring doesn't need to change if realtime typing ever comes back. */
   notifyTyping: (value: string) => void;
@@ -222,12 +218,6 @@ export function useTicketConversation(id: string, initialTicket: CustomerTicket)
     setPending((prev) => prev.filter((p) => !(p.tempId === tempId && p.status === 'failed')));
   }, []);
 
-  const reopen = useCallback(async () => {
-    const res = await reopenTicket(id);
-    if (res.status === 'ok') mergeTicket(res.data);
-    return res.status;
-  }, [id, mergeTicket]);
-
   return useMemo(
     () => ({
       ticket,
@@ -239,10 +229,9 @@ export function useTicketConversation(id: string, initialTicket: CustomerTicket)
       send,
       retry,
       dismissFailed,
-      reopen,
       notifyTyping,
       stopTyping,
     }),
-    [ticket, messages, pending, connection, sending, send, retry, dismissFailed, reopen, notifyTyping, stopTyping],
+    [ticket, messages, pending, connection, sending, send, retry, dismissFailed, notifyTyping, stopTyping],
   );
 }

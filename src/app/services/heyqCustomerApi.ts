@@ -10,9 +10,13 @@
  *   GET  /api/support/tickets/:id              → one of them
  *   POST /api/support/tickets                  → create a ticket
  *   POST /api/support/tickets/:id/messages     → a requester reply
- *   POST /api/support/tickets/:id/reopen       → a requester reopen
- * Full architecture + the POC identity assumption this relies on:
- * docs/migration/ggx-corporate-heyq-live-ticketing.md.
+ * There is no explicit reopen route any more — replying to a resolved/on_hold
+ * ticket already reopens it via Bridge's atomic RPC; the legacy explicit
+ * reopen endpoint only worked against HeyQ's in-memory store and was removed
+ * (see the handoff doc's "Reopen removal" section).
+ * Full architecture + the POC identity mapping this relies on:
+ * docs/migration/ggx-corporate-heyq-live-ticketing.md and
+ * `api/_lib/demoIdentity.ts`.
  *
  * The proxy forwards to QuadX Bridge's customer surface, which enforces
  * visibility SERVER-SIDE: the response is already projected to what a customer
@@ -22,9 +26,13 @@
  * below), so a malformed or over-broad response can never surface an agent-only
  * field into Business+.
  *
- * Requester identity is passed as query/body params today (externalUserId/Org),
- * resolved client-side from the app's mock/demo session and trusted by the proxy
- * as-is — a deliberate POC assumption, not production auth (see the handoff doc).
+ * Every call below is scoped by an opaque `demoAccountId`, NOT
+ * `externalUserId`/`externalOrgId` — the browser cannot state those directly
+ * (that was a P1 finding: docs/migration/ggx-corporate-heyq-live-ticketing.md
+ * §12.2). The proxy resolves them server-side from a fixed demo-account
+ * allowlist (`api/_lib/demoIdentity.ts`) and ignores anything else the request
+ * carries. Still a deliberate POC assumption, not production auth — see that
+ * file's docblock and the handoff doc.
  *
  * Attachments are NOT sent on this path: the approved Bridge contract is
  * text-only (upload bytes are rejected with 400), so `apiCreateTicket` /
@@ -292,14 +300,6 @@ function toCustomerTicket(t: HeyQApiCustomerTicket): CustomerTicket {
  */
 const SUPPORT_PROXY_BASE = '/api/support';
 
-function identityQuery(who: HeyQRequesterIdentity): string {
-  const q = new URLSearchParams({
-    externalUserId: who.externalUserId,
-    externalOrgId: who.externalOrgId,
-  });
-  return q.toString();
-}
-
 /** Map an HTTP status to the adapter's production-shaped result union. */
 function resultForStatus(status: number): 'forbidden' | 'not_found' | 'unavailable' {
   if (status === 403) return 'forbidden';
@@ -381,28 +381,37 @@ export function buildAttachmentUrl(
 
 // ── Public operations (consumed by heyqService) ───────────────────────────────
 // Every operation below calls the same-origin Corporate support proxy
-// (SUPPORT_PROXY_BASE), never QuadX Bridge/HeyQ directly.
+// (SUPPORT_PROXY_BASE), never QuadX Bridge/HeyQ directly, and is scoped by an
+// opaque `demoAccountId` — NOT `externalUserId`/`externalOrgId`. The proxy
+// (`api/_lib/demoIdentity.ts`) is the only place those get derived, from a
+// server-owned allowlist; see that file's docblock and the handoff doc's
+// "POC identity mapping" section.
 
 /** The signed-in requester's tickets. Any failure degrades to an empty list. */
-export async function apiListMyTickets(who: HeyQRequesterIdentity): Promise<CustomerTicket[]> {
-  const res = await getJson(SUPPORT_PROXY_BASE, `/tickets?${identityQuery(who)}`);
+export async function apiListMyTickets(demoAccountId: string): Promise<CustomerTicket[]> {
+  const res = await getJson(SUPPORT_PROXY_BASE, `/tickets?${new URLSearchParams({ demoAccountId })}`);
   if (!res.ok || !Array.isArray(res.data)) return [];
   return (res.data as HeyQApiCustomerTicket[]).map(toCustomerTicket);
 }
 
 /** One of the requester's tickets, or a typed failure. */
 export async function apiGetMyTicket(
-  who: HeyQRequesterIdentity,
+  demoAccountId: string,
   id: string,
 ): Promise<HeyQResult<CustomerTicket>> {
-  const res = await getJson(SUPPORT_PROXY_BASE, `/tickets/${encodeURIComponent(id)}?${identityQuery(who)}`);
+  const res = await getJson(
+    SUPPORT_PROXY_BASE,
+    `/tickets/${encodeURIComponent(id)}?${new URLSearchParams({ demoAccountId })}`,
+  );
   if (!res.ok) return { status: res.result };
   return { status: 'ok', data: toCustomerTicket(res.data as HeyQApiCustomerTicket) };
 }
 
 /**
  * Post a requester reply, then re-read the customer view so the caller gets the
- * updated thread + (if the ticket was resolved/closed) the reopened status.
+ * updated thread + (if the ticket was resolved/closed) the reopened status —
+ * replying to a resolved/on_hold ticket is the supported way to bring it back
+ * (there is no separate explicit reopen call any more; see the module docblock).
  *
  * Text-only — the approved Bridge contract rejects attachment bytes with 400,
  * so this never sends files (see the module docblock). `messageId`, when
@@ -411,7 +420,7 @@ export async function apiGetMyTicket(
  * atomic RPC dedupes an ambiguous retry instead of creating a second message.
  */
 export async function apiReplyToMyTicket(
-  who: HeyQRequesterIdentity,
+  demoAccountId: string,
   id: string,
   body: string,
   messageId?: string,
@@ -419,34 +428,11 @@ export async function apiReplyToMyTicket(
   const posted = await post(
     SUPPORT_PROXY_BASE,
     `/tickets/${encodeURIComponent(id)}/messages`,
-    { externalUserId: who.externalUserId, externalOrgId: who.externalOrgId, body },
+    { demoAccountId, body },
     messageId ? { 'X-Bridge-Message-Id': messageId } : undefined,
   );
   if (!posted.ok) return { status: posted.result };
-  return apiGetMyTicket(who, id);
-}
-
-/**
- * Reopen a resolved/closed ticket, then re-read the customer view.
- *
- * KNOWN LIMITATION: this Bridge route runs against HeyQ's legacy in-memory
- * ticket store, not the Supabase-backed path the rest of this contract uses,
- * so it does not find a Bridge-created ticket (see
- * docs/migration/ggx-corporate-heyq-live-ticketing.md). A reply already
- * reopens a resolved/on_hold ticket automatically via `apiReplyToMyTicket`,
- * which IS the Supabase-backed path — that is the reliable way to reopen a
- * ticket today.
- */
-export async function apiReopenMyTicket(
-  who: HeyQRequesterIdentity,
-  id: string,
-): Promise<HeyQResult<CustomerTicket>> {
-  const posted = await post(SUPPORT_PROXY_BASE, `/tickets/${encodeURIComponent(id)}/reopen`, {
-    externalUserId: who.externalUserId,
-    externalOrgId: who.externalOrgId,
-  });
-  if (!posted.ok) return { status: posted.result };
-  return apiGetMyTicket(who, id);
+  return apiGetMyTicket(demoAccountId, id);
 }
 
 export interface CreateCustomerTicketInput {
@@ -480,7 +466,7 @@ export interface CreateCustomerTicketInput {
  * ticket.
  */
 export async function apiCreateTicket(
-  who: HeyQRequesterIdentity,
+  demoAccountId: string,
   input: CreateCustomerTicketInput,
 ): Promise<HeyQResult<CustomerTicket>> {
   const linkedTransactions = input.linkedTransactions?.length
@@ -501,8 +487,7 @@ export async function apiCreateTicket(
   const trackingNumber = linkedTransactions?.[0]?.trackingNumber;
 
   const payload = {
-    externalUserId: who.externalUserId,
-    externalOrgId: who.externalOrgId,
+    demoAccountId,
     name: input.name,
     email: input.email,
     concernType: CONCERN_TO_HEYQ[input.concernType] ?? 'general_inquiry',
