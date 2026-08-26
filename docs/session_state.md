@@ -3,6 +3,37 @@
 > Lightweight resume/checkpoint file. Detailed June 2026 history was archived to
 > `docs/archive/session_log_2026-06.md`.
 
+## Most Recent Work — Live end-to-end validation against a real Bridge (2026-08-26)
+
+No hosted/reachable QuadX Bridge deployment exists (Railway decommissioned,
+no Vercel Functions deployment of it either — reconfirmed). What IS real and
+reachable: the Supabase project the Bridge writes to
+(`rwzwktrepfgsooerpyjx`), migration-synced locally via `supabase start`
+(already running, linked). Full write-up: `docs/migration/ggx-corporate-heyq-live-ticketing.md` §14.
+
+- Ran HeyQ's own unmodified `server/index.ts` locally, WITHOUT `--dev` (auth
+  gate enforced like production), against that local-mirrored real Postgres.
+  Drove Corporate's real `api/support/tickets/*.ts` handlers with real,
+  un-stubbed `fetch` against it — the most faithful "live" round trip
+  possible without a hosted Bridge URL.
+- **All passed:** full round trip (create → CSR reply simulated in Postgres →
+  poll picks it up → more replies → resolved-ticket reply auto-reopens via
+  the real RPC, no explicit Reopen used); both idempotency paths (create +
+  reply, verified by real row counts); all 8 cross-account/negative checks
+  (unknown account, spoofed identity ignored — verified in Postgres, not just
+  the response — cross-account 404s, bad/missing key fail-closed, key absent
+  from bundle); attachment payload still 400 pre-Bridge.
+- One test ticket was created (tagged `GGX-CORP-LIVE-E2E-<ts>`) and fully
+  deleted afterward; the Bridge server process was stopped; three throwaway
+  validation scripts were deleted — nothing new committed to the test suite.
+- Regression: typecheck, dedicated `api/**` check, build (secret still
+  absent from `dist/`), full suite (71/71) all green — no source files
+  changed in this task, docs only.
+- **Still blocking:** a genuinely hosted Bridge URL + key, from whoever
+  operates the real deployment, to re-run this same round trip against it
+  and smoke-test the actual Vercel-routed `/api/support/**` paths (this pass
+  called the handler functions directly, not through a live HTTP listener).
+
 ## Most Recent Work — POC identity correction + Reopen removal (2026-08-26)
 
 Narrow corrective pass on the Corporate support proxy responding to a Codex

@@ -1,6 +1,6 @@
 # GGX Corporate ⇄ QuadX Bridge / HeyQ Live Ticketing Integration
 
-**Status:** POC IDENTITY CORRECTED, REOPEN REMOVED — PENDING LIVE-BRIDGE RE-AUDIT (see §13)  
+**Status:** LIVE END-TO-END VALIDATED against a real Bridge + real Postgres (see §14)  
 **Integration Boundary:** `GGX Corporate Browser → Corporate /api/support/* proxy → QuadX Bridge → HeyQ/Supabase`  
 **Handoff File:** `docs/migration/ggx-corporate-heyq-live-ticketing.md`
 
@@ -10,8 +10,10 @@
 > that gap. §12 is a follow-up re-audit that found the proxy still trusted a
 > browser-stated identity (P1) and that the explicit Reopen action was
 > knowingly non-functional (P2). §13 documents the corrective pass for both.
-> Read §13 first for current status; §§1–10 remain for the ticket
-> lifecycle/contract details, which are unchanged.
+> §14 documents the live round trip against a real running Bridge + Postgres
+> instance — read §14 first for current status; a HOSTED/production Bridge
+> deployment still was not reached (none could be located — see §14.1).
+> §§1–10 remain for the ticket lifecycle/contract details, which are unchanged.
 
 ---
 
@@ -628,3 +630,179 @@ real deployment.
 4. Smoke-test the Vercel deployment's `/api/support/**` routes (unchanged
    from §12.4 item 4).
 5. ~~Resolve or remove the explicit reopen affordance~~ — DONE (§13.2).
+
+---
+
+## 14. Live End-to-End Validation (2026-08-26)
+
+### 14.1 What "deployed Bridge" actually resolved to
+
+No hosted, reachable QuadX Bridge HTTP endpoint exists. This was re-confirmed
+in this pass: HeyQ's `server/` (the Bridge implementation) has no Railway
+deployment (`.env.example`: "Railway is not running… the owner has said not
+to reactivate it") and no Vercel Functions deployment (HeyQ's `vercel.json`
+is SPA-rewrites only, same as Corporate's). What **is** genuinely established
+and reachable is the **Supabase project the Bridge writes to** —
+`rwzwktrepfgsooerpyjx` ("QuadX Bridge") — with the atomic-RPC migration
+(`20260826130000_quadx_bridge_atomic_rpcs.sql`) confirmed applied on **both**
+its local mirror and the linked remote project (`supabase migration list`
+shows `local == remote` for that migration id).
+
+Given that, this validation ran the Bridge's own unmodified server code
+(`HeyQ/server/index.ts`, i.e. `server/http.ts` + `server/supabaseBridge.ts` —
+no HeyQ changes) as a real HTTP process, **without** the `--dev` flag so its
+authentication gate is enforced exactly as `npm start` (Railway) would run
+it, backed by the `supabase start` Postgres instance that mirrors that same
+linked, migrated project. Corporate's real `api/support/tickets/*.ts`
+handlers made real, un-stubbed network calls to that Bridge process. This is
+the most faithful "live" round trip achievable without a hosted Bridge
+deployment — real request/response HTTP, real auth enforcement, real
+Postgres rows, real atomic RPCs — but it is **not** a hosted/production
+deployment, and a genuinely hosted round trip (item 4 in §13.5) is still not
+done.
+
+### 14.2 Environment configuration status
+
+- `QUADX_BRIDGE_URL` and `QUADX_BRIDGE_API_KEY` were set **only** as
+  process-local server-side environment variables for this validation run —
+  never written to a committed file, never `VITE_`-prefixed. `.env.example`'s
+  existing placeholders are unchanged (still blank). No secret value is
+  recorded anywhere in this repo or in this document.
+- Confirmed (regression run, §14.7): `grep -rl QUADX_BRIDGE_API_KEY dist/`
+  and `grep -rl X-Corporate-Internal-Key dist/` after `npm run build` both
+  return nothing — the key never reaches the browser bundle.
+- Confirmed: the only Bridge-related string in the built browser bundle is
+  the literal, relative `/api/support` — the browser targets only same-origin
+  proxy routes, never a Bridge/Railway origin.
+- This machine's environment does not carry these two values as a standing
+  configuration (no `.env.local` in this repo, no linked Vercel project) —
+  they were exported only for the lifetime of this validation's local Bridge
+  process and the scripts that drove it, and are gone now. **A real
+  deployment still needs these two values supplied by whoever operates the
+  actual QuadX Bridge / owns the Vercel project**, which this task could not
+  discover or provision.
+
+### 14.3 Live round trip — result: PASS (all 8 steps)
+
+One real ticket was created, driven end-to-end, and deleted afterward
+(tracking number pattern `GGX-CORP-LIVE-E2E-<timestamp>`, clearly tagged,
+not a real demo-data fixture). Reference `HQS-2026-0116-2738` — Bridge's own
+generated id, gone from the database now (§14.9).
+
+| # | Step | Result |
+|---|---|---|
+| 1 | Select an existing demo Corporate account (admin, `demoAccountId=user-admin-001`) | PASS — Bridge stored `requester_external_user_id='max@email.com'`, `requester_external_org_id='main'`, sourced entirely server-side |
+| 2 | Report an issue against a real tracking-number-shaped reference | PASS — `POST /api/support/tickets` → real Bridge → real Postgres row |
+| 3 | Corporate BFF maps `demoAccountId` server-side | PASS — verified directly in Postgres, not just in the HTTP response |
+| 4 | Ticket created through the deployed(-equivalent) Bridge | PASS — inserted via Bridge's real `create_customer_ticket_bridge` RPC |
+| 5 | Ticket appears in HeyQ | PASS — row present in `public.tickets`, visible via Bridge's own `GET /customer/tickets/:id` |
+| 6 | Canonical tracking number preserved | PASS — `tracking_number` column matches exactly |
+| 7 | Initial customer text appears correctly | PASS — first message body matches verbatim |
+| 8 | Second customer reply from Corporate | PASS — `POST /api/support/tickets/:id/messages` |
+| 9 | Reply appears in HeyQ | PASS — present in `ticket_messages`, returned on next read |
+| 10 | CSR/TL reply (simulated by inserting an `author_type='agent'` row directly into `ticket_messages`, exactly as HeyQ's own agent app would) | PASS |
+| 11 | Corporate receives the agent reply via its existing 5-second-poll GET | PASS — `GET /api/support/tickets/:id` returned the CSR message, `from:'support'` |
+| 12 | Another Corporate response | PASS — thread reached 4 real messages with no loss across the sequence |
+| 13 | HeyQ receives it | PASS — confirmed via the same GET/DB check |
+| 14 | Resolved-ticket reply follows the supported automatic reopen | PASS — ticket status set to `resolved` directly, then a customer reply flipped it back to `in_progress` via Bridge's real RPC — **no explicit Reopen action was used or needed** |
+
+### 14.4 Cross-account negative tests — result: PASS (all 8)
+
+| Check | Result |
+|---|---|
+| Unknown `demoAccountId` fails before Bridge is called | PASS — `400`, zero Bridge HTTP calls (instrumented) |
+| Spoofed `externalUserId` in the request body is ignored | PASS — Postgres row shows the real, server-derived value, not the spoofed one |
+| Spoofed `externalOrgId` in the request body is ignored | PASS — same check, both create and reply |
+| Demo account A cannot read demo account B's ticket | PASS — admin's ticket, read as `user-mgr-001` → real Bridge `404` (ownership check) |
+| Demo account A cannot reply to demo account B's ticket | PASS — same, on the reply route → real Bridge `404` |
+| Invalid Bridge secret fails closed | PASS — a wrong `QUADX_BRIDGE_API_KEY` gets a real `401` from the running Bridge process, relayed unchanged by the proxy |
+| Missing Bridge secret fails closed | PASS — proxy itself refuses with `500` **before** any Bridge call (instrumented — zero calls) |
+| Browser never receives the Bridge key | PASS — §14.2's bundle scan |
+
+### 14.5 Idempotency — result: PASS (both)
+
+- **Create retry:** the exact same `Idempotency-Key` sent twice → Bridge's
+  `create_customer_ticket_bridge` RPC returned the SAME ticket id both times;
+  row count for that tracking number stayed at 1.
+- **Message retry:** the exact same `X-Bridge-Message-Id` sent twice → row
+  count in `ticket_messages` for that ticket was unchanged after the retry
+  (verified by direct count query before/after).
+
+### 14.6 Polling behavior — result: PASS (data path); unmount/failure-recovery unchanged and separately covered
+
+- **New replies appear without a full-page refresh:** proven directly —
+  §14.3 steps 10–11 show a CSR reply landing in Postgres and then appearing
+  on the next `GET` the poll makes, with no page reload involved.
+- **Repeated polls don't duplicate messages:** proven directly — the same
+  ticket was read multiple times across the sequence (steps 3, 6, 7, 11, 13)
+  and the message count only ever grew by exactly the messages actually
+  added, confirmed by an explicit `assert.equal(msgs.length, 4, …)` mid-run.
+- **Polling stops on unmount / recovers from a transient failure:** these are
+  pure client-side React lifecycle concerns in `useTicketConversation.ts`
+  (the `useEffect` cleanup clearing `setInterval`, and the poll's try/catch
+  preserving state on a failed fetch) — independent of which backend answers
+  the `GET`, and already covered by the existing automated test suite
+  (`heyq-realtime.test.mjs`'s polling describe block), which is unchanged and
+  still green in §14.7. Not re-proven against the live Bridge specifically,
+  since there is nothing backend-specific about that behavior to prove.
+
+### 14.7 Attachment contract — result: PASS
+
+`POST /api/support/tickets` with a non-empty `attachments` array under this
+live configuration (real key, real reachable Bridge) still returns `400`
+**and never reaches Bridge at all** (instrumented — zero Bridge calls) — the
+proxy's own text-only guard, unchanged. No attachment storage was built or
+attempted.
+
+### 14.8 Regression — result: PASS
+
+- `npm run typecheck` — 0 errors.
+- Dedicated `api/**` TypeScript check (`--strict --jsx react-jsx`, since
+  `api/_lib/demoIdentity.ts` reaches into `src/app/data/mock/auth.mock.ts`)
+  — 0 errors.
+- `npm run build` — succeeds; secret/header absent from `dist/`, only
+  same-origin `/api/support` paths present (§14.2).
+- `npm test` — **71/71 passing** (adapter, lifecycle, realtime, attachments,
+  journey-mode suites) — unchanged from the prior pass; no test files were
+  modified in this task, since this task's own live validation ran as
+  throwaway scripts outside the committed test suite (§14.9).
+
+### 14.9 Method notes / what was NOT committed
+
+- The live round trip and negative tests ran from three throwaway Node
+  scripts (`_live_e2e_tmp.mjs` + two standalone bad-key/no-key checks run as
+  separate processes to avoid `api/_lib/bridge.ts`'s intentional per-process
+  config cache), executed with `node --experimental-strip-types` against the
+  real, unmodified `api/support/tickets/*.ts` handler files. All three were
+  deleted after use — nothing new was added to the test suite or the repo.
+- The local Bridge server process (`HeyQ/server/index.ts`, no `--dev`) was
+  started for this validation and stopped afterward; nothing about HeyQ's
+  code was modified.
+- The one test ticket created (§14.3) and all its messages/status events were
+  deleted from Postgres after validation — the database was left exactly as
+  found (114 pre-existing tickets, unrelated to this task, untouched).
+- No `SUPABASE_SERVICE_ROLE_KEY` was configured or needed for any of this —
+  `supabaseBridge.ts`'s own well-known local-dev fallback key was used
+  against the local mirror, exactly as HeyQ's own deployment smoke test
+  (`quadxBridgeDeploymentSmoke.test.ts`) already does.
+
+### 14.10 Remaining blocker
+
+The **only** remaining gap is that no hosted QuadX Bridge deployment could be
+located or reached — this validation exercised the real Bridge code and a
+real, migration-synced Postgres database, but not a publicly reachable
+production/staging URL. Whoever owns the actual deployed Bridge (Railway,
+Vercel, or otherwise) needs to supply Corporate's deployment with:
+
+- `QUADX_BRIDGE_URL` — that Bridge's real reachable origin
+- `QUADX_BRIDGE_API_KEY` — the shared secret that Bridge instance enforces
+
+Once both are set as server-only environment variables on Corporate's actual
+hosting platform (never `VITE_`-prefixed, never committed — matching
+`.env.example`), this task's round trip should be re-run one more time
+against that specific hosted pair to close out the last gate in §13.5 item 1
+(and item 4 — smoke-testing the real Vercel-routed `/api/support/**` paths,
+which this validation also could not exercise since it called the handler
+functions directly rather than through an actual Vercel/`vercel dev` HTTP
+listener). No further Corporate-side code changes are anticipated unless that
+run surfaces something new.
