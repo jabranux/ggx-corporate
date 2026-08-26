@@ -3,6 +3,38 @@
 > Lightweight resume/checkpoint file. Detailed June 2026 history was archived to
 > `docs/archive/session_log_2026-06.md`.
 
+## Most Recent Work — QuadX Bridge deployed as a Supabase Edge Function (2026-08-26)
+
+The "no hosted Bridge exists" blocker from the previous session is resolved.
+Full write-up: `docs/migration/ggx-corporate-heyq-live-ticketing.md` §15.
+
+- **New, in the HeyQ repo** (commit `736b948`): `supabase/functions/quadx-bridge/index.ts`
+  — a self-contained Deno Edge Function porting the 4 routes Corporate's
+  proxy actually calls (list/get/create/reply), same atomic RPCs, same auth
+  contract, same idempotency headers, same fail-closed rules. Deployed to
+  HeyQ's own linked Supabase project (`rwzwktrepfgsooerpyjx`).
+  **Production Bridge URL:**
+  `https://rwzwktrepfgsooerpyjx.supabase.co/functions/v1/quadx-bridge`.
+- **Zero Corporate code changes** — only `QUADX_BRIDGE_URL`'s env VALUE needs
+  to point here now. `.env.example` updated with the production URL comment.
+- **Validated twice**, both via Corporate's real unchanged proxy handlers
+  with real network calls: once against a local mirror, once against the
+  actual hosted deployment. All 17 checks passed both times (full round
+  trip, resolved-ticket auto-reopen, both idempotency paths verified by real
+  row counts, cross-account isolation, spoofed-identity rejection, bad/missing
+  key fail-closed).
+- **Found and fixed a real bug**: the hosted database's migration history
+  claimed the idempotency-key column existed, but it didn't (drift, cause
+  unconfirmed). Re-applied the exact (idempotent) migration directly against
+  hosted to fix it — not an Edge Functions problem, would have broken the
+  Node Bridge too; the Edge Function work just surfaced it.
+- Regression (typecheck/build/71 tests) green, no Corporate source changed.
+  All test data cleaned up on both local and hosted; generated secret not
+  stored anywhere in either repo.
+- **Still open:** no Vercel access available to actually set the two env
+  vars on Corporate's deployment or to smoke-test its real `/api/support/**`
+  HTTP routes end-to-end — someone with Vercel access needs to do that next.
+
 ## Most Recent Work — Live end-to-end validation against a real Bridge (2026-08-26)
 
 No hosted/reachable QuadX Bridge deployment exists (Railway decommissioned,

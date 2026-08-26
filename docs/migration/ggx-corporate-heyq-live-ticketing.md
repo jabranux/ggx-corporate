@@ -1,19 +1,23 @@
 # GGX Corporate ⇄ QuadX Bridge / HeyQ Live Ticketing Integration
 
-**Status:** LIVE END-TO-END VALIDATED against a real Bridge + real Postgres (see §14)  
-**Integration Boundary:** `GGX Corporate Browser → Corporate /api/support/* proxy → QuadX Bridge → HeyQ/Supabase`  
+**Status:** QuadX Bridge is now DEPLOYED and LIVE-VALIDATED as a Supabase Edge
+Function — see §15  
+**Integration Boundary:** `GGX Corporate Browser → Corporate /api/support/* proxy → QuadX Bridge (Supabase Edge Function) → HeyQ/Supabase`  
+**Production Bridge URL:** `https://rwzwktrepfgsooerpyjx.supabase.co/functions/v1/quadx-bridge`  
 **Handoff File:** `docs/migration/ggx-corporate-heyq-live-ticketing.md`
 
-> §§1–10 below are the PRIOR handoff (browser called Bridge directly — this is
-> what the 2026-08-26 cross-application audit correctly flagged as insufficient).
-> §11 documents the lightweight Corporate support proxy (BFF) built to close
-> that gap. §12 is a follow-up re-audit that found the proxy still trusted a
-> browser-stated identity (P1) and that the explicit Reopen action was
-> knowingly non-functional (P2). §13 documents the corrective pass for both.
-> §14 documents the live round trip against a real running Bridge + Postgres
-> instance — read §14 first for current status; a HOSTED/production Bridge
-> deployment still was not reached (none could be located — see §14.1).
-> §§1–10 remain for the ticket lifecycle/contract details, which are unchanged.
+> §§1–10 below are the ORIGINAL handoff (browser called Bridge directly — this
+> is what the 2026-08-26 cross-application audit correctly flagged as
+> insufficient). §11 documents the lightweight Corporate support proxy (BFF)
+> built to close that gap. §12 is a follow-up re-audit that found the proxy
+> still trusted a browser-stated identity (P1) and that the explicit Reopen
+> action was knowingly non-functional (P2). §13 documents the corrective pass
+> for both. §14 documents a live round trip against a real but LOCAL Bridge +
+> Postgres instance, run because no hosted Bridge could be found at the time.
+> §15 (**read this one first**) documents actually hosting QuadX Bridge — as a
+> Supabase Edge Function in HeyQ's own project — and the live validation
+> against that real, deployed, production URL above. §§1–10 remain for the
+> ticket lifecycle/contract details, which are unchanged throughout.
 
 ---
 
@@ -806,3 +810,227 @@ which this validation also could not exercise since it called the handler
 functions directly rather than through an actual Vercel/`vercel dev` HTTP
 listener). No further Corporate-side code changes are anticipated unless that
 run surfaces something new.
+
+---
+
+## 15. QuadX Bridge Hosted as a Supabase Edge Function (2026-08-26)
+
+§14's blocker — no hosted, reachable QuadX Bridge existed anywhere — is
+resolved. Rather than stand up a new host (Railway is explicitly
+decommissioned per the HeyQ repo's own `.env.example`: "the owner has said
+not to reactivate it"), QuadX Bridge is now hosted as a **Supabase Edge
+Function inside HeyQ's own Supabase project** (`rwzwktrepfgsooerpyjx`,
+already the project the Bridge's RPCs and schema live in). This required
+**zero changes to GGX Corporate's application code** — only its
+`QUADX_BRIDGE_URL` environment *value* changes, because Corporate's proxy
+already treated the Bridge origin as fully configurable.
+
+### 15.1 What was built (HeyQ repo)
+
+- **`supabase/functions/quadx-bridge/index.ts`** (new, ~440 lines) — a
+  self-contained Deno Edge Function faithfully porting the FOUR routes
+  Corporate's proxy actually calls and §14 actually validated:
+  `GET /customer/tickets`, `GET /customer/tickets/:id`,
+  `POST /customer/tickets`, `POST /customer/tickets/:id/messages`. Same
+  request/response shapes, same `X-Corporate-Internal-Key`/`Authorization:
+  Bearer` auth contract (constant-time key comparison), same
+  `Idempotency-Key`/`X-Bridge-Message-Id` idempotency headers, same
+  `create_customer_ticket_bridge`/`add_customer_message_bridge` atomic RPCs,
+  same fail-closed ownership checks (404 on any mismatch), same attachment
+  rejection (400, before touching Bridge/the RPCs at all), same
+  message→status mapping (`not found`→404, `unauthenticated`→401,
+  `unavailable`→503). Ported from `server/customer.ts` +
+  `server/supabaseBridge.ts` + the Bridge-specific half of
+  `server/security.ts`; those files are **unmodified**.
+- **Self-contained by design**, matching this repo's own established Edge
+  Function convention (`supabase/functions/ai-review`,
+  `supabase/functions/admin-users` — both explicitly "faithfully ported",
+  zero cross-directory imports from `src/`/`server/`): the small slice of
+  ticket/team-catalog constants it needs (`CONCERN_TYPE_LABELS`, the
+  concern→category default map, the 4-team catalog + its fixed UUID
+  convention from `src/app/lib/teamIds.ts`) are inlined with a note pointing
+  back to the source of truth, rather than imported.
+- **Deliberately NOT ported** (not part of Corporate's active/validated
+  contract — porting them would be new surface, not a migration):
+  - `/customer/tickets/:id/attachments*` and `/customer/realtime/token` —
+    Corporate's attachment UI and realtime WebSocket client are both already
+    dormant/unwired (see `heyqCustomerApi.ts`'s module docblock in the
+    Corporate repo).
+  - the legacy `/tickets/:id/reopen` route — Corporate already removed its
+    own call to it (§13.2); it only ever worked against HeyQ's in-memory
+    store, never a Bridge/Supabase ticket.
+  - the non-atomic multi-step fallback `createCustomerTicketInSupabase` /
+    `addCustomerMessageInSupabase` fall back to when their RPC call itself
+    errors. The atomic RPCs are the ONLY path §14 (and §15.4 below)
+    exercised and validated for idempotency/atomicity; an RPC failure here
+    surfaces as a clean `503` instead.
+- **`supabase/config.toml`**: `[functions.quadx-bridge]` with
+  `verify_jwt = false` (this function authenticates itself via the shared
+  Bridge key, not a Supabase Auth JWT — same reasoning already documented
+  for `[functions.ai-review]`/`[functions.admin-users]`), and
+  `QUADX_BRIDGE_API_KEY = "env(QUADX_BRIDGE_API_KEY)"` added to
+  `[edge_runtime.secrets]` for local-dev parity with the hosted secret.
+- Committed to the HeyQ repo at `736b948` (`supabase/functions/quadx-bridge/`
+  + the `config.toml` diff only — the repository's large amount of *other*
+  pre-existing uncommitted work in `server/*` was left exactly as found; it
+  predates this task and this task's scope did not include reviewing or
+  committing it).
+
+### 15.2 Secrets — never exposed to Corporate or its browser bundle
+
+- `SUPABASE_SERVICE_ROLE_KEY` is **never** configured, held, or transmitted
+  by GGX Corporate at any point. The Edge Function reads it from
+  `Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')` — injected automatically by
+  the Supabase Edge Functions runtime into every function's own execution
+  environment. Corporate never has this credential and never needs it.
+- `QUADX_BRIDGE_API_KEY` is set as a **Supabase project secret** —
+  `supabase secrets set QUADX_BRIDGE_API_KEY=... --project-ref
+  rwzwktrepfgsooerpyjx` — never committed, never logged, never returned in
+  any response. This is the ONLY credential Corporate needs, and Corporate
+  already had the infrastructure to hold it server-side (`api/_lib/bridge.ts`,
+  §11.3) — unchanged by this migration.
+- **Confirmed** (regression run, §15.7): the secret is absent from
+  Corporate's built browser bundle, exactly as before.
+
+### 15.3 Deployment
+
+Deployed with the Supabase CLI, authenticated with existing access to the
+linked, `ACTIVE_HEALTHY` project (`rwzwktrepfgsooerpyjx`, org
+`ufeivykndfhrkoqiunsf`, confirmed via `supabase projects list` before
+proceeding):
+
+```
+supabase secrets set QUADX_BRIDGE_API_KEY=<generated> --project-ref rwzwktrepfgsooerpyjx
+supabase functions deploy quadx-bridge --project-ref rwzwktrepfgsooerpyjx
+```
+
+**Production Bridge URL:**
+`https://rwzwktrepfgsooerpyjx.supabase.co/functions/v1/quadx-bridge`
+
+**Corporate/Vercel environment variables required** (server-only — set on
+Corporate's Vercel project, Production + Preview environments; never
+`VITE_`-prefixed, never committed):
+
+| Variable | Value |
+|---|---|
+| `QUADX_BRIDGE_URL` | `https://rwzwktrepfgsooerpyjx.supabase.co/functions/v1/quadx-bridge` |
+| `QUADX_BRIDGE_API_KEY` | the same value set via `supabase secrets set` above — get it from whoever holds it; it is not recorded in this document or repo |
+
+No Vercel access was available in this task (no linked project, no CLI
+installed — same as every prior pass) to set these directly on Corporate's
+deployment; whoever has Vercel access must add them.
+
+### 15.4 Live validation — local Edge Function first, then the real hosted deployment
+
+Two full passes of the same validation, both via Corporate's real, **unchanged**
+`api/support/tickets/*.ts` handler code (throwaway driver scripts, not
+committed — same method as §14):
+
+1. **Local pass** — `npx supabase start` in the HeyQ repo (Docker; the same
+   linked/migrated local mirror §14 used), function served automatically at
+   `http://127.0.0.1:54321/functions/v1/quadx-bridge`. All 17 checks passed
+   (same list as §15.5 below), verified against the local Postgres via
+   `docker exec ... psql`.
+2. **Hosted pass** — against the actual production URL above. All 17 checks
+   passed, verified against the REAL hosted Postgres via
+   `supabase db query --linked` (Management API — no raw DB password ever
+   used or needed).
+
+Both passes ran the identical 17-check sequence §14 established, so the
+result is directly comparable:
+
+### 15.5 Results (identical outcome, both passes — local mirror AND hosted)
+
+| # | Check | Result |
+|---|---|---|
+| 1–3 | Create a ticket (admin demo account), canonical tracking number preserved, initial customer text visible | PASS |
+| 4 | Second customer reply from Corporate | PASS |
+| 5–6 | Simulated CSR reply (inserted directly in Postgres, as the agent app would) appears on Corporate's next poll (`GET`) | PASS |
+| 7 | Third customer reply; full 4-message thread intact, nothing lost/duplicated | PASS |
+| 8 | Resolved-ticket reply auto-reopens the ticket (`resolved` → `in_progress`) via the real RPC — **no explicit Reopen action used or needed** | PASS |
+| 9 | Idempotent create retry (same `Idempotency-Key`) returns the SAME ticket; row count unchanged | PASS |
+| 10 | Idempotent reply retry (same `X-Bridge-Message-Id`) does not duplicate the message; row count unchanged | PASS |
+| 11–12 | Cross-account isolation: demo account B (manager) cannot GET or reply to demo account A (admin)'s ticket → real `404` both ways | PASS |
+| 13 | Unknown `demoAccountId` → Corporate proxy `400`, Edge Function never called (instrumented) | PASS |
+| 14 | Spoofed `externalUserId`/`externalOrgId` on a reply are ignored; the persisted author is the server-derived identity, verified directly in Postgres | PASS |
+| 15 | Attachment payload → Corporate proxy `400`, Edge Function never called (instrumented) | PASS |
+| 16 | Wrong `QUADX_BRIDGE_API_KEY` → the real Edge Function returns `401`, relayed unchanged | PASS |
+| 17 | Missing `QUADX_BRIDGE_API_KEY` (Corporate side) → proxy `500`, Edge Function never called (instrumented) | PASS |
+
+Missing-key behavior **on the Edge Function's own side** specifically (as
+opposed to Corporate's side, checked above) was verified by code inspection
+of `isAuthorizedCaller` (an unset `QUADX_BRIDGE_API_KEY` makes `expected`
+falsy, so every caller is refused with `401` regardless of what it presents)
+rather than by another full local-stack restart — the logic is identical to
+the already-validated Node equivalent, and restarting the local Supabase
+stack a third time for this one sub-case was judged not worth the cost.
+
+### 15.6 A real bug this validation found and fixed (hosted database drift)
+
+The FIRST hosted idempotency check (#9 above) initially **failed** — a
+create retry with the same `Idempotency-Key` returned a *different* ticket
+id. Root cause: `supabase migration list --linked` reports migration
+`20260826130000_quadx_bridge_atomic_rpcs.sql` as applied on both local and
+remote, but the hosted database was actually **missing the
+`bridge_idempotency_key` column** that migration adds (confirmed directly:
+`column "bridge_idempotency_key" does not exist`). The migration-history
+table and the actual hosted schema had drifted apart — for reasons outside
+this task's visibility (a prior partial/failed apply that still recorded
+success is one plausible explanation, not confirmed).
+
+**Fix**: re-ran that exact migration file directly against the hosted
+database (`supabase db query --linked -f
+supabase/migrations/20260826130000_quadx_bridge_atomic_rpcs.sql`). It is
+idempotent by construction (`add column if not exists`, `create or replace
+function`), so this is a safe repair, not a new migration or a schema
+redesign — it only makes the hosted database match what its own migration
+history already claimed. Re-ran the full validation from a clean state
+afterward; all 17 checks passed. **This was NOT an Edge Functions
+compatibility issue** — it would have equally broken the Node Bridge had it
+been pointed at the same drifted hosted database; the Edge Function
+migration is simply what surfaced it, since §14's local-only pass never
+touched the hosted database at all.
+
+### 15.7 Regression (Corporate repo — no source changes in this task)
+
+- `npm run typecheck` — 0 errors.
+- `npm run build` — succeeds; secret/header still absent from `dist/`
+  (`grep -rl QUADX_BRIDGE_API_KEY dist/` returns nothing).
+- `npm test` — **71/71 passing**, unchanged.
+- No Corporate source files were modified in this task — only
+  `.env.example`'s comments (documenting the new production URL) and this
+  handoff doc.
+
+### 15.8 Cleanup
+
+- All test tickets (local mirror: tracking prefix `GGX-CORP-EDGE-E2E-`;
+  hosted: `GGX-CORP-HOSTED-E2E-`) and their messages/status events were
+  deleted after validation. The hosted `public.tickets` table was empty (0
+  rows) before this task and is empty again now.
+- The local Supabase stack was stopped (`supabase stop`) after use.
+- Every throwaway validation script (six total, across the local-Edge-Function
+  and hosted passes) was deleted; nothing was added to either repo's
+  committed test suite.
+- The generated `QUADX_BRIDGE_API_KEY` test/production value was set once via
+  `supabase secrets set` and is not stored in any file in either repository —
+  see §15.3 for how to obtain/rotate it.
+
+### 15.9 Corporate's real Vercel `/api/support/**` HTTP routes — still not exercised
+
+Per §14.10/§13.5 item 4: this validation, like every prior one, called
+Corporate's `api/support/tickets/*.ts` handler functions directly in-process
+(with real, un-stubbed network calls out to the real Bridge). It did **not**
+go through an actual Vercel deployment or `vercel dev` HTTP listener — no
+Vercel CLI or linked project is available in this environment. Whoever has
+Vercel access should, after setting §15.3's two environment variables:
+
+1. Deploy (or redeploy) Corporate to Vercel.
+2. Confirm `/api/support/tickets` (and the `[id]`/`[id]/messages` routes)
+   resolve as real HTTP endpoints ahead of the SPA catch-all rewrite (the
+   filesystem-over-rewrite precedence this relies on was confirmed against
+   Vercel's documentation in §12.1, but never against an actual deployment).
+3. Re-run the create → reply → poll flow from the real running Corporate UI
+   in a browser, against the production Bridge URL above.
+
+This is the one remaining gate before this integration can be called fully
+production-verified end-to-end.
