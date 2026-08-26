@@ -140,7 +140,14 @@ async function main() {
     const got = await api(`/api/support/tickets/${encodeURIComponent(ticketId)}`, { cookie: adminCookie });
     check('GET the created ticket -> 200 with matching subject', got.status === 200 && got.body?.subject === createBody.subject, `status ${got.status}`);
 
-    const msgId = `${RUN_TAG}-msg-1`;
+    // Must be a real UUID: the Bridge RPC's dedupe key (p_message_id) is a
+    // `uuid`-typed column (it doubles as the inserted message row's PK — see
+    // add_customer_message_bridge in HeyQ's 20260826130000_quadx_bridge_atomic_rpcs.sql),
+    // and the real app always sends crypto.randomUUID() as this header
+    // (useTicketConversation.ts). A non-UUID string here fails Postgres's
+    // uuid cast (22P02) before the RPC body runs, which the Edge Function's
+    // generic RPC-error handler surfaces as a 503 — not a Bridge/RPC defect.
+    const msgId = crypto.randomUUID();
     const reply1 = await api(`/api/support/tickets/${encodeURIComponent(ticketId)}/messages`, { method: 'POST', cookie: adminCookie, body: { body: `${RUN_TAG} reply` }, headers: { 'X-Bridge-Message-Id': msgId } });
     check('authenticated reply -> 200', reply1.status === 200, `got ${reply1.status}`);
     const reply2 = await api(`/api/support/tickets/${encodeURIComponent(ticketId)}/messages`, { method: 'POST', cookie: adminCookie, body: { body: `${RUN_TAG} reply retry` }, headers: { 'X-Bridge-Message-Id': msgId } });

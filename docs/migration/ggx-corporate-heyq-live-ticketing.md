@@ -1525,3 +1525,132 @@ Vercel project via the Vercel MCP plugin (`ggx-corporate`,
   (§19.5), and Production env vars cannot be verified or set with the tools
   available in this session; needs the operator steps in §19.5
 
+## 20. Production Reply 503 — Root Cause: Non-UUID `X-Bridge-Message-Id` in the E2E Script (2026-08-26)
+
+§19.5's operator steps were completed since the last entry (env vars set,
+`1c0e237`/`35824c9` deployed) — `npm run e2e:prod` against
+`https://ggx-corporate.vercel.app` started running for real. First run: 15
+passed, 2 failed, both on the reply path:
+
+```
+authenticated reply -> expected 200, got 503
+same X-Bridge-Message-Id retry -> expected 200, got 503
+```
+
+### 20.1 Trace
+
+Followed the real request end to end rather than guessing from the status
+code:
+
+1. **Vercel runtime logs** (`get_runtime_logs`, filtered to `statusCode=503`
+   on the failing ticket id) showed Corporate's own
+   `/api/support/tickets/:id/messages` handler returning `503` with no
+   `[support proxy]`-prefixed error line. Corporate's own error paths
+   (`failConfig` → 500, `failUpstream` → 502, in `api/_lib/bridge.ts`) don't
+   produce a bare 503 — `relay()` just forwards whatever status Bridge sent
+   back unchanged. **This meant the 503 was Bridge's real, unmodified
+   response**, not a Corporate-side failure — narrowed the search
+   immediately to the Edge Function / RPC / DB layer.
+2. **`api/support/tickets/[id]/messages.ts`** confirmed the request shape
+   Corporate sends: `POST` body `{ ...rest, body: messageText, externalUserId,
+   externalOrgId }`, header `X-Bridge-Message-Id` forwarded from whatever the
+   caller supplied — unchanged since §18, correct contract.
+3. **HeyQ repo, `supabase/functions/quadx-bridge/index.ts`** (`addCustomerMessage`,
+   line ~349): calls `client.rpc('add_customer_message_bridge', { ...,
+   p_message_id: messageId || null })`. Any RPC error (`rpcErr`) that doesn't
+   match `/Ticket not found/` falls through to a **generic**
+   `throw new BridgeError('Bridge customer messaging is unavailable', 503)`
+   — by design (see the function's own module docblock: "An RPC failure here
+   is surfaced as a clean 503"). This is where the specific error gets
+   flattened to a generic 503, so the real cause had to come from the RPC
+   itself.
+4. **HeyQ repo migration `20260826130000_quadx_bridge_atomic_rpcs.sql`**:
+   `add_customer_message_bridge`'s parameter is `p_message_id uuid default
+   null` — typed `uuid`, not `text`. It's used as `target_msg_id :=
+   coalesce(p_message_id, gen_random_uuid())`, which is inserted directly as
+   `ticket_messages.id` (the message row's own primary key) — so it being a
+   real UUID is load-bearing, not incidental.
+5. **Reproduced directly against the hosted DB**, read-only, via
+   `npx supabase db query "select 'GGX-E2E-1787737000-msg-1'::uuid;"
+   --linked` (the Supabase CLI was already authenticated in this
+   environment — no secrets read or printed):
+   ```
+   ERROR: 22P02: invalid input syntax for type uuid: "GGX-E2E-1787737000-msg-1"
+   ```
+   Exact match for the failure mode: `scripts/prod-e2e-validation.mjs` was
+   sending `` `${RUN_TAG}-msg-1}` `` (e.g.
+   `GGX-E2E-1787737871310-msg-1`) as `X-Bridge-Message-Id` — a non-UUID
+   string. The RPC call fails the Postgres `uuid` cast before the function
+   body even runs; `rpcErr` is set; the Edge Function's generic handler turns
+   that into the 503 both failing checks observed. The retry check failed
+   for the identical reason (same malformed id, same cast error) — not
+   because dedup itself is broken.
+
+### 20.2 Why this is a test-script defect, not an implementation/schema defect
+
+The real application never hits this: `useTicketConversation.ts`
+(`src/app/hooks/useTicketConversation.ts`) generates the optimistic message
+id the browser sends as `X-Bridge-Message-Id` via `crypto.randomUUID()` —
+always a real UUID. `p_message_id uuid` matches that contract correctly; the
+column doubling as the message row's PK is why it needs to be a genuine UUID
+rather than an arbitrary opaque string. Nothing in the Edge Function, the
+RPC, or Corporate's proxy was misbehaving — the E2E script (added in §18.5)
+was the only caller anywhere in this system ever sending a non-UUID value
+for this header.
+
+### 20.3 Fix (narrow, script-only)
+
+`scripts/prod-e2e-validation.mjs`: `const msgId = \`${RUN_TAG}-msg-1\`;` →
+`const msgId = crypto.randomUUID();` — matches the real client's contract.
+No change to `api/`, to the HeyQ Edge Function, or to any migration/schema;
+none was needed. (One documented observation, not acted on per this task's
+"narrow root-cause fix only" instruction: the Edge Function's blanket
+RPC-error → 503 mapping means a genuinely malformed `X-Bridge-Message-Id`
+from any future caller would also surface as an opaque "unavailable" rather
+than a client-error status. Worth a follow-up if a non-UUID-generating
+caller is ever added, but out of scope here — the real app has never sent
+one.)
+
+### 20.4 Re-validation
+
+`E2E_BASE_URL=https://ggx-corporate.vercel.app npm run e2e:prod`, full run
+against the live deployment:
+
+```
+17 passed, 0 failed.
+```
+
+Every executable check passed, including both previously-failing reply
+checks. The resolved-ticket auto-reopen check remains `[SKIP]` as designed
+(§18.5/§19 — needs `E2E_RESOLVED_TICKET_ID` pointing at a real resolved
+ticket, an agent-side HeyQ action not creatable from this script).
+
+### 20.5 Test-data cleanup
+
+The script holds no DB credentials and cannot clean up after itself (by
+design — see §18.5). This session had direct Supabase CLI access to the
+linked hosted project (`rwzwktrepfgsooerpyjx`, already authenticated), so
+cleaned up all four `GGX-E2E-*`-tagged test tickets created across the
+failing and passing runs (id list: `a64a0b95-c417-4d64-a121-2c576d631142`,
+`11ff5a03-fe03-40e7-b9a6-4fc3673a7d35`, `6b9bb2c4-05ba-482f-809e-646881b5e5d7`,
+`4f385185-6e20-4040-88fc-968ab1453908`) via a scoped `delete ... where id in
+(...)` targeting exactly those four ids (confirmed via a prior read-only
+`select ... where subject like 'GGX-E2E-%'`, and confirmed zero rows remain
+afterward). All `tickets`-referencing FKs (`ticket_messages`,
+`ticket_attachments`, `internal_notes`, `status_events`, `assignments`,
+`escalations`, `quality_reviews`) are `ON DELETE CASCADE`;
+`notifications.ticket_id` is `ON DELETE SET NULL` — no orphaned rows from
+this cleanup.
+
+### 20.6 Response status summary
+
+- **ROOT_CAUSE**: `scripts/prod-e2e-validation.mjs` sent a non-UUID
+  `X-Bridge-Message-Id`; the Bridge RPC's `p_message_id uuid` parameter
+  rejected it (Postgres `22P02`), which the Edge Function's generic
+  RPC-error handling surfaces as `503`. Not an app, Bridge, or schema defect.
+- **REPLY_PATH**: PASS (§20.4)
+- **IDEMPOTENT_REPLY**: PASS (§20.4 — the retry check, which failed for the
+  same reason as the first reply, now passes)
+- **PRODUCTION_E2E**: PASS — 17/17 executable checks, live against
+  `https://ggx-corporate.vercel.app` (§20.4)
+

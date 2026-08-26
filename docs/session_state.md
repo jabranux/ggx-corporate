@@ -3,6 +3,39 @@
 > Lightweight resume/checkpoint file. Detailed June 2026 history was archived to
 > `docs/archive/session_log_2026-06.md`.
 
+## Most Recent Work — production reply 503 diagnosed and fixed (2026-08-26)
+
+`npm run e2e:prod` against live production (`https://ggx-corporate.vercel.app`)
+started passing for real this session (env vars now set, per §19.5's
+operator steps) — first run: 15 passed, 2 failed, both on the reply path
+(`503`). Full trace + fix: `docs/migration/ggx-corporate-heyq-live-ticketing.md`
+§20.
+
+- Traced the real request end to end: Vercel runtime logs showed Corporate's
+  proxy relaying Bridge's own `503` unchanged (not a Corporate-side error
+  path) → the HeyQ Edge Function's `addCustomerMessage` maps any
+  `add_customer_message_bridge` RPC error to a generic `503` → the RPC's
+  `p_message_id` parameter is `uuid`-typed (it doubles as the inserted
+  message row's PK) → reproduced directly against the hosted DB (read-only
+  `select '<value>'::uuid`, via the Supabase CLI which was already
+  authenticated in this environment) and got the exact error:
+  `22P02: invalid input syntax for type uuid`.
+- **Root cause**: `scripts/prod-e2e-validation.mjs` was sending
+  `` `${RUN_TAG}-msg-1}` `` as `X-Bridge-Message-Id` — a non-UUID string. The
+  real app always sends `crypto.randomUUID()` for this header
+  (`useTicketConversation.ts`), so no real caller had ever hit this; it was
+  a test-script defect, not an app/Bridge/schema defect. Fix: generate a real
+  UUID in the script. No `api/`, Edge Function, or migration changes needed.
+- Re-ran `npm run e2e:prod` against production: **17 passed, 0 failed**
+  (resolved-ticket auto-reopen still `[SKIP]` by design — needs a real
+  pre-resolved ticket). Cleaned up all 4 `GGX-E2E-*` test tickets created
+  across both runs directly via the Supabase CLI (scoped delete by exact id,
+  confirmed zero orphaned rows — all referencing FKs are `ON DELETE
+  CASCADE`/`SET NULL`).
+- Production auth-hardening work (§18/§19) is now fully live-validated
+  end-to-end, including the reply path. No known blockers remain on this
+  task.
+
 ## Most Recent Work — public demo credentials removed from frontend (2026-08-26)
 
 Closed the last item from the production-auth audit: `Login.tsx` was
