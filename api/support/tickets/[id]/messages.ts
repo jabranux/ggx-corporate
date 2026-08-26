@@ -9,7 +9,7 @@
 import {
   bridgeFetch, requireDemoIdentity, hasAttachmentPayload, relay, failConfig, failUpstream, single,
   BridgeConfigError, type ProxyRequest, type ProxyResponse,
-} from '../../../_lib/bridge.ts';
+} from '../../../_lib/bridge';
 
 export default async function handler(req: ProxyRequest, res: ProxyResponse): Promise<void> {
   try {

@@ -39,7 +39,7 @@
  * "Production auth — still deferred" section) — building that is explicitly
  * out of scope for this pass.
  */
-import { MOCK_AUTH_USERS } from '../../src/app/data/mock/auth.mock.ts';
+import { MOCK_AUTH_USERS } from '../../src/app/data/mock/auth.mock';
 
 export interface BridgeIdentity {
   externalUserId: string;
