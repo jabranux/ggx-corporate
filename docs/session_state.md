@@ -3,6 +3,64 @@
 > Lightweight resume/checkpoint file. Detailed June 2026 history was archived to
 > `docs/archive/session_log_2026-06.md`.
 
+## Most Recent Work — live typing presence finished against the deployed QuadX Bridge contract (2026-08-27)
+
+Resumed and finished the preserved GGX typing/presence WIP now that HEYQ/QuadX
+Bridge ships the canonical Supabase-backed typing contract (HeyQ's
+`docs/migration/live-typing-canonical-contract.md`). Commit `d7e0e31`.
+
+- **Verified the exact deployed contract** against HeyQ's canonical doc + the
+  live `quadx-bridge/index.ts` source (read-only, HeyQ repo untouched):
+  `POST /customer/tickets/:id/typing` (body `{ externalUserId, externalOrgId,
+  state: 'start'|'stop' }` → `{ typing: boolean }`) and `GET
+  /customer/tickets/:id/typing?externalUserId=&externalOrgId=` → `{ typing:
+  boolean }`, 6s server-side TTL, `:id` strictly the ticket **UUID** (a
+  human-readable reference 404s). The preserved WIP's proxy
+  (`api/support/tickets/[id]/typing.ts`) already matched this 1:1 — route,
+  method, body/query shape, response relay, UUID usage (`ticket.id`, the same
+  field `[id].ts`'s GET already uses), and identity sourced only from
+  `requireSessionIdentity` (never trusted from the request) — so no proxy
+  contract changes were needed, only its stale "not shipped yet" docblock.
+- **Two real gaps found and fixed in `useTicketConversation.ts`'s dedicated
+  3s agent-typing poll** (customer-side send/throttle logic was already
+  correct): (1) no `isPolling` guard — a visibility-change bounce could fire
+  a second `getTypingStatus` GET while one was still in flight, unlike the
+  main ticket-detail poll's existing single-flight guard; (2) never paused
+  for a resolved/closed ticket (an "inactive" conversation) the way the
+  ticket-detail poll already does — now shares that pause condition via a
+  ref (`ticketStatusForTypingRef`, updated without restarting the effect) and
+  resumes immediately, via a new `restartTypingPollRef`, when a reply reopens
+  the ticket — mirroring the existing `restartPollingRef` pattern exactly.
+  The customer's own typing signal is deliberately NOT paused for a terminal
+  ticket, since replying to one reopens it.
+- **Sender (customer) values, unchanged from the WIP, confirmed correct**:
+  throttled `start` (~1 per 2s, comfortably inside the 6s TTL), inactivity
+  `stop` after 3s, force-stop on send/clear/ticket-change/unmount.
+- **401/403 preserved for free**: `apiSendTypingSignal`/`apiGetTypingStatus`
+  go through the same shared `post`/`getJson` helpers every other ticket call
+  uses, so a 401 still clears the session (`SESSION_EXPIRED_EVENT`) and a 403
+  does not — no typing-specific code needed to write this rule twice.
+- **New test**: `tests/api-support-typing.test.mjs` — esbuild-bundles the real
+  `[id]/typing.ts` handler (same approach as
+  `tests/api-support-categories.test.mjs`) against a local fake Bridge HTTP
+  server; asserts the exact route/method/body/query shape, UUID passthrough,
+  spoofed-identity rejection, 401-before-Bridge, 400 on a malformed state, and
+  405 on other methods. `tests/heyq-typing.test.mjs` (already-committed WIP)
+  gained one more DOM case for the new terminal-pause/resume behavior.
+- **Validated**: `npm run typecheck` clean; full suite **128/128** (`npm
+  test`, including both new/updated typing test files). Manual browser
+  verification of the indicator was not run in this pass (no dev server
+  session opened) — the DOM-level Playwright coverage in `heyq-typing.test.mjs`
+  drives the actual rendered "Customer Support is typing…" bubble end to end
+  against a fetch-stubbed proxy, including its appearance/clearing and the
+  new pause/resume case.
+- **Not deployed; not pushed.** No source-side blocker remains — the proxy
+  contract is confirmed correct against the live Bridge implementation. Live
+  round-trip verification still needs `QUADX_BRIDGE_URL`/
+  `QUADX_BRIDGE_API_KEY` configured in a real environment (same recurring
+  blocker as every prior HeyQ-integration session on this project) and a GGX
+  Vercel redeploy once pushed.
+
 ## Most Recent Work — ticket-detail polling: stale-reply race fixed (2026-08-27)
 
 Codex's final audit of the adaptive-polling work below (commit `9ccead5`)
