@@ -66,29 +66,14 @@ export interface SessionContext {
 
 const AUTH_STORAGE_KEY = 'auth';
 
-/**
- * Attempt login with email + password. Credentials are verified server-side
- * by `POST /api/auth/login` (the security-critical check — see the module
- * docblock); on success it also sets the httpOnly session cookie
- * `/api/support/**` relies on. The returned display `MockAuthUser` is built
- * entirely from that response — no local email→identity table is consulted.
- */
-export async function loginMockUser(
-  email: string,
-  password: string
-): Promise<LoginResult> {
-  let res: Response;
-  try {
-    res = await fetch('/api/auth/login', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ email, password }),
-    });
-  } catch {
-    return { success: false, user: null, error: 'Unable to reach the server. Try again.' };
-  }
+/** Shared response handling for both session-issuing endpoints below —
+ * validates the server's user payload and persists the UI-display session on
+ * success. Neither caller does anything with the response except pass it
+ * here, so a shape change to one endpoint's contract can't silently diverge
+ * from the other's handling. */
+async function handleLoginResponse(res: Response, networkErrorFallback: string): Promise<LoginResult> {
   if (!res.ok) {
-    return { success: false, user: null, error: 'Invalid email or password.' };
+    return { success: false, user: null, error: networkErrorFallback };
   }
   const data = await res.json().catch(() => null);
   const u = data?.user;
@@ -114,6 +99,52 @@ export async function loginMockUser(
   // Persist a lightweight UI-display session (matching AuthContext.tsx shape).
   saveState(AUTH_STORAGE_KEY, session);
   return { success: true, user: toMockAuthUser(session) };
+}
+
+/**
+ * Attempt login with email + password. Credentials are verified server-side
+ * by `POST /api/auth/login` (the security-critical check — see the module
+ * docblock); on success it also sets the httpOnly session cookie
+ * `/api/support/**` relies on. The returned display `MockAuthUser` is built
+ * entirely from that response — no local email→identity table is consulted.
+ */
+export async function loginMockUser(
+  email: string,
+  password: string
+): Promise<LoginResult> {
+  let res: Response;
+  try {
+    res = await fetch('/api/auth/login', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email, password }),
+    });
+  } catch {
+    return { success: false, user: null, error: 'Unable to reach the server. Try again.' };
+  }
+  return handleLoginResponse(res, 'Invalid email or password.');
+}
+
+/**
+ * Quick Login: the Login page's "Main Account" / "Subaccount" cards call
+ * this with an opaque scope instead of an email/password — no seeded
+ * credential is ever sent by or held in the browser. `POST
+ * /api/auth/quick-login` resolves the scope to a demo user server-side
+ * (`resolveQuickLoginUser`, `api/_lib/demoUsers.ts`) and mints the same
+ * signed `ggx_session` cookie `loginMockUser` does.
+ */
+export async function quickLoginMockUser(scope: 'main' | 'subaccount'): Promise<LoginResult> {
+  let res: Response;
+  try {
+    res = await fetch('/api/auth/quick-login', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ scope }),
+    });
+  } catch {
+    return { success: false, user: null, error: 'Unable to reach the server. Try again.' };
+  }
+  return handleLoginResponse(res, 'Quick Login failed. Please try again or sign in manually.');
 }
 
 /** Clear the current session, both the server-verified cookie and the local

@@ -5,10 +5,11 @@
  * another valid demo account id could impersonate that account, per the P1
  * finding in docs/migration/ggx-corporate-heyq-live-ticketing.md) with a
  * signed, httpOnly, expiring cookie the browser can send but never read,
- * construct, or tamper with. `api/auth/login.ts` is the ONLY place a token is
- * minted (after validating credentials server-side, see `demoUsers.ts`);
- * every other route (`requireSessionIdentity` in `bridge.ts`) only ever
- * VERIFIES a token already on the request.
+ * construct, or tamper with. `api/auth/login.ts` (password) and
+ * `api/auth/quick-login.ts` (opaque Quick Login scope) are the ONLY places a
+ * token is minted, both only after resolving a demo user server-side (see
+ * `demoUsers.ts`); every other route (`requireSessionIdentity` in
+ * `bridge.ts`) only ever VERIFIES a token already on the request.
  *
  * Minimal POC-appropriate mechanism — HMAC-SHA256 signed cookie, no external
  * session store — deliberately the smallest thing that makes identity
@@ -59,8 +60,9 @@ function sign(payloadB64: string, secret: string): string {
   return createHmac('sha256', secret).update(payloadB64).digest('base64url');
 }
 
-/** Mint a signed session token. Only ever called from `api/auth/login.ts`
- * after credentials have been verified server-side. */
+/** Mint a signed session token. Only ever called from `api/auth/login.ts` or
+ * `api/auth/quick-login.ts`, after credentials (or a Quick Login scope) have
+ * been resolved server-side. */
 export function createSessionToken(payload: Omit<SessionPayload, 'iat' | 'exp'>): string {
   const secret = getSecret();
   const now = Math.floor(Date.now() / 1000);
@@ -130,14 +132,21 @@ export function readVerifiedSession(req: SessionRequest): SessionPayload | null 
 }
 
 /** Deployed (Vercel) vs local dev — gates the cookie's `Secure` attribute so
- * local HTTP dev still works while every real deployment is HTTPS-only. */
+ * local HTTP dev still works while every real deployment is HTTPS-only.
+ * Treats `vercel dev` (`VERCEL_ENV=development`) as "deployed" too, which is
+ * fine here (Secure on localhost is harmless — most browsers just decline to
+ * store it, and cookie mechanics aren't this function's job to special-case)
+ * but is the WRONG boundary for anything gating actual availability of a
+ * feature — see `api/auth/quick-login.ts`'s own, differently-scoped check,
+ * which deliberately does not reuse this. */
 function isDeployedEnv(): boolean {
   return process.env.VERCEL_ENV !== undefined || process.env.NODE_ENV === 'production';
 }
 
 /** `Set-Cookie` value establishing a verified session — httpOnly (never
  * readable or settable by browser JS), signed, expiring. The only way to
- * obtain one is a successful `POST /api/auth/login`. */
+ * obtain one is a successful `POST /api/auth/login` or
+ * `POST /api/auth/quick-login`. */
 export function buildSessionCookie(token: string): string {
   const attrs = [`${COOKIE_NAME}=${token}`, 'Path=/', 'HttpOnly', 'SameSite=Lax', `Max-Age=${SESSION_TTL_SECONDS}`];
   if (isDeployedEnv()) attrs.push('Secure');

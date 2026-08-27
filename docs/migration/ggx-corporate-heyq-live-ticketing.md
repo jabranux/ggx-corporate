@@ -1654,3 +1654,243 @@ this cleanup.
 - **PRODUCTION_E2E**: PASS — 17/17 executable checks, live against
   `https://ggx-corporate.vercel.app` (§20.4)
 
+## 21. Quick Login UI Cleanup — Opaque Scope, No Client-Side Credentials (2026-08-27)
+
+Two-part task, executed across two sessions. Part 1 added a "Quick Login"
+section to the Login page's existing seeded-account sign-in. Part 2 (this
+entry) fixed a client-side credential exposure that part 1 introduced —
+closely related to, but distinct from, §19's original credential-removal
+fix.
+
+### 21.1 Part 1 — Quick Login UI (commit `1cf3045`, since amended — see §21.3)
+
+`Login.tsx` had **no** Quick Login section going in: §19's fix (`35824c9`)
+had removed the old "Admin"/"Manager" demo-fill buttons entirely, because
+they echoed the working POC password in the rendered page and the bundle.
+Part 1 rebuilt Quick Login from scratch rather than restoring that old
+version:
+
+- Two cards below the Sign In button — **Main Account** ("Access to the main
+  corporate account with broader administrative capabilities.") and
+  **Subaccount** ("Access scoped to a managed subaccount for day-to-day
+  operations.") — with a small "Quick Login" heading/divider, matching
+  existing page styling.
+- `handleQuickLogin` called the same `loginMockUser` → `POST /api/auth/login`
+  → signed `ggx_session` cookie path manual login uses — no bypass, no
+  client-only session.
+- **The gap**: `QUICK_LOGIN_ACCOUNTS` in `Login.tsx` held the seeded
+  `email`/`password` literals directly (`max@email.com` /
+  `manager@email.com` / `!1234qwer`) so `handleQuickLogin` could call
+  `loginMockUser(account.email, account.password)`. Not rendered in the
+  page, but present in `Login.tsx`'s source and therefore in the production
+  JS bundle — the same category of exposure §19 had just closed, reopened by
+  this new feature. Caught before push (branch was not yet pushed to
+  `origin`/`james`).
+
+### 21.2 Part 2 — Move credential resolution server-side (this session)
+
+Goal: keep the Main Account / Subaccount UI exactly as shipped in part 1, but
+have the frontend send only an opaque scope string, with the seeded account
+resolved server-side through the same signed-session flow — mirroring how
+§18 already made support-proxy identity server-resolved instead of
+client-stated.
+
+- **`api/_lib/demoUsers.ts`** — added `QUICK_LOGIN_SCOPES` (`{ main:
+  'user-admin-001', subaccount: 'user-mgr-001' }`) and
+  `resolveQuickLoginUser(scope: unknown): DemoUser | null`, an allowlist
+  lookup: only the two literal scope strings resolve to anything; any other
+  value (including a client-supplied user id) returns `null`. No email/
+  password ever appears in the request/response contract for this path.
+- **`api/auth/quick-login.ts`** (new) — `POST` handler that mirrors
+  `api/auth/login.ts` exactly: resolves the scope via
+  `resolveQuickLoginUser`, then the same `createSessionToken` +
+  `buildSessionCookie` + response-shape as the password path. Not a new auth
+  mechanism — a second, more restrictive way to reach the same
+  `ggx_session` cookie. Rejects a non-POST method (405) and an unrecognized/
+  missing scope (400, no cookie set).
+- **`api/_lib/session.ts`** — docblocks updated: `api/auth/login.ts` is no
+  longer described as the *only* place a token is minted; both routes are
+  named as the two (and only) session-issuing paths.
+- **`src/app/services/authService.ts`** — added `quickLoginMockUser(scope:
+  'main' | 'subaccount')`, posting `{ scope }` to
+  `/api/auth/quick-login`. Factored the shared response-validation/session-
+  persist logic (previously inline in `loginMockUser`) into
+  `handleLoginResponse`, used by both functions, so the two session-issuing
+  paths can't silently diverge in how they validate the server's response or
+  persist the UI-display session.
+- **`src/app/pages/Login.tsx`** — `QUICK_LOGIN_ACCOUNTS` now holds only
+  `{ scope, label, description }`; no `email`/`password` fields anywhere in
+  the file. `handleQuickLogin` calls `quickLoginMockUser(account.scope)`
+  instead of `loginMockUser(account.email, account.password)`. UI (labels,
+  descriptions, placement, styling) is byte-for-byte what part 1 shipped —
+  only the data flow underneath changed.
+
+No change to `api/_lib/session.ts`'s cookie mechanics, `verifyDemoCredentials`
+(manual login's password check, untouched), `resolveBridgeIdentity`, or
+anything under QuadX Bridge / `api/support/**` — this pass is Login-page and
+`api/auth/*` only, same boundary §19 kept.
+
+### 21.3 Commit handling
+
+Folded into the existing, not-yet-pushed `1cf3045` via `git commit --amend`
+rather than a second commit — part 1 and part 2 are one logical unit of work
+(ship Quick Login without a client-side credential leak), and part 1 alone
+was never pushed or reviewed as a standalone change.
+
+### 21.4 Validation
+
+- `npm run typecheck` — 0 errors.
+- `npm run build` — clean (pre-existing chunk-size warning only, unrelated).
+- **Bundle credential scan** (`grep` over a fresh `dist/assets/*.js` build,
+  same method as §19.4): `!1234qwer` and `manager@email.com` — absent.
+  `max@email.com` — one match, confirmed via context dump to be the
+  pre-existing `RootLayout.tsx` display fallback
+  (`user?.email ?? 'max@email.com'`, §19.4's already-documented, intentionally
+  out-of-scope leftover) — not from `Login.tsx`, not a Quick Login
+  regression.
+- **New: `tests/api-auth-quick-login.test.mjs`** — `POST
+  /api/auth/quick-login` handler bundled with esbuild and called directly
+  (no live Vercel functions runtime locally, same pattern as
+  `api-support-categories.test.mjs`): `scope: 'main'` → signed session for
+  `user-admin-001`/Main Account; `scope: 'subaccount'` → signed session for
+  `user-mgr-001`/Acme Luzon; seven unrecognized/malformed scopes (including
+  `'admin'`, a raw user id, an email, and non-string values) → `400`, no
+  `Set-Cookie`; non-`POST` → `405`; plus the gate matrix in §21.5's third
+  pass (Preview/Production/`NODE_ENV=production` → `404`; plain local dev
+  and `vercel dev` → `200`).
+- **Updated: `tests/login-quick-login.test.mjs`** — added a static source
+  scan asserting `Login.tsx` never contains the seeded email/password
+  strings; the Main Account / Subaccount browser tests now additionally
+  assert the actual network request to `/api/auth/quick-login` carries only
+  `{ scope }` (via `window.__authRequests`, recorded by
+  `tests/helpers.mjs`'s `stubAuthEndpoints`, which now also stubs
+  `/api/auth/quick-login` for the no-live-functions-runtime dev-server
+  tests) — not email/password, and that `/api/auth/login` is never also
+  called for a Quick Login click. Existing coverage (labels/descriptions
+  render, correct account mapping, manual login unaffected) unchanged.
+- `npm test` — full suite: **161/161 passed** (0 fail, 0 skip; includes the
+  14 new Quick Login tests across `api-auth-quick-login.test.mjs` and
+  `login-quick-login.test.mjs`, after §21.5's three audit passes added five
+  gate tests total).
+- **Codex final audit** — `codex review --commit <amended commit>`, four
+  passes: three P1s fixed, one P2 acknowledged as pre-existing/out-of-scope
+  (§21.5).
+
+### 21.5 Codex final audit — four passes: three P1s fixed, one P2 acknowledged
+
+**Pass 1** (`codex review` against the diff after §21.1–21.2) raised:
+
+> **[P1]** `api/auth/quick-login.ts` mints a signed session from a
+> client-known scope string with no authorization check — any caller who
+> discovers the endpoint gets a real session for either seeded account,
+> including in production.
+
+Accurate, and worth taking seriously despite the pre-existing POC threat
+model: the seeded password is already public (committed in
+`docs/archive/PROJECT_HANDOFF.md`, and `demoUsers.ts`'s own docblock already
+accepts "a fixed, non-sensitive, small POC account set — not
+general-purpose auth"), and this change is a net improvement over the
+version it replaces — it removes a real, reusable secret from the JS bundle.
+But it does lower the bar further: reaching either account previously
+required knowing/copying an actual password string; the new endpoint
+requires nothing but the word already printed on the button.
+
+A "real" fix (proof of authorization before minting the cookie) would mean
+redesigning authentication — explicitly out of scope for this task twice
+over, and it would also defeat Quick Login's purpose (one click, no
+typing). Presented the trade-off to the user directly; first decision:
+**gate the endpoint to non-production** — `VERCEL_ENV === 'production'` →
+`404`, before any scope resolution or session minting.
+
+**Pass 2** (`codex review` re-run against the gated commit) found the first
+fix incomplete:
+
+> **[P1]** The production-only gate still permits unauthenticated Quick
+> Login on Preview deployments configured to access the live Bridge — per
+> §15.3, Preview is provisioned with the same `QUADX_BRIDGE_URL`/
+> `QUADX_BRIDGE_API_KEY` as Production, so anyone reaching a Preview URL
+> gets the identical zero-secret session against live data.
+>
+> **[P2]** The Login page still renders the Quick Login cards on every
+> deployed environment even though the request is now guaranteed to `404`
+> there — a click just produces a generic failure alert.
+
+Confirmed against §15.3 directly: this repo has never had a separate
+staging Bridge — Preview and Production share one live backend. So
+"Production-only" wasn't actually the boundary the first fix needed;
+"deployed at all" is. Presented the corrected trade-off (including the P2
+UX question it created — hide the now-mostly-dead buttons on every deployed
+tier, or leave them visible with the existing graceful failure); second
+decision: **tighten the gate to any deployed environment, leave the UI
+untouched**.
+
+First attempt at the fix tried reusing `api/_lib/session.ts`'s existing
+`isDeployedEnv()` helper (`VERCEL_ENV !== undefined || NODE_ENV ===
+'production'`), exporting it for `api/auth/quick-login.ts` to share.
+
+**Pass 3** (`codex review` re-run against that version) caught why that
+reuse was wrong:
+
+> **[P1]** `isDeployedEnv()` also treats `VERCEL_ENV=development` (what
+> `vercel dev` sets) as "deployed", so this newly local-only endpoint 404s
+> under `vercel dev` too — the one real local Vercel Functions runtime
+> available for testing it, with no other standard local path to exercise
+> the route.
+
+Correct, and a good catch: `isDeployedEnv()`'s existing semantics ("is this
+process running anywhere on Vercel, including `vercel dev`") are the right
+boundary for its actual job (gate the cookie's `Secure` attribute — `vercel
+dev` is still a Vercel context worth treating consistently there), but the
+wrong boundary for "is this endpoint reachable by anyone other than whoever
+is running the process" — `vercel dev` is a developer's own machine, not a
+public URL. Reverted the export (kept `isDeployedEnv()` private, unchanged,
+still used only for its original cookie purpose) and gave
+`api/auth/quick-login.ts` its own, differently-scoped `isPubliclyReachable()`:
+true for `VERCEL_ENV` `'production'`/`'preview'`, or a non-Vercel host with
+`NODE_ENV=production`; false for `VERCEL_ENV=development` and plain local
+dev. Third decision: **same "deployed at all" trade-off already agreed in
+pass 2, corrected to actually mean it — public reachability, not "any Vercel
+context."**
+
+Two more tests added to `tests/api-auth-quick-login.test.mjs` (five gate
+tests total): `VERCEL_ENV=development` → still `200` (the case pass 3
+caught); plain local dev (`node --test`, `npm run dev` — no `VERCEL_ENV` at
+all) → still `200`, confirmed separately. `'production'`/`'preview'`/
+`NODE_ENV=production` → still `404`, no `Set-Cookie`, unchanged from pass 2.
+Re-ran typecheck, build, and the full suite after each of the three passes —
+see the updated `npm test` count above.
+
+**Pass 4** (`codex review` against the final gated commit, confirming no P1s
+remain) surfaced one P2, acknowledged but not acted on:
+
+> **[P2]** `npm run dev` (plain Vite) doesn't execute anything under `api/`,
+> so both Quick Login cards always fail under the project's default local
+> dev command — only `vercel dev` (or the stubbed browser tests) actually
+> exercises the route.
+
+True, but pre-existing and repo-wide, not introduced by this task:
+`/api/auth/login`, every `/api/support/**` route, and every other handler
+under `api/` already have this exact property under plain `npm run dev` —
+it's *why* `tests/helpers.mjs`'s `stubAuthEndpoints`/`addHeyQApiStubScript`
+exist at all (both docblocks say so directly), and it predates Quick Login
+entirely. A fix would mean changing the project's default local dev command
+for every route, not something scoped to Quick Login — left as-is.
+
+### 21.6 Response status summary
+
+- **CLIENT_CREDENTIAL_EXPOSURE**: FIXED — `Login.tsx` no longer contains the
+  seeded email/password in any form; Quick Login sends only an opaque scope,
+  resolved server-side.
+- **SIGNED_SESSION_FLOW**: PRESERVED — both password login and Quick Login
+  mint the identical `ggx_session` cookie via the identical
+  `createSessionToken`/`buildSessionCookie` path; no client-only session, no
+  `demoAccountId`-style trust reintroduced.
+- **CODEX_P1_ZERO_SECRET_ENDPOINT**: FIXED (§21.5, all three passes) —
+  `/api/auth/quick-login` now 404s whenever it's publicly reachable
+  (`isPubliclyReachable()` — Production and Preview, since Preview shares
+  live Bridge credentials per §15.3) before resolving any scope or minting a
+  session; unaffected under `vercel dev` or plain local dev. Manual
+  password login is unaffected in every environment.
+- **SCOPE**: GGX Corporate only — no change to QuadX Bridge, `api/support/**`,
+  Bridge identity resolution, or account/role architecture.
+

@@ -12,8 +12,12 @@
  *
  * ── What this is / is not ────────────────────────────────────────────────
  * `verifyDemoCredentials` is the ONLY place a password is checked — it backs
- * `POST /api/auth/login` (`api/auth/login.ts`), which is the only place a
- * session token is minted (see `session.ts`). `resolveBridgeIdentity` is the
+ * `POST /api/auth/login` (`api/auth/login.ts`). `resolveQuickLoginUser` is
+ * the ONLY place an opaque Quick Login scope is resolved — it backs
+ * `POST /api/auth/quick-login` (`api/auth/quick-login.ts`), the Login page's
+ * Quick Login cards, which send a scope string (`'main'` | `'subaccount'`)
+ * instead of a password. Both routes are the only places a session token is
+ * minted (see `session.ts`). `resolveBridgeIdentity` is the
  * ONLY place a verified session's Bridge identity is derived, and it always
  * re-reads the CURRENT table by id rather than trusting fields embedded in
  * an already-issued token — so removing/reassigning a demo account here
@@ -43,6 +47,21 @@ const DEMO_USERS: readonly DemoUser[] = [
   { id: 'user-admin-001', email: 'max@email.com', password: '!1234qwer', role: 'admin', name: 'Max Rodriguez', accountId: 'main', accountName: 'Main Account' },
   { id: 'user-mgr-001', email: 'manager@email.com', password: '!1234qwer', role: 'manager', name: 'Rina Lopez', accountId: 'acme-luzon', accountName: 'Acme Luzon' },
 ];
+
+export type QuickLoginScope = 'main' | 'subaccount';
+
+/**
+ * Opaque scope → demo user id, for the Login page's "Main Account" /
+ * "Subaccount" Quick Login cards. The frontend sends only the scope string
+ * (`api/auth/quick-login.ts`); it never sees or holds the underlying email/
+ * password — those stay server-side, same as every other credential in this
+ * file. Keep in sync with `QUICK_LOGIN_ACCOUNTS` in `src/app/pages/Login.tsx`
+ * (label/description only — no credentials there either).
+ */
+const QUICK_LOGIN_SCOPES: Readonly<Record<QuickLoginScope, string>> = {
+  main: 'user-admin-001',
+  subaccount: 'user-mgr-001',
+};
 
 function timingSafeStringEqual(a: string, b: string): boolean {
   const bufA = Buffer.from(a);
@@ -75,4 +94,17 @@ export function resolveBridgeIdentity(userId: string): BridgeIdentity | null {
   const user = DEMO_USERS.find((u) => u.id === userId);
   if (!user) return null;
   return { externalUserId: user.email, externalOrgId: user.accountId };
+}
+
+/**
+ * Resolve a Quick Login scope (`'main'` | `'subaccount'`) to its demo user,
+ * for `POST /api/auth/quick-login`. Only the two fixed scopes above resolve
+ * to anything; any other value (including a client-supplied user id) returns
+ * `null` — this is not a general credential bypass, just a same-fixed-account
+ * shortcut around typing the seeded email/password.
+ */
+export function resolveQuickLoginUser(scope: unknown): DemoUser | null {
+  if (typeof scope !== 'string' || !(scope in QUICK_LOGIN_SCOPES)) return null;
+  const userId = QUICK_LOGIN_SCOPES[scope as QuickLoginScope];
+  return DEMO_USERS.find((u) => u.id === userId) ?? null;
 }

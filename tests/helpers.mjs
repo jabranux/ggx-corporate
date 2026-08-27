@@ -65,22 +65,45 @@ const DEMO_ACCOUNTS = {
   'manager@email.com': { password: '!1234qwer', id: 'user-mgr-001',   name: 'Rina Lopez',    email: 'manager@email.com', role: 'manager', accountId: 'acme-luzon',  accountName: 'Acme Luzon' },
 };
 
-/** Stub `/api/auth/login` and `/api/auth/logout` so `authService.loginMockUser`/
- * `logoutMockUser`'s real `fetch()` calls resolve without a live Vercel functions
- * runtime. Must be registered before the navigation that triggers the login form
- * submit (an init script). */
-async function stubAuthEndpoints(page) {
-  await page.addInitScript((accounts) => {
+/** Opaque Quick Login scope → demo account email, mirroring
+ * `QUICK_LOGIN_SCOPES` in `api/_lib/demoUsers.ts`. */
+const QUICK_LOGIN_SCOPES = {
+  main: 'max@email.com',
+  subaccount: 'manager@email.com',
+};
+
+/** Stub `/api/auth/login`, `/api/auth/quick-login`, and `/api/auth/logout` so
+ * `authService`'s real `fetch()` calls resolve without a live Vercel
+ * functions runtime. Also records every stubbed request on
+ * `window.__authRequests` (path + parsed body) so tests can assert on what
+ * the client actually sent (e.g. that Quick Login never sends a password).
+ * Must be registered before the navigation that triggers the request (an
+ * init script). */
+export async function stubAuthEndpoints(page) {
+  await page.addInitScript(({ accounts, scopes }) => {
+    window.__authRequests = [];
     const orig = window.fetch.bind(window);
     window.fetch = async (url, init) => {
       const path = new URL(String(url), 'http://x').pathname;
       const method = (init?.method ?? 'GET').toUpperCase();
+      let body = {};
+      try { body = init?.body ? JSON.parse(init.body) : {}; } catch { body = {}; }
+
       if (method === 'POST' && path === '/api/auth/login') {
-        let body = {};
-        try { body = init?.body ? JSON.parse(init.body) : {}; } catch { body = {}; }
+        window.__authRequests.push({ path, body });
         const account = accounts[body.email];
         if (!account || account.password !== body.password) {
           return new Response(JSON.stringify({ error: 'Invalid email or password.' }), { status: 401, headers: { 'Content-Type': 'application/json' } });
+        }
+        const { password, ...user } = account;
+        return new Response(JSON.stringify({ user }), { status: 200, headers: { 'Content-Type': 'application/json' } });
+      }
+      if (method === 'POST' && path === '/api/auth/quick-login') {
+        window.__authRequests.push({ path, body });
+        const email = scopes[body.scope];
+        const account = email ? accounts[email] : undefined;
+        if (!account) {
+          return new Response(JSON.stringify({ error: 'Invalid Quick Login scope.' }), { status: 400, headers: { 'Content-Type': 'application/json' } });
         }
         const { password, ...user } = account;
         return new Response(JSON.stringify({ user }), { status: 200, headers: { 'Content-Type': 'application/json' } });
@@ -90,7 +113,7 @@ async function stubAuthEndpoints(page) {
       }
       return orig(url, init);
     };
-  }, DEMO_ACCOUNTS);
+  }, { accounts: DEMO_ACCOUNTS, scopes: QUICK_LOGIN_SCOPES });
 }
 
 /** Launch a browser and sign in, returning a page parked on the dashboard. */

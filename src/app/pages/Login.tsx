@@ -8,7 +8,27 @@ import { Card, CardContent } from '../components/ui/Card';
 import { Checkbox } from '../components/ui/Checkbox';
 import { Alert } from '../components/ui/Alert';
 import { useAuth } from '../contexts/AuthContext';
-import { loginMockUser } from '../services/authService';
+import { loginMockUser, quickLoginMockUser } from '../services/authService';
+
+/**
+ * Quick Login options, labeled by account scope only — no seeded email or
+ * password lives in the client bundle. Each card sends its opaque `scope` to
+ * `POST /api/auth/quick-login`, which resolves it to a demo user server-side
+ * (`resolveQuickLoginUser`, `api/_lib/demoUsers.ts`) and mints the same
+ * signed `ggx_session` cookie manual login does (see `handleQuickLogin`).
+ */
+export const QUICK_LOGIN_ACCOUNTS = [
+  {
+    scope: 'main',
+    label: 'Main Account',
+    description: 'Access to the main corporate account with broader administrative capabilities.',
+  },
+  {
+    scope: 'subaccount',
+    label: 'Subaccount',
+    description: 'Access scoped to a managed subaccount for day-to-day operations.',
+  },
+] as const;
 
 export function Login() {
   const navigate = useNavigate();
@@ -48,6 +68,25 @@ export function Login() {
       navigate('/dashboard');
     } else {
       alert('Invalid email or password.');
+    }
+  };
+
+  const handleQuickLogin = async (account: (typeof QUICK_LOGIN_ACCOUNTS)[number]) => {
+    // Same signed-session path as manual login — resolves the seeded account
+    // server-side from an opaque scope, never a credential held here.
+    const result = await quickLoginMockUser(account.scope);
+    if (result.success && result.user) {
+      const u = result.user;
+      login({
+        name: u.name,
+        email: u.email,
+        role: u.role,
+        accountId: u.accountId,
+        accountName: u.accountName,
+      });
+      navigate('/dashboard');
+    } else {
+      alert('Quick Login failed. Please try again or sign in manually.');
     }
   };
 
@@ -145,6 +184,29 @@ export function Login() {
                   )}
 
                   <Button type="submit" className="w-full">Sign in</Button>
+
+                  <div className="relative pt-2">
+                    <div className="absolute inset-0 flex items-center">
+                      <div className="w-full border-t border-gray-200" />
+                    </div>
+                    <div className="relative flex justify-center text-xs">
+                      <span className="px-2 bg-white text-gray-500 font-medium">Quick Login</span>
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-2 gap-2">
+                    {QUICK_LOGIN_ACCOUNTS.map((account) => (
+                      <button
+                        key={account.scope}
+                        type="button"
+                        onClick={() => handleQuickLogin(account)}
+                        className="flex flex-col items-start gap-0.5 rounded-lg border border-gray-300 bg-white px-3 py-2.5 text-left hover:bg-gray-50 hover:border-gray-400 transition-colors"
+                      >
+                        <span className="text-sm font-medium text-gray-900">{account.label}</span>
+                        <span className="text-[11px] text-gray-500 leading-snug">{account.description}</span>
+                      </button>
+                    ))}
+                  </div>
 
                   <div className="relative">
                     <div className="absolute inset-0 flex items-center">
