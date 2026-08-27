@@ -3,6 +3,33 @@
 > Lightweight resume/checkpoint file. Detailed June 2026 history was archived to
 > `docs/archive/session_log_2026-06.md`.
 
+## Most Recent Work — ticket-detail polling: stale-reply race fixed (2026-08-27)
+
+Codex's final audit of the adaptive-polling work below (commit `9ccead5`)
+found a real P1: a detail GET already in flight when a reply reopens a
+resolved/closed ticket could resolve AFTER that reply, overwriting the
+just-reopened status and cancelling the 15s cadence the reply had just
+re-armed. Commit `5dcc289`.
+
+- **Fix:** a per-effect epoch counter in `useTicketConversation.ts`, bumped
+  whenever a confirmed reply calls `restartPollingRef`. A poll snapshots the
+  epoch before its GET and re-checks it after; if superseded, the response is
+  discarded entirely (no merge, no reschedule) — the reply's own schedule is
+  left standing.
+- **New test:** `heyq-request-lifecycle.test.mjs` races a deliberately
+  delayed stale poll against a reply that reopens a resolved ticket (bespoke
+  self-mutating fetch stub, not the shared static fixture — the reply needs
+  to actually flip status). Asserts the reopened status sticks and the 15s
+  cadence survives. Full suite **106/106**, typecheck clean, build clean.
+- **Process note for future sessions:** don't pipe a long-running background
+  test command through `tail` — it buffers ALL output until the process
+  exits, so a genuinely-progressing run looks indistinguishable from a hung
+  one for its entire duration. Redirect to a plain log file (`> file.log
+  2>&1`) and `Read`/`tail` that file instead. Separately, killing the
+  Bash-tool's tracked wrapper does not reliably kill a deeply nested
+  `npm`/`node --test`/`vite` child-process tree on Windows — verify and, if
+  needed, `Stop-Process` the actual child PIDs directly.
+
 ## Most Recent Work — ticket-detail adaptive polling (2026-08-27)
 
 Replaced `useTicketConversation`'s fixed 5s ticket-detail poll with an
