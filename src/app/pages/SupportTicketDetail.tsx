@@ -204,6 +204,7 @@ function LiveTicketView({
                   placeholder="Type your message to the support team..."
                   value={reply}
                   onChange={(e) => handleReplyChange(e.target.value)}
+                  onBlur={() => convo.stopTyping()}
                   disabled={sending}
                 />
                 <p className="text-[11px] text-gray-400">

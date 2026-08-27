@@ -38,10 +38,14 @@ const realClock: TypingClock = {
  * no follow-up (start or stop) before it self-clears. Comfortably longer than
  * the dedicated typing poll interval so normal polling never flickers it. */
 export const REMOTE_TYPING_STALE_MS = 8_000;
-/** At most one outbound 'start' per burst of keystrokes. */
+/** At most one outbound 'start' per burst of keystrokes — also the sparse
+ * keepalive cadence while typing continues, comfortably inside the 6s TTL. */
 export const CUSTOMER_TYPING_THROTTLE_MS = 2_000;
-/** Outbound 'stop' after this long with no further keystrokes. */
-export const CUSTOMER_TYPING_STOP_DEBOUNCE_MS = 3_000;
+/** Outbound 'stop' after this long with no further keystrokes (product spec:
+ * 10s inactivity → not typing). Deliberately longer than the 6s server TTL —
+ * that TTL already self-heals the remote side sooner if this explicit stop is
+ * ever delayed or lost, so this value is a UX choice, not a correctness one. */
+export const CUSTOMER_TYPING_STOP_DEBOUNCE_MS = 10_000;
 
 export interface RemoteTypingTracker {
   /** Feed a fresh remote signal ('true' = the agent is typing right now). */

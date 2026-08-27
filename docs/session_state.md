@@ -3,6 +3,73 @@
 > Lightweight resume/checkpoint file. Detailed June 2026 history was archived to
 > `docs/archive/session_log_2026-06.md`.
 
+## Most Recent Work — typing presence: event-driven receiver evaluated and ruled out; sender-side hardening shipped (2026-08-27)
+
+Audited the full typing/presence path (`typingPresence.ts`,
+`useTicketConversation.ts`, `heyqCustomerApi.ts`, `ticketsService.ts`, the
+`/api/support/tickets/[id]/typing` proxy) to see whether the 3s
+"keep asking if the other side is typing" receiver poll could be replaced
+with an event-driven Supabase Realtime subscription, per the audit's request.
+GGX/HeyQ/Bridge were read; **only GGX source was changed** (HEYQ/Bridge/
+Supabase untouched, as instructed).
+
+- **Realtime investigation (read-only, against HeyQ's deployed contract —
+  `HeyQ/docs/migration/live-typing-canonical-contract.md` +
+  `HeyQ/supabase/migrations/20260829100000_ticket_typing_state.sql`):**
+  HEYQ's own agent-side receiver already consumes this exact server state
+  (`public.ticket_typing_state`) via Supabase Realtime `postgres_changes` —
+  but that table's RLS grants `select` **only to the `authenticated` role**
+  (a real Supabase Auth session bound to a staff `profiles` row); `service_role`
+  (full CRUD, bypasses RLS entirely) is the only other grantee. GGX customers
+  never hold a Supabase Auth session — identity here is GGX's own signed
+  session cookie + a Bridge-resolved `externalUserId`/`externalOrgId`
+  (`requireSessionIdentity`), so there is **no credential the browser could
+  present** to subscribe directly: not `anon` (no policy grants it), not
+  `authenticated` (nothing to mint a valid JWT from for an external customer
+  identity), and never `service_role` (would bypass RLS on every table in the
+  database, not just this one — a full trust-boundary break, explicitly
+  disallowed). Broadcast and Presence have the identical gap: no ticket-scoped
+  Realtime Authorization/token-issuance mechanism exists today for a customer
+  identity, and QuadX Bridge is a stateless Edge Function with no persistent
+  connection to participate in a broadcast channel of its own (same reason
+  HEYQ's own design doc gives for not using Broadcast on the staff side).
+  **Conclusion: none of the three mechanisms (Broadcast / Presence /
+  `postgres_changes`) can be wired from GGX today without either exposing a
+  Supabase credential to the browser or building new companion
+  infrastructure** — a scoped Realtime token-issuance route (new Bridge
+  endpoint) plus a channel-authorization policy keyed to
+  `(ticket, externalUserId)` (new Supabase migration). Per the task's
+  instruction, this is **not invented as a workaround**; the 3s receiver poll
+  stays exactly as-is, and the finding above is the exact companion-change
+  ask for a future HEYQ/Bridge/Supabase session.
+- **Sender-side hardening (safe, local-only, shipped this pass):**
+  `CUSTOMER_TYPING_STOP_DEBOUNCE_MS` raised from 3s to the spec's explicit
+  **10s** inactivity value (`typingPresence.ts`) — the 6s server TTL still
+  self-heals the remote indicator sooner if this explicit stop is ever late
+  or lost, so this was a UX-value fix, not a correctness one. Added two
+  immediate-stop triggers that were missing from the original WIP:
+  **composer blur** (`onBlur` on the reply textarea in
+  `SupportTicketDetail.tsx`, calling the hook's existing `stopTyping()`) and
+  **tab hidden / window blur** (`useTicketConversation.ts`'s typing effect —
+  `document.hidden` and a new `window` `blur` listener both call
+  `customerEmitter.stopNow()` immediately, rather than waiting out the 10s
+  debounce). Returning to the tab/window was already correct — nothing calls
+  `onInputChange`/resends `start` on focus/visibility-restore, confirmed by a
+  new test. Send/clear/ticket-change/unmount stops, the throttled ~2s
+  keepalive-while-typing, and the poll's own single-flight/pause/resume
+  behavior were already correct and are unchanged.
+- **New tests** (`tests/heyq-typing.test.mjs`, DOM-level, real fetch-stubbed
+  proxy): composer blur stops immediately: tab-hidden stops immediately;
+  window-blur stops immediately; returning to a visible tab does not resend
+  `start` without a new keystroke. All existing pure-logic and DOM typing
+  tests pass unchanged (the inactivity test asserts against the
+  now-10s `CUSTOMER_TYPING_STOP_DEBOUNCE_MS` constant, not a hardcoded value,
+  so it needed no edit).
+- **Validated:** `npm run typecheck` clean, `npm run build` clean, full suite
+  **132/132** (up from 128 — the 4 new tests above), `tests/heyq-typing.test.mjs`
+  standalone **16/16**. Not deployed, not pushed, not committed to git yet
+  pending final review.
+
 ## Most Recent Work — live typing presence finished against the deployed QuadX Bridge contract (2026-08-27)
 
 Resumed and finished the preserved GGX typing/presence WIP now that HEYQ/QuadX

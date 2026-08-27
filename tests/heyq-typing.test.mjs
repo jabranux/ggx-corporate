@@ -303,6 +303,62 @@ describe('the ticket detail page (typing wired end-to-end)', () => {
     assert.equal(countAfterWaiting, countAtNavigation, 'the typing poll must not keep firing after the conversation unmounts');
   });
 
+  /** Simulate the Page Visibility API without actually backgrounding the OS window. */
+  async function setHidden(hidden) {
+    await page.evaluate((hidden) => {
+      Object.defineProperty(document, 'hidden', { configurable: true, get: () => hidden });
+      Object.defineProperty(document, 'visibilityState', { configurable: true, get: () => (hidden ? 'hidden' : 'visible') });
+      document.dispatchEvent(new Event('visibilitychange'));
+    }, hidden);
+  }
+
+  it('composer blur stops the customer\'s typing signal immediately, without waiting for the inactivity debounce', async () => {
+    await openLiveTicket({});
+
+    await page.fill('#ticket-reply', 'Still there?');
+    await page.waitForFunction(() => (window.__typingPostCalls ?? []).includes('start'), { timeout: 5_000 });
+
+    await page.locator('#ticket-reply').blur();
+    // Well short of the 10s inactivity debounce — this must be immediate.
+    await page.waitForFunction(() => (window.__typingPostCalls ?? []).includes('stop'), { timeout: 2_000 });
+  });
+
+  it('the tab going hidden stops the customer\'s typing signal immediately', async () => {
+    await openLiveTicket({});
+
+    await page.fill('#ticket-reply', 'Still there?');
+    await page.waitForFunction(() => (window.__typingPostCalls ?? []).includes('start'), { timeout: 5_000 });
+
+    await setHidden(true);
+    await page.waitForFunction(() => (window.__typingPostCalls ?? []).includes('stop'), { timeout: 2_000 });
+  });
+
+  it('the window losing focus stops the customer\'s typing signal immediately', async () => {
+    await openLiveTicket({});
+
+    await page.fill('#ticket-reply', 'Still there?');
+    await page.waitForFunction(() => (window.__typingPostCalls ?? []).includes('start'), { timeout: 5_000 });
+
+    await page.evaluate(() => window.dispatchEvent(new Event('blur')));
+    await page.waitForFunction(() => (window.__typingPostCalls ?? []).includes('stop'), { timeout: 2_000 });
+  });
+
+  it('returning to a visible tab never resends start on its own — only an actual keystroke does', async () => {
+    await openLiveTicket({});
+
+    await page.fill('#ticket-reply', 'Still there?');
+    await page.waitForFunction(() => (window.__typingPostCalls ?? []).includes('start'), { timeout: 5_000 });
+
+    await setHidden(true); // forces an immediate stop
+    await page.waitForFunction(() => (window.__typingPostCalls ?? []).includes('stop'), { timeout: 2_000 });
+
+    await setHidden(false);
+    await page.waitForTimeout(500); // give any (unwanted) auto-resend a chance to fire
+
+    const starts = await page.evaluate(() => (window.__typingPostCalls ?? []).filter((s) => s === 'start').length);
+    assert.equal(starts, 1, 'becoming visible again must not re-send start without a new keystroke');
+  });
+
   it('pauses the agent-typing poll while the ticket is resolved (an inactive conversation), and resumes it once a reply reopens it', async () => {
     await openLiveTicket({ initialStatus: 'resolved', reopensOnReply: true, typingGetSequence: [false] });
     await page.getByText('This ticket has been resolved').first().waitFor({ timeout: 8_000 });

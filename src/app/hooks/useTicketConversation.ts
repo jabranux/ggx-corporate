@@ -49,11 +49,36 @@
  *     (stale-expiry timeout). A reply that reopens a terminal ticket resumes
  *     this poll immediately (`restartTypingPollRef`), same pattern as
  *     `restartPollingRef` above.
+ *
+ *     REMAINS POLL-BASED, NOT EVENT-DRIVEN, BY DESIGN: HEYQ's own receiver
+ *     consumes this same server state (`ticket_typing_state`) via Supabase
+ *     Realtime `postgres_changes`, but that table's RLS grants `select` only
+ *     to the `authenticated` role (a real Supabase Auth session bound to a
+ *     staff `profiles` row) — see HeyQ's
+ *     `supabase/migrations/20260829100000_ticket_typing_state.sql`. GGX
+ *     customers never hold a Supabase Auth session (identity here is GGX's
+ *     own signed session cookie + a Bridge-resolved `externalUserId`), so
+ *     there is no credential this browser could present to subscribe
+ *     directly — not `anon` (no policy grants it), not `authenticated` (no
+ *     JWT to mint one from), and never `service_role` (would bypass RLS on
+ *     every table, not just this one). Supabase Broadcast/Presence have the
+ *     same gap: no ticket-scoped Realtime Authorization/token-issuance path
+ *     exists today for a customer identity. Safely closing this needs a
+ *     companion change in HEYQ/QuadX Bridge/Supabase (a scoped Realtime
+ *     token route + a channel-authorization policy keyed to
+ *     `(ticket, externalUserId)`) — out of scope here (HEYQ/Bridge are not
+ *     modified by this task). See the migration write-up in
+ *     `docs/session_state.md` for the full companion-change handoff.
  *   • Customer typing: reply-box keystrokes go through a
  *     `CustomerTypingEmitter` (same module) that throttles outbound
- *     start-signals to roughly one per 2s (comfortably inside the 6s TTL) and
- *     force-stops on inactivity/send/clear/ticket-change/unmount — this side
- *     is NOT paused for a terminal ticket, since replying to one reopens it.
+ *     start-signals to roughly one per 2s (comfortably inside the 6s TTL,
+ *     also the sparse keepalive while typing continues) and force-stops on:
+ *     10s inactivity, send, input clear, composer blur (`SupportTicketDetail`
+ *     wires this), the tab going hidden or the window losing focus (both
+ *     handled below — immediately, not by waiting out the 10s debounce), and
+ *     ticket change/unmount. Returning to the tab/window never re-sends
+ *     `start` on its own — only an actual keystroke does. This side is NOT
+ *     paused for a terminal ticket, since replying to one reopens it.
  *   • Transport: `sendTypingSignal`/`getTypingStatus` (`services/heyqService.ts`
  *     → a same-origin `/api/support/tickets/:id/typing` proxy route, which
  *     forwards to Bridge with the server-verified session identity). Both
@@ -340,11 +365,19 @@ export function useTicketConversation(id: string, initialTicket: CustomerTicket)
 
     scheduleNextPoll();
 
+    // Backgrounding the tab (or losing window focus while still visible,
+    // e.g. alt-tabbing to another app) must stop the CUSTOMER's own typing
+    // signal immediately — not wait out the 10s inactivity debounce — per
+    // the "hidden/unfocused → stop" requirement. Returning to the tab/window
+    // deliberately does nothing here: only an actual keystroke re-arms it.
     const onVisibility = () => {
+      if (document.hidden) customerEmitter.stopNow();
       clearPoll();
       if (document.visibilityState === 'visible') void pollOnce();
     };
     document.addEventListener('visibilitychange', onVisibility);
+    const onWindowBlur = () => customerEmitter.stopNow();
+    window.addEventListener('blur', onWindowBlur);
 
     // Mirrors restartPollingRef above: a confirmed reply that reopens a
     // terminal ticket must resume a paused poll loop immediately, using the
@@ -359,6 +392,7 @@ export function useTicketConversation(id: string, initialTicket: CustomerTicket)
     return () => {
       cancelled = true;
       document.removeEventListener('visibilitychange', onVisibility);
+      window.removeEventListener('blur', onWindowBlur);
       clearPoll();
       customerEmitter.stopNow(); // ticket change / unmount forces a stop signal
       customerEmitter.dispose();
