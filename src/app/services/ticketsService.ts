@@ -69,9 +69,13 @@ export type {
   StatusChangedData,
 } from './heyqService';
 
-// Typing presence — its own ephemeral send/poll path, consumed only by
+// Typing presence — its own ephemeral path, consumed only by
 // useTicketConversation.ts. Never part of a ticket read/poll payload.
-export { sendTypingSignal, getTypingStatus } from './heyqService';
+// Sending is unchanged; receiving is event-driven (Supabase Realtime
+// Broadcast via subscribeToAgentTyping + heyqTypingRealtime.ts), not a poll
+// — see heyqService.ts's docblock.
+export { sendTypingSignal, subscribeToAgentTyping } from './heyqService';
+export type { AgentTypingSubscription } from './heyqService';
 
 /**
  * List-row shape for the existing Support Tickets table and topbar search.

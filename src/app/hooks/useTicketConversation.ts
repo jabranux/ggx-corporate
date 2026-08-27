@@ -35,56 +35,61 @@
  * rather than deleted.
  *
  * TYPING PRESENCE is its own lightweight, separate path — NOT the dormant
- * WebSocket above, and NOT folded into the 15s ticket-detail poll — consuming
- * the now-deployed QuadX Bridge typing contract (`POST`/`GET
- * /customer/tickets/:id/typing`, 6s server-side TTL; see that route's
- * docblock for the exact request/response shapes):
- *   • Remote (agent) typing: a dedicated 3s poll (`TYPING_POLL_INTERVAL_MS`)
- *     of `getTypingStatus(id)`, single-flight (never overlaps a slow GET —
- *     see `isPolling` below) and paused while `document.hidden` OR the
- *     ticket's own status is terminal (an "inactive" conversation, same
- *     condition the ticket-detail poll above pauses on) — feeding a
- *     `RemoteTypingTracker` (`lib/typingPresence.ts`) that debounces the
- *     `agentTyping` flag and self-clears if a stop signal is ever lost
- *     (stale-expiry timeout). A reply that reopens a terminal ticket resumes
- *     this poll immediately (`restartTypingPollRef`), same pattern as
- *     `restartPollingRef` above.
+ * WebSocket above, and NOT folded into the 15s ticket-detail poll:
+ *   • Remote (agent) typing: EVENT-DRIVEN over Supabase Realtime Broadcast
+ *     (`heyqTypingRealtime.ts`'s `connectAgentTypingRealtime`), consuming the
+ *     QuadX Bridge companion contract HEYQ shipped in commit `ac5b685`
+ *     (`POST /customer/tickets/:id/typing/subscribe` → a short-lived,
+ *     RECEIVE-ONLY, ticket-scoped Realtime credential — see HeyQ's
+ *     `docs/migration/typing-realtime-broadcast-authorization.md`). This
+ *     REPLACES the former 3s `GET .../typing` poll entirely — no periodic
+ *     request of any kind for the receive side any more. A subscription is
+ *     opened only while the ticket is NOT terminal (mirrors the ticket-detail
+ *     poll's own pause condition) and is torn down/reopened around tab
+ *     visibility (see below) and a reply that reopens a resolved/closed
+ *     ticket (`restartTypingRealtimeRef`, same pattern as
+ *     `restartPollingRef` above). The raw `{ typing, updatedAt }` broadcast
+ *     feeds the EXISTING `RemoteTypingTracker` (`lib/typingPresence.ts`)
+ *     unchanged — it still debounces `agentTyping` and self-clears on a
+ *     stale-expiry timeout (now aligned to HEYQ's own 15s server TTL), just
+ *     driven by a push instead of a pull. A typing broadcast NEVER triggers
+ *     a ticket refetch — `onTyping` only ever calls `remoteTracker.signal`.
  *
- *     REMAINS POLL-BASED, NOT EVENT-DRIVEN, BY DESIGN: HEYQ's own receiver
- *     consumes this same server state (`ticket_typing_state`) via Supabase
- *     Realtime `postgres_changes`, but that table's RLS grants `select` only
- *     to the `authenticated` role (a real Supabase Auth session bound to a
- *     staff `profiles` row) — see HeyQ's
- *     `supabase/migrations/20260829100000_ticket_typing_state.sql`. GGX
- *     customers never hold a Supabase Auth session (identity here is GGX's
- *     own signed session cookie + a Bridge-resolved `externalUserId`), so
- *     there is no credential this browser could present to subscribe
- *     directly — not `anon` (no policy grants it), not `authenticated` (no
- *     JWT to mint one from), and never `service_role` (would bypass RLS on
- *     every table, not just this one). Supabase Broadcast/Presence have the
- *     same gap: no ticket-scoped Realtime Authorization/token-issuance path
- *     exists today for a customer identity. Safely closing this needs a
- *     companion change in HEYQ/QuadX Bridge/Supabase (a scoped Realtime
- *     token route + a channel-authorization policy keyed to
- *     `(ticket, externalUserId)`) — out of scope here (HEYQ/Bridge are not
- *     modified by this task). See the migration write-up in
- *     `docs/session_state.md` for the full companion-change handoff.
+ *     Tab hidden/visible: hidden immediately stops the customer's own typing
+ *     signal (unchanged) AND tears down the Realtime subscription — no
+ *     point holding an idle authorized socket open while backgrounded — and
+ *     clears `agentTyping` (an already-true indicator can't be trusted once
+ *     the channel that would confirm/clear it is gone). Becoming visible
+ *     again reconnects fresh but deliberately does NOT mark the agent
+ *     typing on its own — only a genuine broadcast after reconnecting does
+ *     that (never assume typing resumes just because the tab did).
+ *
+ *     Security: only ever holds the short-lived, receive-only, ticket-scoped
+ *     token Bridge mints — never `service_role`, never a broad/authenticated
+ *     Supabase session, never usable for a different ticket (see
+ *     `heyqTypingRealtime.ts`'s own docblock for the full security model,
+ *     including why `realtime.setAuth(token)` is re-applied immediately
+ *     before every subscribe/reconnect rather than assumed to persist).
  *   • Customer typing: reply-box keystrokes go through a
- *     `CustomerTypingEmitter` (same module) that throttles outbound
- *     start-signals to roughly one per 2s (comfortably inside the 6s TTL,
- *     also the sparse keepalive while typing continues) and force-stops on:
- *     10s inactivity, send, input clear, composer blur (`SupportTicketDetail`
- *     wires this), the tab going hidden or the window losing focus (both
- *     handled below — immediately, not by waiting out the 10s debounce), and
- *     ticket change/unmount. Returning to the tab/window never re-sends
- *     `start` on its own — only an actual keystroke does. This side is NOT
- *     paused for a terminal ticket, since replying to one reopens it.
- *   • Transport: `sendTypingSignal`/`getTypingStatus` (`services/heyqService.ts`
- *     → a same-origin `/api/support/tickets/:id/typing` proxy route, which
- *     forwards to Bridge with the server-verified session identity). Both
- *     still degrade silently on any transport failure — sending never throws
- *     and reading never shows a stuck indicator — so typing can never block
- *     or break the real conversation.
+ *     `CustomerTypingEmitter` (`lib/typingPresence.ts`) that throttles
+ *     outbound start-signals to roughly one per 4s (HEYQ's own send-throttle
+ *     value, sparse relative to its 15s TTL — see that module's docblock)
+ *     and force-stops on: 10s inactivity, send, input clear, composer blur
+ *     (`SupportTicketDetail` wires this), the tab going hidden or the window
+ *     losing focus (both handled below — immediately, not by waiting out
+ *     the 10s debounce), and ticket change/unmount. Returning to the
+ *     tab/window never re-sends `start` on its own — only an actual
+ *     keystroke does. This side is NOT paused for a terminal ticket, since
+ *     replying to one reopens it. Unchanged by this pass except the retuned
+ *     constants above.
+ *   • Transport: `sendTypingSignal` (send) / `subscribeToAgentTyping`
+ *     (receive credential) — both in `services/heyqService.ts`, both routed
+ *     through the same-origin `/api/support/tickets/:id/typing*` proxy,
+ *     which forwards to Bridge with the server-verified session identity.
+ *     Both still degrade silently on any transport failure — sending never
+ *     throws and a failed/denied subscribe just means no live signal, never
+ *     a stuck indicator — so typing can never block or break the real
+ *     conversation.
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
@@ -92,20 +97,17 @@ import {
   replyToTicket,
   isTerminalTicketStatus,
   sendTypingSignal,
-  getTypingStatus,
+  subscribeToAgentTyping,
   type CustomerTicket,
   type CustomerTicketMessage,
   type HeyQTicketStatus,
 } from '../services/ticketsService';
 import type { RealtimeStatus } from '../services/heyqRealtimeClient';
 import { createRemoteTypingTracker, createCustomerTypingEmitter } from '../lib/typingPresence';
+import { connectAgentTypingRealtime, type AgentTypingRealtimeConnection } from '../services/heyqTypingRealtime';
 
 /** Steady-state gap between ticket-detail polls once a request completes. */
 const POLL_INTERVAL_MS = 15_000;
-/** Dedicated typing-presence poll interval — intentionally separate from and
- * much shorter than POLL_INTERVAL_MS above; never shortens the ticket-detail
- * cadence to make typing feel responsive. */
-const TYPING_POLL_INTERVAL_MS = 3_000;
 
 /** An outgoing reply the requester sent, before/while HeyQ confirms it. */
 export interface PendingMessage {
@@ -297,22 +299,34 @@ export function useTicketConversation(id: string, initialTicket: CustomerTicket)
 
   // ── Typing presence (own path — see the module docblock) ───────────────────
   // Entirely separate from the ticket-detail polling effect above: its own
-  // short poll for the remote (agent) signal, its own throttle/debounce for
-  // outbound customer signals, its own cleanup. Never touches `statusNow`,
-  // `epoch`, or POLL_INTERVAL_MS.
+  // Realtime subscription for the remote (agent) signal, its own
+  // throttle/debounce for outbound customer signals, its own cleanup. Never
+  // touches `statusNow`, `epoch`, POLL_INTERVAL_MS, or triggers a ticket
+  // refetch of any kind.
 
   const remoteTrackerRef = useRef<ReturnType<typeof createRemoteTypingTracker> | null>(null);
   const customerEmitterRef = useRef<ReturnType<typeof createCustomerTypingEmitter> | null>(null);
-  // Kept current (without restarting the effect below) so the typing poll can
-  // pause once the ticket goes terminal without re-running its whole setup —
-  // the same "inactive conversation" condition the ticket-detail poll above
-  // already pauses on. The customer's OWN typing signal keeps working
-  // regardless (a reply to a terminal ticket still reopens it).
+  const typingConnectionRef = useRef<AgentTypingRealtimeConnection | null>(null);
+  // Kept current (without restarting the effect below) so the typing
+  // subscription can pause once the ticket goes terminal without re-running
+  // its whole setup — the same "inactive conversation" condition the
+  // ticket-detail poll above already pauses on. The customer's OWN typing
+  // signal keeps working regardless (a reply to a terminal ticket still
+  // reopens it).
   const ticketStatusForTypingRef = useRef<HeyQTicketStatus>(initialTicket.status);
   useEffect(() => {
     ticketStatusForTypingRef.current = ticket.status;
+    // Closing the live subscription the moment a ticket resolves/closes
+    // MID-SESSION (not just at mount) — an inactive conversation has no
+    // reason to hold an open, authorized channel. restartTypingRealtimeRef
+    // (below) reopens it the instant a reply reopens the ticket.
+    if (isTerminalTicketStatus(ticket.status) && typingConnectionRef.current) {
+      typingConnectionRef.current.stop();
+      typingConnectionRef.current = null;
+      remoteTrackerRef.current?.signal(false);
+    }
   }, [ticket.status]);
-  const restartTypingPollRef = useRef<(status: HeyQTicketStatus) => void>(() => {});
+  const restartTypingRealtimeRef = useRef<(status: HeyQTicketStatus) => void>(() => {});
 
   useEffect(() => {
     setAgentTyping(false); // fresh ticket — no carried-over indicator
@@ -328,74 +342,67 @@ export function useTicketConversation(id: string, initialTicket: CustomerTicket)
     remoteTrackerRef.current = remoteTracker;
     customerEmitterRef.current = customerEmitter;
 
-    let isPolling = false; // guards against an overlapping GET (see poll() below)
-    let cancelled = false;
-    let pollTimer: ReturnType<typeof setTimeout> | null = null;
-
-    const clearPoll = () => {
-      if (pollTimer !== null) {
-        clearTimeout(pollTimer);
-        pollTimer = null;
-      }
+    // Opens (or reopens, after stopping any existing one) a fresh Realtime
+    // connection for the current ticket. `mintCredential` resolves identity
+    // itself (subscribeToAgentTyping) — a signed-out/forbidden/not-found
+    // outcome resolves to `null`, which `connectAgentTypingRealtime` treats
+    // like any other transport failure (backs off and retries) — see
+    // heyqTypingRealtime.ts.
+    const openConnection = () => {
+      typingConnectionRef.current?.stop();
+      const connection = connectAgentTypingRealtime({
+        mintCredential: () => subscribeToAgentTyping(id).then((res) => (res.status === 'ok' ? res.data : null)),
+        onTyping: (typing) => remoteTracker.signal(typing), // NEVER a ticket refetch — only the local indicator
+      });
+      typingConnectionRef.current = connection;
+      connection.start();
     };
 
-    const scheduleNextPoll = () => {
-      clearPoll();
-      // Paused while the tab is hidden, and while the ticket is terminal
-      // (resolved/closed — an "inactive" conversation, mirroring the
-      // ticket-detail poll's own pause condition above). restartTypingPollRef
-      // below explicitly resumes this loop the moment a reply reopens it.
-      if (cancelled || document.hidden || isTerminalTicketStatus(ticketStatusForTypingRef.current)) return;
-      pollTimer = setTimeout(() => { void pollOnce(); }, TYPING_POLL_INTERVAL_MS);
-    };
-
-    const pollOnce = async () => {
-      if (isPolling || cancelled) return; // single-flight — never overlap a slow GET
-      isPolling = true;
-      try {
-        const typing = await getTypingStatus(id); // never throws — see heyqService
-        if (!cancelled) remoteTracker.signal(typing);
-      } catch {
-        // Defensive only — getTypingStatus already fails closed to `false`.
-      } finally {
-        isPolling = false;
-        if (!cancelled) scheduleNextPoll();
-      }
-    };
-
-    scheduleNextPoll();
+    if (!isTerminalTicketStatus(ticketStatusForTypingRef.current)) openConnection();
 
     // Backgrounding the tab (or losing window focus while still visible,
     // e.g. alt-tabbing to another app) must stop the CUSTOMER's own typing
     // signal immediately — not wait out the 10s inactivity debounce — per
-    // the "hidden/unfocused → stop" requirement. Returning to the tab/window
-    // deliberately does nothing here: only an actual keystroke re-arms it.
+    // the "hidden/unfocused → stop" requirement (unchanged from the poll
+    // era). It also tears down the Realtime subscription entirely: no point
+    // holding an idle authorized socket open while backgrounded, and an
+    // already-true indicator can't be trusted with no live channel left to
+    // confirm/clear it — so it's cleared now, not carried across. Returning
+    // to the tab reconnects fresh but deliberately does NOT mark the agent
+    // typing on its own — only a genuine broadcast after reconnecting does
+    // that; only an actual keystroke re-arms the CUSTOMER's own signal.
     const onVisibility = () => {
-      if (document.hidden) customerEmitter.stopNow();
-      clearPoll();
-      if (document.visibilityState === 'visible') void pollOnce();
+      if (document.hidden) {
+        customerEmitter.stopNow();
+        typingConnectionRef.current?.stop();
+        typingConnectionRef.current = null;
+        remoteTracker.signal(false);
+      } else if (document.visibilityState === 'visible' && !isTerminalTicketStatus(ticketStatusForTypingRef.current)) {
+        openConnection();
+      }
     };
     document.addEventListener('visibilitychange', onVisibility);
     const onWindowBlur = () => customerEmitter.stopNow();
     window.addEventListener('blur', onWindowBlur);
 
     // Mirrors restartPollingRef above: a confirmed reply that reopens a
-    // terminal ticket must resume a paused poll loop immediately, using the
+    // terminal ticket must resume the subscription immediately, using the
     // status the reply just confirmed — not whatever ticketStatusForTypingRef
     // last saw, which updates via a separate effect and may not have
-    // re-rendered yet at the point `submit` calls this.
-    restartTypingPollRef.current = (status) => {
+    // re-rendered yet at the point `submit` calls this. Skipped while hidden
+    // — the visibility handler above will pick it up on return.
+    restartTypingRealtimeRef.current = (status) => {
       ticketStatusForTypingRef.current = status;
-      if (!isPolling) scheduleNextPoll();
+      if (!typingConnectionRef.current && !document.hidden) openConnection();
     };
 
     return () => {
-      cancelled = true;
       document.removeEventListener('visibilitychange', onVisibility);
       window.removeEventListener('blur', onWindowBlur);
-      clearPoll();
       customerEmitter.stopNow(); // ticket change / unmount forces a stop signal
       customerEmitter.dispose();
+      typingConnectionRef.current?.stop();
+      typingConnectionRef.current = null;
       remoteTracker.dispose();
       remoteTrackerRef.current = null;
       customerEmitterRef.current = null;
@@ -424,7 +431,7 @@ export function useTicketConversation(id: string, initialTicket: CustomerTicket)
         // reopen out of resolved/closed) — re-arm the cadence from now rather
         // than waiting out whatever was left of the previous 15s window.
         restartPollingRef.current(res.data.status);
-        restartTypingPollRef.current(res.data.status); // resume the typing poll if a reply just reopened a terminal ticket
+        restartTypingRealtimeRef.current(res.data.status); // reopen the typing subscription if a reply just reopened a terminal ticket
         setPending((prev) => prev.filter((p) => p.tempId !== tempId));
       } else {
         setPending((prev) => prev.map((p) => (p.tempId === tempId ? { ...p, status: 'failed' } : p)));

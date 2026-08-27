@@ -3,6 +3,93 @@
 > Lightweight resume/checkpoint file. Detailed June 2026 history was archived to
 > `docs/archive/session_log_2026-06.md`.
 
+## Most Recent Work — typing presence: event-driven RECEIVER shipped (Supabase Realtime Broadcast, replacing the 3s poll) (2026-08-27)
+
+HEYQ/QuadX Bridge shipped the companion architecture this session's earlier
+audit (below) identified as the blocker: commit `ac5b685`
+(`docs/migration/typing-realtime-broadcast-authorization.md` in the HeyQ
+repo) — `POST /customer/tickets/:id/typing/subscribe` mints a short-lived
+(~300s), RECEIVE-ONLY, ticket-scoped Supabase Realtime Authorization token
+for a private broadcast channel (`ticket:<id>:agent_typing`), using
+Supabase's "Broadcast from Database" + private-channel "Realtime
+Authorization" primitives — no `service_role`, no broad Supabase session,
+no custom WebSocket server. This session wires GGX up to it, replacing the
+3s `GET /typing` poll entirely.
+
+- **New**: `src/app/services/heyqTypingRealtime.ts` — the Realtime
+  connection state machine (`connectAgentTypingRealtime`): mints a
+  credential → `await setAuth(token)` → subscribes to the private channel;
+  refreshes the token ~60s before its own expiry on the SAME open channel
+  (no resubscribe, invisible to the indicator); on `CHANNEL_ERROR`/
+  `TIMED_OUT`/`CLOSED`, fully tears down (`AWAITED` `disconnect()` — an
+  unawaited one raced a resubscribe in early testing and is now a documented
+  pitfall) and reconnects with capped backoff; single-flight/duplicate-
+  subscription guarded; `stop()` idempotent. Test-injectable client factory
+  (`__setSupabaseClientFactoryForTests` for direct unit tests, plus a
+  `window.__ggxTestSupabaseClientFactory` seam for DOM-level tests that
+  can't win the React-mount race against a direct setter call) — no real
+  Supabase project or WebSocket server needed for any test in this pass.
+- **`useTicketConversation.ts`**: the dedicated 3s agent-typing poll effect
+  is REMOVED and replaced by a Realtime subscription: opened only while the
+  ticket is non-terminal, closed and reopened around tab hidden/visible
+  (hidden also clears `agentTyping` — an indicator can't be trusted with no
+  live channel left to confirm/clear it; becoming visible reconnects but
+  never marks typing on its own, only a genuine broadcast does), closed the
+  moment a ticket resolves MID-SESSION (not just at mount) via a small
+  status-watching effect, and reopened the instant a reply reopens a
+  terminal ticket (`restartTypingRealtimeRef`, same pattern the old
+  `restartTypingPollRef` used). The raw broadcast still feeds the EXISTING
+  `RemoteTypingTracker` unchanged — a typing event still only ever updates
+  the local indicator, never a ticket refetch.
+- **Sender constants retuned** (`typingPresence.ts`) to HEYQ's new lease
+  (server TTL 15s, up from 6s): `REMOTE_TYPING_STALE_MS` 8s→15s (now mirrors
+  HEYQ's own authoritative TTL, the true self-heal ceiling for a
+  dropped/missed broadcast — no longer paced against a retired poll
+  interval); `CUSTOMER_TYPING_THROTTLE_MS` 2s→4s (matches HEYQ's own
+  send-throttle, sparse relative to the 15s TTL — "do not make traffic more
+  frequent than necessary"). `CUSTOMER_TYPING_STOP_DEBOUNCE_MS` (10s) was
+  already correct, unchanged.
+- **Dead client code removed** (GGX-only — HEYQ/Bridge's own `GET
+  /customer/tickets/:id/typing` route is untouched server-side, GGX simply
+  no longer calls it): `getTypingStatus`/`apiGetTypingStatus`, and the `GET`
+  handler in `api/support/tickets/[id]/typing.ts` (now POST-only). New:
+  `subscribeToAgentTyping`/`apiSubscribeToAgentTyping` and a new proxy
+  route, `api/support/tickets/[id]/typing/subscribe.ts` (POST-only,
+  identical identity/ownership rules as every other route in this proxy —
+  session-verified identity only, Bridge 404-not-403 semantics).
+- **New dependency**: `@supabase/supabase-js` (browser Realtime client
+  only — no server-side Supabase usage in GGX; the proxy still only ever
+  holds `QUADX_BRIDGE_API_KEY`).
+- **Two real issues found only by testing against actual browser/module
+  timing** (not visible from code review — see `heyqTypingRealtime.ts`'s
+  docblock and `tests/heyq-typing.test.mjs`'s reconnect test): an
+  unawaited `realtime.disconnect()` during reconnect let a freshly
+  resubscribed channel get silently torn down moments later; and
+  `setAuth(token)` must be re-applied immediately before EVERY
+  (re)subscribe, never assumed to persist.
+- **Tests**: `tests/heyq-typing.test.mjs` — added a full pure-logic suite
+  for `heyqTypingRealtime.ts` (setAuth-before-subscribe, duplicate-
+  subscription prevention, malformed-payload safety, token refresh on the
+  same client, reconnect ordering, idempotent stop — 6 tests, no real
+  Supabase/WebSocket), and rewrote the DOM-level suite around a fake
+  Realtime client instead of a GET-poll fetch stub (12 tests: broadcast
+  delivery, setAuth-before-subscribe end-to-end, no-refetch-on-typing,
+  failed-subscribe-never-blocks, unmount teardown, hidden/visible
+  lifecycle incl. "no auto-typing-on-reconnect", resolved/closed pause +
+  resume, and resolving MID-SESSION closes the subscription). Existing
+  pure-logic `typingPresence.ts` coverage (throttle/debounce/stale-expiry)
+  is unchanged — it already read its constants from the module's own
+  exports, not hardcoded values, so needed no edits despite the retune.
+  `tests/api-support-typing.test.mjs` — removed the GET-route tests
+  (dead route), added a new suite for `typing/subscribe.ts` (route/method,
+  identity-from-session-only, no service-role leakage, 404-not-403,
+  405 on other methods).
+- **Validated**: `npm run typecheck` clean, `npm run build` clean, full
+  suite **148/148** across 46 suites (`npm test`); the two typing files
+  standalone **39/39** (13 route-level + 26 client/DOM), re-run for
+  stability. Not deployed, not pushed, not committed to git yet pending
+  final review.
+
 ## Most Recent Work — typing presence: event-driven receiver evaluated and ruled out; sender-side hardening shipped (2026-08-27)
 
 Audited the full typing/presence path (`typingPresence.ts`,

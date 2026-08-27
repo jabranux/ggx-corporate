@@ -11,6 +11,11 @@
  *   POST /api/support/tickets                  → create a ticket
  *   POST /api/support/tickets/:id/messages     → a requester reply
  *   GET  /api/support/categories               → the live Concern Category taxonomy
+ *   POST /api/support/tickets/:id/typing       → outbound customer typing signal
+ *   POST /api/support/tickets/:id/typing/subscribe → mint a short-lived,
+ *     ticket-scoped Supabase Realtime credential for the agent-typing
+ *     receiver (see heyqTypingRealtime.ts) — replaces the former
+ *     `GET .../typing` poll, which is now dead client code and removed.
  *
  * Categories are LIVE, not a Corporate-side catalog: `apiListConcernCategories`
  * always calls the proxy fresh (no caching here, matching Bridge's own
@@ -505,11 +510,16 @@ export async function apiReplyToMyTicket(
 }
 
 // ── Typing presence (ephemeral — own path, never part of a ticket read) ──────
-// See api/support/tickets/[id]/typing.ts's docblock for the deployed Bridge
-// contract this proxies to. Both calls below still degrade silently by
-// design — sending never throws and a failed read just means "no signal",
-// never a stuck indicator — regardless of whether the failure is a real
-// transport error or something upstream.
+// Sending: see api/support/tickets/[id]/typing.ts's docblock for the
+// deployed Bridge contract this proxies to. Still degrades silently by
+// design — sending never throws, a network/Bridge failure here must never
+// affect sending a real message.
+//
+// Receiving: EVENT-DRIVEN (Supabase Realtime Broadcast), not a poll — see
+// heyqTypingRealtime.ts and api/support/tickets/[id]/typing/subscribe.ts.
+// `apiGetTypingStatus`/the GET .../typing route it called are REMOVED (dead
+// GGX-only client code once the poll was retired) — HEYQ/Bridge's own GET
+// route is untouched server-side, GGX simply no longer calls it.
 
 /** Best-effort outbound typing signal. Never throws — a network/Bridge
  * failure here must not affect sending a real message. */
@@ -517,12 +527,52 @@ export async function apiSendTypingSignal(ticketId: string, state: 'start' | 'st
   await post(SUPPORT_PROXY_BASE, `/tickets/${encodeURIComponent(ticketId)}/typing`, { state });
 }
 
-/** Current agent-typing snapshot for one ticket. Any failure reads as
- * `false`, never as a stuck indicator or a thrown error. */
-export async function apiGetTypingStatus(ticketId: string): Promise<boolean> {
-  const res = await getJson(SUPPORT_PROXY_BASE, `/tickets/${encodeURIComponent(ticketId)}/typing`, 'no-store');
-  if (!res.ok || !res.data || typeof res.data !== 'object') return false;
-  return (res.data as { typing?: unknown }).typing === true;
+/** A short-lived, ticket-scoped, RECEIVE-ONLY Supabase Realtime credential —
+ * exactly what `POST /customer/tickets/:id/typing/subscribe` returns (see
+ * HeyQ's docs/migration/typing-realtime-broadcast-authorization.md).
+ * `supabaseAnonKey` is the PUBLIC anon/publishable key, safe for the
+ * browser — access is gated entirely by Bridge-side RLS, never by this
+ * key's secrecy. Never a `service_role` credential. */
+export interface AgentTypingSubscription {
+  token: string;
+  channel: string;
+  expiresIn: number;
+  expiresAt: string;
+  supabaseUrl: string;
+  supabaseAnonKey: string;
+}
+
+/**
+ * Mint a fresh Realtime typing-subscription credential for one ticket. Bridge
+ * re-verifies the requester owns the ticket on every call (same fail-closed
+ * 404-not-403 semantics as every other typing/ticket route) — knowing a
+ * ticket id is never enough. Called once per connection attempt, including
+ * every reconnect and scheduled token refresh (see heyqTypingRealtime.ts).
+ */
+export async function apiSubscribeToAgentTyping(ticketId: string): Promise<HeyQResult<AgentTypingSubscription>> {
+  const res = await postJson(SUPPORT_PROXY_BASE, `/tickets/${encodeURIComponent(ticketId)}/typing/subscribe`, {});
+  if (!res.ok) return { status: res.result };
+  const data = res.data as Partial<AgentTypingSubscription>;
+  if (
+    !data
+    || typeof data.token !== 'string'
+    || typeof data.channel !== 'string'
+    || typeof data.supabaseUrl !== 'string'
+    || typeof data.supabaseAnonKey !== 'string'
+  ) {
+    return { status: 'unavailable' };
+  }
+  return {
+    status: 'ok',
+    data: {
+      token: data.token,
+      channel: data.channel,
+      expiresIn: typeof data.expiresIn === 'number' ? data.expiresIn : 300,
+      expiresAt: typeof data.expiresAt === 'string' ? data.expiresAt : new Date(Date.now() + 300_000).toISOString(),
+      supabaseUrl: data.supabaseUrl,
+      supabaseAnonKey: data.supabaseAnonKey,
+    },
+  };
 }
 
 export interface CreateCustomerTicketInput {

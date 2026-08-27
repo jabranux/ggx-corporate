@@ -56,14 +56,17 @@ import {
   apiListConcernCategories,
   apiMintRealtimeToken,
   apiSendTypingSignal,
-  apiGetTypingStatus,
+  apiSubscribeToAgentTyping,
   buildAttachmentUrl,
   getHeyQApiBaseUrl,
   projectRealtimeMessage,
   type RealtimeToken,
+  type AgentTypingSubscription,
   type ConcernCategory,
   type ConcernSubcategory,
 } from './heyqCustomerApi';
+
+export type { AgentTypingSubscription } from './heyqCustomerApi';
 
 export { projectRealtimeMessage, buildAttachmentUrl } from './heyqCustomerApi';
 export type { ConcernCategory, ConcernSubcategory } from './heyqCustomerApi';
@@ -568,8 +571,18 @@ export async function replyToMyTicket(
   return apiReplyToMyTicket(id, body, messageId);
 }
 
-// ── Typing presence (ephemeral — own send/poll path, separate from ticket
-// detail reads/polling; see useTicketConversation.ts) ──────────────────────
+// ── Typing presence (ephemeral — own send/subscribe path, separate from
+// ticket detail reads/polling; see useTicketConversation.ts) ───────────────
+//
+// Sending (customer → HEYQ) is unchanged: a throttled/debounced outbound
+// start/stop signal over Bridge's typing route.
+//
+// Receiving (HEYQ agent → customer) is EVENT-DRIVEN, not polled: a
+// short-lived, ticket-scoped Supabase Realtime Broadcast credential (see
+// heyqTypingRealtime.ts and HeyQ's
+// docs/migration/typing-realtime-broadcast-authorization.md). The former
+// `getTypingStatus` 3s-poll adapter is removed — dead client code once the
+// poll it served no longer exists.
 
 /** Best-effort outbound typing signal for the signed-in requester. A signed-out
  * caller is a silent no-op — never throws, never blocks a real reply. */
@@ -579,12 +592,18 @@ export async function sendTypingSignal(ticketId: string, state: 'start' | 'stop'
   await apiSendTypingSignal(ticketId, state);
 }
 
-/** Current agent-typing snapshot for one ticket. `false` for a signed-out
- * caller or any transport failure — never a stuck indicator. */
-export async function getTypingStatus(ticketId: string): Promise<boolean> {
+/**
+ * Mint a short-lived, ticket-scoped Realtime typing-subscription credential
+ * for the signed-in requester. Resolves identity through the same client-
+ * side UX-shortcut every other read here uses (the real authorization
+ * boundary is server-side, in the Corporate proxy + Bridge). Called once per
+ * connection attempt, including every reconnect and scheduled token refresh
+ * — see heyqTypingRealtime.ts's `connectAgentTypingRealtime`.
+ */
+export async function subscribeToAgentTyping(ticketId: string): Promise<HeyQResult<AgentTypingSubscription>> {
   const session = await getSessionContext();
-  if (!session.isAuthenticated) return false;
-  return apiGetTypingStatus(ticketId);
+  if (!session.isAuthenticated) return { status: 'forbidden' };
+  return apiSubscribeToAgentTyping(ticketId);
 }
 
 // ── Realtime (DORMANT — live ticket conversation over the HeyQ WebSocket) ─────

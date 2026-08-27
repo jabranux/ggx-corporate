@@ -34,17 +34,35 @@ const realClock: TypingClock = {
   clearTimeout: (h) => clearTimeout(h as unknown as ReturnType<typeof setTimeout>),
 };
 
-/** How long the remote indicator stays up after the last "typing" signal with
- * no follow-up (start or stop) before it self-clears. Comfortably longer than
- * the dedicated typing poll interval so normal polling never flickers it. */
-export const REMOTE_TYPING_STALE_MS = 8_000;
-/** At most one outbound 'start' per burst of keystrokes — also the sparse
- * keepalive cadence while typing continues, comfortably inside the 6s TTL. */
-export const CUSTOMER_TYPING_THROTTLE_MS = 2_000;
+/**
+ * How long the remote indicator stays up after the last "typing" signal with
+ * no follow-up (start or stop) before it self-clears. Matches HEYQ's own
+ * authoritative server-side TTL (`TYPING_TTL_MS` in HeyQ's
+ * quadx-bridge/index.ts and useTicketRealtime.ts — 15s, up from an earlier
+ * 6s, aligned to GGX's own 10s customer-inactivity target + a 5s margin; see
+ * HeyQ's docs/migration/typing-realtime-broadcast-authorization.md) — this
+ * is the true ceiling for "how long a lost/dropped signal can persist before
+ * self-healing" now that the remote side is a Realtime Broadcast push
+ * (heyqTypingRealtime.ts), not a poll: a connected subscription delivers a
+ * fresh signal near-instantly, so this timer only ever fires on an actual
+ * missed/dropped broadcast (a network blip) rather than being paced against
+ * a poll interval.
+ */
+export const REMOTE_TYPING_STALE_MS = 15_000;
+/**
+ * At most one outbound 'start' per burst of keystrokes — also the de facto
+ * keepalive cadence while typing continues (each further keystroke re-checks
+ * this window). Matches HEYQ's own `TYPING_SEND_THROTTLE_MS` (4s) — sparse
+ * relative to the 15s TTL above (3+ refreshes of margin against one missed
+ * tick), not the tighter ~2s cadence tuned for the old 6s TTL. Do not make
+ * this more frequent than necessary.
+ */
+export const CUSTOMER_TYPING_THROTTLE_MS = 4_000;
 /** Outbound 'stop' after this long with no further keystrokes (product spec:
- * 10s inactivity → not typing). Deliberately longer than the 6s server TTL —
- * that TTL already self-heals the remote side sooner if this explicit stop is
- * ever delayed or lost, so this value is a UX choice, not a correctness one. */
+ * 10s inactivity → not typing — matches HEYQ's own `TYPING_INACTIVITY_MS`
+ * exactly). Shorter than the 15s server TTL above, which is fine: the TTL
+ * already self-heals the remote side sooner if this explicit stop is ever
+ * delayed or lost, so this value is a UX choice, not a correctness one. */
 export const CUSTOMER_TYPING_STOP_DEBOUNCE_MS = 10_000;
 
 export interface RemoteTypingTracker {
