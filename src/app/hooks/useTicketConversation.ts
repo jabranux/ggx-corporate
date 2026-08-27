@@ -158,6 +158,17 @@ export function useTicketConversation(id: string, initialTicket: CustomerTicket)
     let cancelled = false;
     let timeoutId: ReturnType<typeof setTimeout> | null = null;
     let statusNow: HeyQTicketStatus = initialTicket.status;
+    // Bumped by a confirmed reply (see restartPollingRef below). A poll whose
+    // GET was already in flight when that happened started under an older
+    // epoch: it may resolve AFTER the reply's own (authoritative, necessarily
+    // fresher) response — e.g. a slow read racing a reply that reopens a
+    // resolved ticket. Without this check that stale response would overwrite
+    // the just-reopened status via mergeTicket/statusNow, and its own
+    // `finally` would then see that stale terminal status and cancel the
+    // cadence the reply just re-armed. Checking the epoch after the await
+    // makes a superseded poll a no-op instead — no merge, no reschedule (the
+    // reply's restart already scheduled the next one).
+    let epoch = 0;
 
     const clearScheduled = () => {
       if (timeoutId !== null) {
@@ -177,9 +188,10 @@ export function useTicketConversation(id: string, initialTicket: CustomerTicket)
     const poll = async () => {
       if (isPolling || cancelled) return; // single-flight
       isPolling = true;
+      const myEpoch = epoch;
       try {
         const res = await getTicketById(id);
-        if (cancelled) return;
+        if (cancelled || myEpoch !== epoch) return; // superseded by a confirmed reply while in flight
         if (res.status === 'ok') {
           statusNow = res.data.status;
           mergeTicket(res.data);
@@ -191,7 +203,7 @@ export function useTicketConversation(id: string, initialTicket: CustomerTicket)
         // Silently handle transient errors, keep existing conversation state
       } finally {
         isPolling = false;
-        if (!cancelled) scheduleNext(POLL_INTERVAL_MS);
+        if (!cancelled && myEpoch === epoch) scheduleNext(POLL_INTERVAL_MS);
       }
     };
 
@@ -207,6 +219,7 @@ export function useTicketConversation(id: string, initialTicket: CustomerTicket)
     document.addEventListener('visibilitychange', onVisibility);
 
     restartPollingRef.current = (status) => {
+      epoch++; // invalidate any poll already in flight — its response is now stale
       statusNow = status;
       scheduleNext(POLL_INTERVAL_MS);
     };

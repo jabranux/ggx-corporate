@@ -420,4 +420,124 @@ describe('Ticket detail — adaptive polling lifecycle', () => {
       await browser.close();
     }
   });
+
+  it('a stale in-flight poll must not undo a reply that reopened the ticket, nor cancel the cadence it re-armed', { timeout: 45_000 }, async () => {
+    const RACE_TICKET_ID = 'race-ticket-1';
+    const { browser, page } = await signIn(server.base, 'admin');
+    try {
+      // A bespoke, self-mutating stub (rather than the static TICKETS fixture
+      // used elsewhere in this file) — the reply POST needs to actually flip
+      // the ticket's status, and the detail GET needs to be delayable so its
+      // response can be made to resolve AFTER that reply completes.
+      await page.addInitScript((ticketId) => {
+        const now = () => new Date().toISOString();
+        window.__ticket = {
+          id: ticketId, reference: 'HQS-RACE-0001', subject: 'Race condition fixture',
+          concernType: 'general_inquiry', issueType: 'General inquiry', status: 'resolved',
+          priority: 'normal', supportTeam: 'Customer Support',
+          createdAt: '2026-08-20T09:00:00Z', updatedAt: '2026-08-20T09:00:00Z',
+          openedBySupport: false, canReopen: true,
+          messages: [{ id: 'm1', from: 'support', authorLabel: 'Customer Support', body: 'Resolved.', createdAt: '2026-08-20T09:00:00Z' }],
+        };
+        window.__detailDelayMs = 0;
+        // Timestamps rather than a bare counter, so the 15s cadence can be
+        // checked against REAL elapsed time from the reply's own confirmation
+        // moment — chaining several `waitForTimeout` budgets on the Node side
+        // drifts too easily to safely assert a ~15s gap.
+        window.__detailCallTimes = [];
+        window.__replyConfirmedAt = null;
+        const origFetch = window.fetch.bind(window);
+        const json = (data, status = 200) => new Response(JSON.stringify(data), { status, headers: { 'Content-Type': 'application/json' } });
+        window.fetch = async (url, init) => {
+          const u = String(url);
+          const method = (init?.method ?? 'GET').toUpperCase();
+          const path = new URL(u, 'http://x').pathname;
+          if (method === 'POST' && /\/api\/support\/tickets\/[^/]+\/messages$/.test(path)) {
+            const body = init?.body ? JSON.parse(init.body) : {};
+            window.__ticket.messages.push({ id: 'srv-' + (window.__ticket.messages.length + 1), from: 'you', authorLabel: 'You', body: body.body, createdAt: now() });
+            window.__ticket.status = 'open'; // Bridge reopens a resolved ticket on reply
+            window.__ticket.updatedAt = now();
+            window.__replyConfirmedAt = Date.now(); // fast — no artificial delay applies to the POST
+            return json(window.__ticket);
+          }
+          if (u.includes('/api/support/tickets')) {
+            const m = path.match(/\/api\/support\/tickets\/([^/]+)$/);
+            if (m) {
+              window.__detailCallTimes.push(Date.now());
+              // Snapshot captured when the request is received, BEFORE any
+              // artificial delay — a slow read that started before the reply
+              // still reports the pre-reply ('resolved') status, reproducing
+              // the exact race a real slow/delayed backend read would hit.
+              const snapshot = JSON.parse(JSON.stringify(window.__ticket));
+              if (window.__detailDelayMs > 0) await new Promise((r) => setTimeout(r, window.__detailDelayMs));
+              return json(snapshot);
+            }
+            return json([window.__ticket]);
+          }
+          return origFetch(url, init);
+        };
+      }, RACE_TICKET_ID);
+
+      await page.goto(`${server.base}/dashboard/support-tickets/${RACE_TICKET_ID}`, { waitUntil: 'networkidle' });
+      await page.getByText('Race condition fixture').first().waitFor({ timeout: 10_000 });
+      await page.getByText('This ticket has been resolved').waitFor({ timeout: 10_000 });
+      await page.waitForTimeout(500); // settle any StrictMode duplicate mount-effect load
+      const baseline = (await page.evaluate(() => window.__detailCallTimes)).length;
+      assert.ok(baseline >= 1, 'the page performs its own initial getTicketById read');
+
+      // Delay future detail GETs, then bring the tab back into view — a
+      // terminal ticket still refreshes once on visibility restore, and that
+      // GET's response won't land for 4s: the stale poll is now in flight.
+      await page.evaluate(() => { window.__detailDelayMs = 4_000; });
+      await setHidden(page, true);
+      await setHidden(page, false);
+      await page.waitForTimeout(200); // let the delayed GET actually start
+      assert.equal((await page.evaluate(() => window.__detailCallTimes)).length, baseline + 1, 'the visibility-restore poll (the one that will go stale) is now in flight');
+
+      // Reset the delay before replying: the stale poll's fetch already
+      // captured 4000ms when it started (unaffected by this), but the reply
+      // flow's own confirmation GET (`apiReplyToMyTicket` re-reads the ticket
+      // after its POST — same endpoint, so it'd otherwise inherit the delay
+      // too) must resolve fast, matching the real, undelayed reply path.
+      await page.evaluate(() => { window.__detailDelayMs = 0; });
+
+      // While that stale poll is still in flight, send a reply — it reopens the ticket.
+      await page.locator('#ticket-reply').fill('Actually, still an issue.');
+      await page.getByRole('button', { name: /send reply/i }).click();
+      await page.getByText('Actually, still an issue.').first().waitFor({ timeout: 10_000 }); // optimistic bubble
+
+      // The reply's own confirmation is authoritative and immediate (no
+      // artificial delay applies to the POST) — the resolved banner must
+      // disappear once it lands, well before the stale poll resolves.
+      await page.getByText('This ticket has been resolved').waitFor({ state: 'hidden', timeout: 5_000 });
+
+      // Let the earlier, slower poll (still carrying the stale 'resolved'
+      // snapshot) resolve, then let the cadence the reply re-armed run for a
+      // full cycle plus margin. Real elapsed time from the reply's own
+      // confirmation timestamp (recorded server-side in the stub, not
+      // approximated by chaining `waitForTimeout` budgets) is what gets
+      // checked below, so drift in this wait doesn't affect correctness.
+      await page.waitForTimeout(20_000);
+      assert.equal(await page.getByText('This ticket has been resolved').count(), 0, 'a stale in-flight poll must not revert a reopened ticket back to Resolved');
+
+      // Exactly two detail GETs should have started after the reply's own
+      // POST: its own (now-undelayed) confirmation re-read, near-immediate,
+      // and then the cadence it re-armed firing once more ~15s later — not
+      // cancelled by the stale poll's discarded terminal status.
+      const { replyConfirmedAt, gapsAfterReply } = await page.evaluate(() => ({
+        replyConfirmedAt: window.__replyConfirmedAt,
+        // >= (not >): with the artificial delay reset to 0, the reply's own
+        // confirmation re-read can resolve within the same millisecond as
+        // the POST that preceded it (no real network latency in this stub).
+        gapsAfterReply: window.__detailCallTimes.filter((t) => t >= window.__replyConfirmedAt).map((t) => t - window.__replyConfirmedAt),
+      }));
+      assert.ok(replyConfirmedAt, 'the reply must have confirmed');
+      assert.equal(gapsAfterReply.length, 2, `expected the reply’s own confirmation GET plus exactly one resumed poll in this 20s window, got gaps ${JSON.stringify(gapsAfterReply)}`);
+      const [confirmationGap, resumedGap] = gapsAfterReply;
+      assert.ok(confirmationGap < 2_000, `the reply’s confirmation re-read should be near-immediate, got a ${confirmationGap}ms gap`);
+      assert.ok(resumedGap >= 13_000 && resumedGap <= 19_000, `expected the resumed poll ~15s after the reply, got a ${resumedGap}ms gap`);
+    } finally {
+      await browser.close();
+    }
+  });
 });
