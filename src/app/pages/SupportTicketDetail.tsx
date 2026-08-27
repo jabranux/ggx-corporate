@@ -132,7 +132,12 @@ function LiveTicketView({
     if (!reply.trim() || sending) return;
     const body = reply;
     setReply(''); // clear immediately; the message renders optimistically
-    await convo.send(body);
+    await convo.send(body); // convo.send() also clears the customer's own typing signal
+  };
+
+  const handleReplyChange = (value: string) => {
+    setReply(value);
+    convo.notifyTyping(value); // no-op for an empty value — also force-stops it
   };
 
   return (
@@ -198,7 +203,7 @@ function LiveTicketView({
                   className="w-full h-24 px-3 py-2 rounded-lg border border-gray-300 text-sm focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent"
                   placeholder="Type your message to the support team..."
                   value={reply}
-                  onChange={(e) => setReply(e.target.value)}
+                  onChange={(e) => handleReplyChange(e.target.value)}
                   disabled={sending}
                 />
                 <p className="text-[11px] text-gray-400">

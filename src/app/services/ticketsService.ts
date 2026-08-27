@@ -69,6 +69,10 @@ export type {
   StatusChangedData,
 } from './heyqService';
 
+// Typing presence — its own ephemeral send/poll path, consumed only by
+// useTicketConversation.ts. Never part of a ticket read/poll payload.
+export { sendTypingSignal, getTypingStatus } from './heyqService';
+
 /**
  * List-row shape for the existing Support Tickets table and topbar search.
  * `trackingNumber` is the linked OMS order id, or '—' for a general ticket.

@@ -55,6 +55,8 @@ import {
   apiCreateTicket,
   apiListConcernCategories,
   apiMintRealtimeToken,
+  apiSendTypingSignal,
+  apiGetTypingStatus,
   buildAttachmentUrl,
   getHeyQApiBaseUrl,
   projectRealtimeMessage,
@@ -564,6 +566,25 @@ export async function replyToMyTicket(
   const session = await getSessionContext();
   if (!session.isAuthenticated) return { status: 'forbidden' };
   return apiReplyToMyTicket(id, body, messageId);
+}
+
+// ── Typing presence (ephemeral — own send/poll path, separate from ticket
+// detail reads/polling; see useTicketConversation.ts) ──────────────────────
+
+/** Best-effort outbound typing signal for the signed-in requester. A signed-out
+ * caller is a silent no-op — never throws, never blocks a real reply. */
+export async function sendTypingSignal(ticketId: string, state: 'start' | 'stop'): Promise<void> {
+  const session = await getSessionContext();
+  if (!session.isAuthenticated) return;
+  await apiSendTypingSignal(ticketId, state);
+}
+
+/** Current agent-typing snapshot for one ticket. `false` for a signed-out
+ * caller or any transport failure — never a stuck indicator. */
+export async function getTypingStatus(ticketId: string): Promise<boolean> {
+  const session = await getSessionContext();
+  if (!session.isAuthenticated) return false;
+  return apiGetTypingStatus(ticketId);
 }
 
 // ── Realtime (DORMANT — live ticket conversation over the HeyQ WebSocket) ─────

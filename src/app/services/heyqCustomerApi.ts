@@ -504,6 +504,27 @@ export async function apiReplyToMyTicket(
   return apiGetMyTicket(id);
 }
 
+// ── Typing presence (ephemeral — own path, never part of a ticket read) ──────
+// See api/support/tickets/[id]/typing.ts's docblock for the deployed Bridge
+// contract this proxies to. Both calls below still degrade silently by
+// design — sending never throws and a failed read just means "no signal",
+// never a stuck indicator — regardless of whether the failure is a real
+// transport error or something upstream.
+
+/** Best-effort outbound typing signal. Never throws — a network/Bridge
+ * failure here must not affect sending a real message. */
+export async function apiSendTypingSignal(ticketId: string, state: 'start' | 'stop'): Promise<void> {
+  await post(SUPPORT_PROXY_BASE, `/tickets/${encodeURIComponent(ticketId)}/typing`, { state });
+}
+
+/** Current agent-typing snapshot for one ticket. Any failure reads as
+ * `false`, never as a stuck indicator or a thrown error. */
+export async function apiGetTypingStatus(ticketId: string): Promise<boolean> {
+  const res = await getJson(SUPPORT_PROXY_BASE, `/tickets/${encodeURIComponent(ticketId)}/typing`, 'no-store');
+  if (!res.ok || !res.data || typeof res.data !== 'object') return false;
+  return (res.data as { typing?: unknown }).typing === true;
+}
+
 export interface CreateCustomerTicketInput {
   /** Requester display fields for the ticket's guest requester record. */
   name: string;
