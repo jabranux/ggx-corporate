@@ -273,6 +273,18 @@ export const TICKET_STATUS_OPTIONS: { value: HeyQTicketStatus; label: string }[]
   ['new', 'open', 'in_progress', 'on_hold', 'resolved', 'closed'] as HeyQTicketStatus[]
 ).map((s) => ({ value: s, label: TICKET_STATUS_META[s].label }));
 
+/**
+ * Terminal support-ticket statuses — matches the "Resolved" stat card's own
+ * `count('resolved', 'closed')` grouping. A reply still reopens either one
+ * (see `replyToTicket`'s docblock), so this is a point-in-time read, not a
+ * permanent classification.
+ */
+const TERMINAL_TICKET_STATUSES: ReadonlySet<HeyQTicketStatus> = new Set(['resolved', 'closed']);
+
+export function isTerminalTicketStatus(status: HeyQTicketStatus): boolean {
+  return TERMINAL_TICKET_STATUSES.has(status);
+}
+
 // ── Concern Categories (live, for the report drawer's selector) ──────────────
 
 /**
@@ -557,7 +569,7 @@ export async function replyToMyTicket(
 // ── Realtime (DORMANT — live ticket conversation over the HeyQ WebSocket) ─────
 //
 // UNUSED by the running app. The approved QuadX Bridge contract for this POC
-// is REST + 5-second polling only (see hooks/useTicketConversation.ts); it has
+// is REST + adaptive 15-second polling only (see hooks/useTicketConversation.ts); it has
 // no realtime/WebSocket route. This section (and heyqRealtimeClient.ts) is
 // left in place, still pointed at the legacy standalone HeyQ API origin, as a
 // documented dormant capability rather than deleted — nothing in the running

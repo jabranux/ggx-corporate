@@ -46,8 +46,8 @@
  * `apiReplyToMyTicket` below only ever send JSON. The realtime WebSocket
  * (`getHeyQRealtimeUrl` / `apiMintRealtimeToken` below) and the attachment
  * download helper (`buildAttachmentUrl`) are UNUSED by the app today — the
- * approved Bridge contract for this POC is REST + 5-second polling only (see
- * `hooks/useTicketConversation.ts`) — and are left in place, still pointed at
+ * approved Bridge contract for this POC is REST + adaptive 15-second polling
+ * only (see `hooks/useTicketConversation.ts`) — and are left in place, still pointed at
  * the legacy standalone HeyQ API origin, as a documented dormant capability
  * rather than deleted. Nothing in the running app calls them.
  */

@@ -4,10 +4,11 @@
  * DORMANT capability, kept for when a future Bridge contract adds a realtime
  * channel (see docs/migration/ggx-corporate-heyq-live-ticketing.md and
  * `useTicketConversation.ts`'s module docblock). The approved QuadX Bridge
- * contract for this POC is REST + 5-second polling only — `useTicketConversation`
- * does NOT open a WebSocket, so nothing below is exercised by the running app.
- * These tests still verify the standalone client module is correct in
- * isolation, so it stays usable the day a realtime contract is approved:
+ * contract for this POC is REST + adaptive 15-second polling only —
+ * `useTicketConversation` does NOT open a WebSocket, so nothing below is
+ * exercised by the running app. These tests still verify the standalone
+ * client module is correct in isolation, so it stays usable the day a
+ * realtime contract is approved:
  *
  *   • service seam    — the WS URL derivation, the connection-token mint, and
  *                       the customer-safe message projection allowlist.
@@ -15,10 +16,13 @@
  *                       event filtering, typing, reconnect + token re-mint,
  *                       teardown. Exercises `heyqRealtimeClient.ts` directly.
  *   • detail UI       — the ACTUAL wired-up behavior: an agent reply appears
- *                       via the 5-second REST poll (not a socket push), a
- *                       repeated poll of the same data does not duplicate a
- *                       message, and an optimistic reply reconciles to a
- *                       single confirmed bubble.
+ *                       via the 15-second adaptive REST poll (not a socket
+ *                       push), a repeated poll of the same data does not
+ *                       duplicate a message, and an optimistic reply
+ *                       reconciles to a single confirmed bubble. Full
+ *                       adaptive-cadence coverage (single-flight, hidden-tab,
+ *                       visibility restore, terminal status) lives in
+ *                       `heyq-request-lifecycle.test.mjs`.
  */
 import { after, before, describe, it } from 'node:test';
 import assert from 'node:assert/strict';
@@ -303,7 +307,7 @@ describe('the ticket detail page (REST polling only — no WebSocket is opened)'
       }
       window.WebSocket = NoSocketExpected;
       // Directly mutate the mock ticket, as if HeyQ/Bridge received an agent
-      // reply out-of-band — the next 5-second poll is what surfaces it.
+      // reply out-of-band — the next 15-second adaptive poll is what surfaces it.
       window.__addAgentReply = (body) => {
         window.__ticket.messages.push({ id: 'agent-1', from: 'support', authorLabel: 'Customer Support', body, createdAt: now() });
         window.__ticket.updatedAt = now();
@@ -315,16 +319,16 @@ describe('the ticket detail page (REST polling only — no WebSocket is opened)'
     await page.getByText('Live', { exact: true }).first().waitFor({ timeout: 15000 });
   }
 
-  it('shows an agent reply after the next poll, and a repeated poll of the same data does not duplicate it', async () => {
+  it('shows an agent reply after the next poll, and a repeated poll of the same data does not duplicate it', { timeout: 45_000 }, async () => {
     await openLiveTicket();
 
     await page.evaluate(() => window.__addAgentReply('Your parcel is out for delivery.'));
-    // The poll runs every 5s; give it two cycles' worth of margin.
-    await page.getByText('Your parcel is out for delivery.').first().waitFor({ timeout: 12_000 });
+    // The adaptive poll's first tick lands at 15s; give it margin past that.
+    await page.getByText('Your parcel is out for delivery.').first().waitFor({ timeout: 20_000 });
 
     // Let at least one more poll run over the SAME (unchanged) ticket data —
     // the message must not be duplicated by re-upserting the same id.
-    await page.waitForTimeout(5_500);
+    await page.waitForTimeout(16_000);
     const count = await page.getByText('Your parcel is out for delivery.').count();
     assert.equal(count, 1, 'a repeated poll of unchanged data must not duplicate the message');
   });

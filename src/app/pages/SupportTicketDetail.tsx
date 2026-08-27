@@ -11,7 +11,7 @@ import { Button } from '../components/ui/Button';
 import { Badge } from '../components/ui/Badge';
 import { Alert } from '../components/ui/Alert';
 // The ticket lives in HeyQ; this page is a customer-visible mirror of it. The
-// conversation is kept current by a 5-second REST poll (useTicketConversation)
+// conversation is kept current by an adaptive 15-second REST poll (useTicketConversation)
 // routed through the Corporate support proxy, and every write (reply, reopen)
 // persists the same way — Business+ keeps no ticket state of its own. Order
 // data comes from OMS.

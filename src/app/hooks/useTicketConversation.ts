@@ -5,7 +5,7 @@
  * this hook is the customer client that keeps the on-screen thread in sync:
  *
  *   • REST is authoritative and the ONLY sync mechanism. The thread is seeded
- *     from the initial `getTicketById` read, kept current by a 5-second poll
+ *     from the initial `getTicketById` read, kept current by an ADAPTIVE poll
  *     of `getTicketById` while the conversation is open, and every reply
  *     persists over REST (`replyToTicket`) — routed through the Corporate
  *     support proxy (`/api/support/*`), never QuadX Bridge/HeyQ directly.
@@ -17,22 +17,36 @@
  *     (`X-Bridge-Message-Id`), so an ambiguous retry cannot duplicate the reply
  *     server-side.
  *
+ * Polling cadence (adaptive, single-flight):
+ *   • 15s between polls, scheduled request-completes → wait 15s → next poll
+ *     (a `setTimeout` chain re-armed in each poll's `finally`, never a fixed
+ *     `setInterval`) — a slow request can never stack a second one behind it.
+ *   • Paused entirely while `document.hidden`, and while the ticket's own
+ *     status is terminal (`resolved`/`closed` — see `isTerminalTicketStatus`);
+ *     a reply that reopens a terminal ticket resumes the cadence immediately.
+ *   • The tab becoming visible again triggers one immediate refresh, which
+ *     then re-arms the normal 15s cadence from that point.
+ *
  * DORMANT: this hook does NOT open a WebSocket. The approved QuadX Bridge
- * contract for this POC is REST + 5-second polling only — there is no
- * realtime/typing signal to show, so `notifyTyping`/`stopTyping` are no-ops
- * and `agentTyping` is always `false`. `heyqRealtimeClient.ts` and the
- * realtime exports below remain in the codebase, unused, as a documented
- * dormant capability (see docs/migration/ggx-corporate-heyq-live-ticketing.md)
- * rather than deleted.
+ * contract for this POC is REST + polling only — there is no realtime/typing
+ * signal to show, so `notifyTyping`/`stopTyping` are no-ops and `agentTyping`
+ * is always `false`. `heyqRealtimeClient.ts` and the realtime exports below
+ * remain in the codebase, unused, as a documented dormant capability (see
+ * docs/migration/ggx-corporate-heyq-live-ticketing.md) rather than deleted.
  */
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   getTicketById,
   replyToTicket,
+  isTerminalTicketStatus,
   type CustomerTicket,
   type CustomerTicketMessage,
+  type HeyQTicketStatus,
 } from '../services/ticketsService';
 import type { RealtimeStatus } from '../services/heyqRealtimeClient';
+
+/** Steady-state gap between ticket-detail polls once a request completes. */
+const POLL_INTERVAL_MS = 15_000;
 
 /** An outgoing reply the requester sent, before/while HeyQ confirms it. */
 export interface PendingMessage {
@@ -123,6 +137,12 @@ export function useTicketConversation(id: string, initialTicket: CustomerTicket)
 
   // ── Polling lifecycle ───────────────────────────────────────────────────────
 
+  // Lets a confirmed reply (handled outside this effect, in `submit`) re-arm the
+  // cadence with the ticket's post-reply status — needed because replying to a
+  // resolved/closed ticket reopens it, and the paused loop wouldn't otherwise
+  // know to resume until an unrelated remount.
+  const restartPollingRef = useRef<(status: HeyQTicketStatus) => void>(() => {});
+
   useEffect(() => {
     // Re-seed for a new ticket id (route change reusing this hook instance).
     setTicket(initialTicket);
@@ -130,18 +150,38 @@ export function useTicketConversation(id: string, initialTicket: CustomerTicket)
     setPending([]);
     setConnection('open'); // initialTicket is already a fresh read — see the field's docblock
 
-    // REST Polling: poll getTicketById every 5s while conversation is open. No
-    // immediate GET on mount — initialTicket already IS the first fresh load,
-    // so the first poll happens on the interval's first 5s tick.
+    // Adaptive REST polling: single-flight, request-completes-then-wait-15s
+    // cadence via a re-armed setTimeout (never a fixed setInterval, so a slow
+    // request can't stack a second one behind it). No immediate GET on mount
+    // — initialTicket already IS the first fresh load.
     let isPolling = false;
     let cancelled = false;
+    let timeoutId: ReturnType<typeof setTimeout> | null = null;
+    let statusNow: HeyQTicketStatus = initialTicket.status;
+
+    const clearScheduled = () => {
+      if (timeoutId !== null) {
+        clearTimeout(timeoutId);
+        timeoutId = null;
+      }
+    };
+
+    const scheduleNext = (delayMs: number) => {
+      clearScheduled();
+      // Hidden tab: stay paused until visibility triggers a refresh. Terminal
+      // ticket: stay paused until a reply reopens it (see restartPollingRef).
+      if (cancelled || document.hidden || isTerminalTicketStatus(statusNow)) return;
+      timeoutId = setTimeout(() => { void poll(); }, delayMs);
+    };
+
     const poll = async () => {
-      if (isPolling) return; // single-flight: a tick and a visibility refresh can't overlap
+      if (isPolling || cancelled) return; // single-flight
       isPolling = true;
       try {
         const res = await getTicketById(id);
         if (cancelled) return;
         if (res.status === 'ok') {
+          statusNow = res.data.status;
           mergeTicket(res.data);
           setConnection('open');
         } else if (res.status === 'unavailable') {
@@ -151,21 +191,30 @@ export function useTicketConversation(id: string, initialTicket: CustomerTicket)
         // Silently handle transient errors, keep existing conversation state
       } finally {
         isPolling = false;
+        if (!cancelled) scheduleNext(POLL_INTERVAL_MS);
       }
     };
-    const pollInterval = setInterval(() => {
-      if (document.hidden) return; // a backgrounded tab does not poll
-      void poll();
-    }, 5_000);
-    // Refresh once as soon as the tab is foregrounded again, rather than
-    // waiting out the rest of the current 5s interval.
-    const onVisibility = () => { if (document.visibilityState === 'visible') void poll(); };
+
+    scheduleNext(POLL_INTERVAL_MS); // starts paused if the ticket loads already terminal
+
+    // An immediate refresh on foregrounding, then the poll's own completion
+    // re-arms the normal 15s cadence from that point. A backgrounding tab
+    // clears any pending tick outright — no request fires while hidden.
+    const onVisibility = () => {
+      clearScheduled();
+      if (document.visibilityState === 'visible') void poll();
+    };
     document.addEventListener('visibilitychange', onVisibility);
+
+    restartPollingRef.current = (status) => {
+      statusNow = status;
+      scheduleNext(POLL_INTERVAL_MS);
+    };
 
     return () => {
       cancelled = true;
       document.removeEventListener('visibilitychange', onVisibility);
-      clearInterval(pollInterval);
+      clearScheduled();
     };
     // Intentionally keyed on id only; initialTicket refresh is handled by merges.
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -187,6 +236,10 @@ export function useTicketConversation(id: string, initialTicket: CustomerTicket)
       const res = await replyToTicket(id, body, tempId);
       if (res.status === 'ok') {
         mergeTicket(res.data);
+        // Confirmed refresh already carries the post-reply ticket (incl. a
+        // reopen out of resolved/closed) — re-arm the cadence from now rather
+        // than waiting out whatever was left of the previous 15s window.
+        restartPollingRef.current(res.data.status);
         setPending((prev) => prev.filter((p) => p.tempId !== tempId));
       } else {
         setPending((prev) => prev.map((p) => (p.tempId === tempId ? { ...p, status: 'failed' } : p)));
