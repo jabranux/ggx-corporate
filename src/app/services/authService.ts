@@ -129,6 +129,17 @@ export async function logoutMockUser(): Promise<void> {
 }
 
 /**
+ * Clear ONLY the local UI-display session (no network call) — for when the
+ * server has already told us the session cookie is gone/invalid (a 401 from
+ * `/api/support/**`, see `heyqCustomerApi.ts`'s `SESSION_EXPIRED_EVENT`), so
+ * there is nothing left to ask the server to clear. Calling `logoutMockUser`
+ * in that situation would fire a redundant `/api/auth/logout` request.
+ */
+export function clearLocalSession(): void {
+  clearState(AUTH_STORAGE_KEY);
+}
+
+/**
  * Return the current authenticated user from the session, or null.
  * Reads the persisted AuthContext shape and enriches it with derived
  * permissions/subaccount scoping (see `toMockAuthUser`).

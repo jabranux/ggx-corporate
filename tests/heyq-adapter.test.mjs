@@ -99,6 +99,25 @@ const withStub = (fn, { response = null, status = 200, reject = false } = {}) =>
     { src: fn.toString(), response, status, reject },
   );
 
+/**
+ * Restore the admin UI-display session in `localStorage` after a test that
+ * deliberately triggers a real 401 — `heyqCustomerApi.ts`'s
+ * `notifySessionExpired()` dispatches a genuine `window` event that this
+ * SAME page's real, mounted `AuthContext` also receives (it isn't scoped to
+ * the test's own listener), clearing the session for real. The adapter
+ * functions under test read `localStorage` fresh on every call (not React
+ * state), so restoring it here is enough to un-block every test that runs
+ * after — without it, a real 401 earlier in the file cascades into
+ * `session.isAuthenticated === false` for everything downstream.
+ */
+const restoreAdminSession = () =>
+  page.evaluate(() => {
+    localStorage.setItem(
+      'ggx.auth',
+      JSON.stringify({ id: 'user-admin-001', name: 'Max Rodriguez', email: 'max@email.com', role: 'admin', accountId: 'main', accountName: 'Main Account' }),
+    );
+  });
+
 /** OMS-side adapter call (no stub — real transactionService). */
 const adapter = (fn, arg) =>
   page.evaluate(
@@ -254,6 +273,7 @@ describe('privacy filtering', () => {
 
 describe('common API failures', () => {
   const cases = [
+    { status: 401, expect: 'forbidden' },
     { status: 403, expect: 'forbidden' },
     { status: 404, expect: 'not_found' },
     { status: 500, expect: 'unavailable' },
@@ -262,6 +282,11 @@ describe('common API failures', () => {
     it(`maps HTTP ${c.status} to ${c.expect}`, async () => {
       const { result } = await withStub((svc) => svc.getMyTicket('tkt_x'), { response: { error: 'x' }, status: c.status });
       assert.equal(result.status, c.expect);
+      // A real 401 dispatches ggx:session-expired, which this page's real,
+      // mounted AuthContext also receives and acts on for real (see
+      // restoreAdminSession's docblock) — undo that so later tests still
+      // run as an authenticated session.
+      if (c.status === 401) await restoreAdminSession();
     });
   }
 
@@ -273,6 +298,56 @@ describe('common API failures', () => {
   it('degrades the list to empty on failure', async () => {
     const { result } = await withStub((svc) => svc.listMyTickets(), { response: { error: 'down' }, status: 503 });
     assert.deepEqual(result, []);
+  });
+});
+
+/**
+ * A 401 from `/api/support/**` means the signed session cookie is gone or no
+ * longer maps to a valid account (`requireSessionIdentity` in the HeyQ
+ * repo's `api/_lib/bridge.ts` — the ONLY status it writes, always before
+ * Bridge is called). That must clear the client's own UI-display session
+ * (`AuthContext`, via `SESSION_EXPIRED_EVENT`) so `ProtectedRoute` sends the
+ * user back to Login instead of leaving a stale "signed in" UI in front of a
+ * ticket list that will now silently 401 forever (the production symptom
+ * this closes — session cookie TTL and the localStorage UI flag had no way
+ * to stay in sync). A 403 is a DIFFERENT thing — a Bridge-side ownership
+ * denial on an otherwise-valid session — and must never trigger this.
+ *
+ * Each test here fires a REAL 401 against the live, mounted app on this
+ * page, so `restoreAdminSession()` afterward undoes the real cascading
+ * logout for whatever runs next (see its docblock).
+ */
+describe('session-expired signal (401 vs 403 from the support proxy)', () => {
+  const withEventCapture = (fn, { status }) =>
+    page.evaluate(
+      async ({ src, status }) => {
+        const events = [];
+        const listener = () => events.push('fired');
+        window.addEventListener('ggx:session-expired', listener);
+        const orig = window.fetch;
+        window.fetch = async () => new Response(JSON.stringify({ error: 'x' }), { status, headers: { 'Content-Type': 'application/json' } });
+        try {
+          const svc = await import('/src/app/services/heyqService.ts');
+          // eslint-disable-next-line no-new-func
+          await new Function('svc', `return (${src})(svc);`)(svc);
+          return events;
+        } finally {
+          window.fetch = orig;
+          window.removeEventListener('ggx:session-expired', listener);
+        }
+      },
+      { src: fn.toString(), status },
+    );
+
+  it('a 401 from the support proxy dispatches ggx:session-expired', async () => {
+    const events = await withEventCapture((svc) => svc.getMyTicket('tkt_x'), { status: 401 });
+    assert.deepEqual(events, ['fired']);
+    await restoreAdminSession();
+  });
+
+  it('a 403 from the support proxy does NOT dispatch ggx:session-expired (a valid session, just denied)', async () => {
+    const events = await withEventCapture((svc) => svc.getMyTicket('tkt_x'), { status: 403 });
+    assert.deepEqual(events, []);
   });
 });
 

@@ -1,6 +1,7 @@
-import { createContext, useContext, useState, type ReactNode } from 'react';
+import { createContext, useContext, useEffect, useState, type ReactNode } from 'react';
 import { loadState } from '../lib/storage';
-import { logoutMockUser } from '../services/authService';
+import { logoutMockUser, clearLocalSession } from '../services/authService';
+import { SESSION_EXPIRED_EVENT } from '../services/heyqCustomerApi';
 
 // Credentials are verified server-side (`POST /api/auth/login`, see
 // `services/authService.ts` and `api/auth/login.ts`), which also sets the
@@ -48,6 +49,24 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setUser(null);
     void logoutMockUser();
   };
+
+  // The server-verified session cookie (12h TTL, `api/_lib/session.ts`) can
+  // expire or be invalidated independently of this UI-display state, which
+  // otherwise persists in localStorage indefinitely. `heyqCustomerApi.ts`
+  // dispatches this event the moment `/api/support/**` returns 401 — the
+  // ONLY status its `requireSessionIdentity` writes for "no/invalid
+  // session" — so the stale local state is cleared and `ProtectedRoute`
+  // redirects to Login instead of leaving the UI looking signed-in while
+  // every ticket call silently fails. No network call here: the server
+  // already told us its side is gone.
+  useEffect(() => {
+    const onSessionExpired = () => {
+      setUser(null);
+      clearLocalSession();
+    };
+    window.addEventListener(SESSION_EXPIRED_EVENT, onSessionExpired);
+    return () => window.removeEventListener(SESSION_EXPIRED_EVENT, onSessionExpired);
+  }, []);
 
   return (
     <AuthContext.Provider value={{ user, isAuthenticated: !!user, login, logout }}>

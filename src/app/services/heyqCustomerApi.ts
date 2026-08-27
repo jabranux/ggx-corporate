@@ -342,6 +342,28 @@ function toCustomerTicket(t: HeyQApiCustomerTicket): CustomerTicket {
  */
 const SUPPORT_PROXY_BASE = '/api/support';
 
+/**
+ * Fired when the support proxy (`api/support/**`) returns 401 — the ONLY
+ * status `requireSessionIdentity` (the HeyQ repo's `api/_lib/bridge.ts`)
+ * writes, always before Bridge is ever called, for "no session cookie" or
+ * "session cookie no longer maps to a valid account". A 403, by contrast, is
+ * a Bridge-side ownership/authorization denial on an otherwise-valid session
+ * and must NOT clear it.
+ *
+ * `AuthContext` listens for this to clear the client's UI-display session
+ * (`authService`'s `localStorage` state, which has no expiry of its own) so
+ * `ProtectedRoute` redirects to Login instead of leaving the user looking
+ * signed-in while every ticket call silently 401s and the UI just shows an
+ * empty list (the observed production symptom: the signed, httpOnly session
+ * cookie has its own 12h TTL — `api/_lib/session.ts`'s `SESSION_TTL_SECONDS`
+ * — that the localStorage flag never tracked).
+ */
+export const SESSION_EXPIRED_EVENT = 'ggx:session-expired';
+
+function notifySessionExpired(): void {
+  if (typeof window !== 'undefined') window.dispatchEvent(new Event(SESSION_EXPIRED_EVENT));
+}
+
 /** Map an HTTP status to the adapter's production-shaped result union. */
 function resultForStatus(status: number): 'forbidden' | 'not_found' | 'unavailable' {
   if (status === 401 || status === 403) return 'forbidden'; // 401: no/invalid session
@@ -367,7 +389,10 @@ async function getJson(base: string, path: string, cache?: RequestCache): Promis
       headers: { Accept: 'application/json' },
       ...(cache ? { cache } : {}),
     });
-    if (!res.ok) return { ok: false, result: resultForStatus(res.status) };
+    if (!res.ok) {
+      if (res.status === 401 && base === SUPPORT_PROXY_BASE) notifySessionExpired();
+      return { ok: false, result: resultForStatus(res.status) };
+    }
     return { ok: true, data: await res.json() };
   } catch {
     return { ok: false, result: 'unavailable' }; // network / CORS / DNS
@@ -385,7 +410,10 @@ async function post(base: string, path: string, body?: unknown, headers?: Record
       headers: { 'Content-Type': 'application/json', ...headers },
       body: body === undefined ? undefined : JSON.stringify(body),
     });
-    if (!res.ok) return { ok: false, result: resultForStatus(res.status) };
+    if (!res.ok) {
+      if (res.status === 401 && base === SUPPORT_PROXY_BASE) notifySessionExpired();
+      return { ok: false, result: resultForStatus(res.status) };
+    }
     return { ok: true };
   } catch {
     return { ok: false, result: 'unavailable' };
@@ -402,7 +430,10 @@ async function postJson(base: string, path: string, body: unknown, headers?: Rec
       headers: { 'Content-Type': 'application/json', ...headers },
       body: JSON.stringify(body),
     });
-    if (!res.ok) return { ok: false, result: resultForStatus(res.status) };
+    if (!res.ok) {
+      if (res.status === 401 && base === SUPPORT_PROXY_BASE) notifySessionExpired();
+      return { ok: false, result: resultForStatus(res.status) };
+    }
     return { ok: true, data: await res.json() };
   } catch {
     return { ok: false, result: 'unavailable' };
