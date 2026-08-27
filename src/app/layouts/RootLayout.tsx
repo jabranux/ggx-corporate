@@ -276,23 +276,45 @@ export function RootLayout() {
 
   // Cross-domain search source lists, loaded from the service facades.
   // Refreshed on navigation (matches the bell's freshness) so newly created
-  // claims/tickets surface in search. Filtering stays local (presentation-only).
+  // claims surface in search. Filtering stays local (presentation-only).
   const [searchTx, setSearchTx] = useState<TransactionSummary[]>([]);
   const [searchClaims, setSearchClaims] = useState<Claim[]>([]);
-  const [searchTickets, setSearchTickets] = useState<SupportTicket[]>([]);
 
   useEffect(() => {
     let active = true;
-    Promise.all([getTransactions(), getClaimsList(), getTicketsList()])
-      .then(([tx, claims, tickets]) => {
+    Promise.all([getTransactions(), getClaimsList()])
+      .then(([tx, claims]) => {
         if (!active) return;
         setSearchTx(tx);
         setSearchClaims(claims);
-        setSearchTickets(tickets);
       })
       .catch(() => { /* keep last-known lists */ });
     return () => { active = false; };
   }, [location.pathname]);
+
+  // Tickets are NOT part of the eager per-navigation load above: unrelated
+  // dashboard pages must not call /api/support/tickets just to support topbar
+  // search. Instead, loaded lazily the first time the user types a qualifying
+  // (>=2 char) topbar query, then reused for the rest of this RootLayout's
+  // lifetime — navigating around does not refetch it.
+  const [searchTickets, setSearchTickets] = useState<SupportTicket[]>([]);
+  const ticketsLoadState = useRef<'idle' | 'loading' | 'loaded'>('idle');
+
+  useEffect(() => {
+    if (topbarQuery.trim().length < 2 || ticketsLoadState.current !== 'idle') return;
+    ticketsLoadState.current = 'loading';
+    let active = true;
+    getTicketsList()
+      .then((tickets) => {
+        if (!active) return;
+        setSearchTickets(tickets);
+        ticketsLoadState.current = 'loaded';
+      })
+      .catch(() => {
+        if (active) ticketsLoadState.current = 'idle'; // allow retry on the next qualifying keystroke
+      });
+    return () => { active = false; };
+  }, [topbarQuery]);
 
   // Close all transient popovers/dropdowns when the route changes.
   useEffect(() => {

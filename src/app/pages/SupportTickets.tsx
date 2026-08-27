@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router';
 import { IconPlus, IconMessage, IconEye, IconCircleCheck, IconPlayerPause, IconProgress } from '@tabler/icons-react';
 import { StatCard } from '../components/StatCard';
@@ -45,17 +45,43 @@ export function SupportTickets() {
   const [tickets, setTickets] = useState<SupportTicket[]>([]);
   const [unread, setUnread] = useState<Set<string>>(new Set());
   const [scope, setScope] = useState('');
-  const reloadTickets = () => { getTicketsList().then(setTickets).catch(() => {}); };
+
+  // Single-flight guard: a slow response must never overlap with the next poll
+  // tick / focus / visibility refresh — at most one list request in flight.
+  const listInFlight = useRef(false);
+  // Discards a response that resolves after unmount instead of setting state.
+  const mountedRef = useRef(true);
+  const reloadTickets = useCallback(() => {
+    if (listInFlight.current) return;
+    listInFlight.current = true;
+    getTicketsList()
+      .then((rows) => { if (mountedRef.current) setTickets(rows); })
+      .catch(() => {})
+      .finally(() => { listInFlight.current = false; });
+  }, []);
 
   useEffect(() => { getRequesterIdentity().then((who) => { if (who) setScope(who.externalUserId); }); }, []);
 
-  useEffect(() => { reloadTickets(); }, []);
+  useEffect(() => { reloadTickets(); }, [reloadTickets]);
   useEffect(() => {
+    mountedRef.current = true;
     const onFocus = () => reloadTickets();
+    // Page Visibility API — distinct from window focus (e.g. switching OS apps
+    // without changing tabs). Refreshes once as soon as the tab is foregrounded.
+    const onVisibility = () => { if (document.visibilityState === 'visible') reloadTickets(); };
     window.addEventListener('focus', onFocus);
-    const poll = window.setInterval(reloadTickets, LIST_POLL_MS);
-    return () => { window.removeEventListener('focus', onFocus); window.clearInterval(poll); };
-  }, []);
+    document.addEventListener('visibilitychange', onVisibility);
+    const poll = window.setInterval(() => {
+      if (document.hidden) return; // a backgrounded tab does not poll
+      reloadTickets();
+    }, LIST_POLL_MS);
+    return () => {
+      mountedRef.current = false;
+      window.removeEventListener('focus', onFocus);
+      document.removeEventListener('visibilitychange', onVisibility);
+      window.clearInterval(poll);
+    };
+  }, [reloadTickets]);
 
   // Recompute unread (and seed first-seen baselines) whenever the list changes.
   useEffect(() => { setUnread(computeUnread(scope, tickets)); }, [tickets, scope]);

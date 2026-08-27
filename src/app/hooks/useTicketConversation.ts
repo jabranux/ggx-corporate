@@ -79,7 +79,10 @@ export function useTicketConversation(id: string, initialTicket: CustomerTicket)
   const [ticket, setTicket] = useState<CustomerTicket>(initialTicket);
   const [messages, setMessages] = useState<CustomerTicketMessage[]>(() => ordered(initialTicket.messages));
   const [pending, setPending] = useState<PendingMessage[]>([]);
-  const [connection, setConnection] = useState<RealtimeStatus>('connecting');
+  // The caller's initial `getTicketById(id)` read (passed in as `initialTicket`)
+  // IS the first fresh load, so the connection starts 'open' rather than
+  // 'connecting' — see the polling effect below for why no immediate GET follows.
+  const [connection, setConnection] = useState<RealtimeStatus>('open');
   const [sending, setSending] = useState(false);
 
   // ── Message store helpers ──────────────────────────────────────────────────
@@ -125,12 +128,15 @@ export function useTicketConversation(id: string, initialTicket: CustomerTicket)
     setTicket(initialTicket);
     setMessages(ordered(initialTicket.messages));
     setPending([]);
+    setConnection('open'); // initialTicket is already a fresh read — see the field's docblock
 
-    // REST Polling: poll getTicketById every 5s while conversation is open.
+    // REST Polling: poll getTicketById every 5s while conversation is open. No
+    // immediate GET on mount — initialTicket already IS the first fresh load,
+    // so the first poll happens on the interval's first 5s tick.
     let isPolling = false;
     let cancelled = false;
     const poll = async () => {
-      if (isPolling) return;
+      if (isPolling) return; // single-flight: a tick and a visibility refresh can't overlap
       isPolling = true;
       try {
         const res = await getTicketById(id);
@@ -147,11 +153,18 @@ export function useTicketConversation(id: string, initialTicket: CustomerTicket)
         isPolling = false;
       }
     };
-    void poll(); // don't wait a full 5s for the first "Live" status
-    const pollInterval = setInterval(poll, 5_000);
+    const pollInterval = setInterval(() => {
+      if (document.hidden) return; // a backgrounded tab does not poll
+      void poll();
+    }, 5_000);
+    // Refresh once as soon as the tab is foregrounded again, rather than
+    // waiting out the rest of the current 5s interval.
+    const onVisibility = () => { if (document.visibilityState === 'visible') void poll(); };
+    document.addEventListener('visibilitychange', onVisibility);
 
     return () => {
       cancelled = true;
+      document.removeEventListener('visibilitychange', onVisibility);
       clearInterval(pollInterval);
     };
     // Intentionally keyed on id only; initialTicket refresh is handled by merges.
