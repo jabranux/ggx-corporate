@@ -134,6 +134,38 @@ describe('Topbar ticket search — lazy load, no eager per-navigation fetch', ()
       await browser.close();
     }
   });
+
+  it('clearing the query and navigating away mid-request does not strand the lazy load in "loading" forever', async () => {
+    const { browser, page } = await newSession();
+    try {
+      await page.goto(`${server.base}/dashboard/transactions`, { waitUntil: 'networkidle' });
+      await page.evaluate(() => { window.__listDelayMs = 3000; });
+
+      const search = page.getByPlaceholder(/search tracking numbers, orders/i);
+      await search.fill('42'); // qualifying query starts the lazy load (delayed response)
+      await page.waitForTimeout(200);
+      assert.equal(listCalls(await calls(page)).length, 1, 'the lazy load started');
+
+      // Clear the query, then navigate — both clear topbarQuery/topbarOpen
+      // while the delayed request is still in flight.
+      await search.fill('');
+      await page.getByRole('link', { name: 'Transactions', exact: true }).first().click();
+      await page.waitForURL('**/dashboard/transactions', { timeout: 10_000 });
+
+      await page.waitForTimeout(3500); // let the delayed response resolve
+
+      // Re-query: if the loader had gotten stuck in 'loading' (the bug), this
+      // would never surface a result and would never issue a second request
+      // either (blocked by the stuck state) — the dropdown would show "No
+      // results" forever.
+      const search2 = page.getByPlaceholder(/search tracking numbers, orders/i);
+      await search2.fill('4200');
+      await page.getByRole('button', { name: new RegExp(TICKET_REFERENCE) }).waitFor({ state: 'visible', timeout: 10_000 });
+      assert.equal(listCalls(await calls(page)).length, 1, 'the original delayed request completed and populated the cache — no second fetch was needed');
+    } finally {
+      await browser.close();
+    }
+  });
 });
 
 describe('Support Tickets — list refresh lifecycle', () => {

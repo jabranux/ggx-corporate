@@ -33,7 +33,7 @@ import {
   IconBuildingStore,
   IconApps,
 } from '@tabler/icons-react';
-import { useEffect, useRef, useState, type ComponentType } from 'react';
+import { useCallback, useEffect, useRef, useState, type ComponentType } from 'react';
 import { cn } from '../lib/utils';
 import { Button } from '../components/ui/Button';
 import { Avatar } from '../components/ui/Avatar';
@@ -299,22 +299,36 @@ export function RootLayout() {
   // lifetime — navigating around does not refetch it.
   const [searchTickets, setSearchTickets] = useState<SupportTicket[]>([]);
   const ticketsLoadState = useRef<'idle' | 'loading' | 'loaded'>('idle');
-
+  // Guards the eventual setSearchTickets call against a REAL RootLayout
+  // unmount only (mount effect below, empty deps — not re-run per keystroke).
+  const ticketsMountedRef = useRef(true);
   useEffect(() => {
-    if (topbarQuery.trim().length < 2 || ticketsLoadState.current !== 'idle') return;
+    ticketsMountedRef.current = true;
+    return () => { ticketsMountedRef.current = false; };
+  }, []);
+
+  // Triggered imperatively from the search input (not a useEffect keyed on
+  // topbarQuery): an effect there would re-run its cleanup on every keystroke,
+  // which would mark an in-flight request's own closure "cancelled" the
+  // moment the query changes again — leaving `ticketsLoadState` stuck at
+  // 'loading' forever once that request's .then/.catch checked the stale
+  // flag and silently no-opped. `ticketsLoadState` is single-flight against
+  // itself (the `!== 'idle'` guard) and is intentionally NOT tied to any
+  // particular keystroke's lifetime, so it always resolves to 'loaded' or
+  // (on failure) back to 'idle' for a retry, regardless of what the query
+  // does meanwhile. Only the actual setState call is unmount-guarded.
+  const ensureTicketsLoaded = useCallback(() => {
+    if (ticketsLoadState.current !== 'idle') return;
     ticketsLoadState.current = 'loading';
-    let active = true;
     getTicketsList()
       .then((tickets) => {
-        if (!active) return;
-        setSearchTickets(tickets);
         ticketsLoadState.current = 'loaded';
+        if (ticketsMountedRef.current) setSearchTickets(tickets);
       })
       .catch(() => {
-        if (active) ticketsLoadState.current = 'idle'; // allow retry on the next qualifying keystroke
+        ticketsLoadState.current = 'idle'; // allow retry on the next qualifying keystroke
       });
-    return () => { active = false; };
-  }, [topbarQuery]);
+  }, []);
 
   // Close all transient popovers/dropdowns when the route changes.
   useEffect(() => {
@@ -615,9 +629,15 @@ export function RootLayout() {
                 value={topbarQuery}
                 onChange={(e) => {
                   setTopbarQuery(e.target.value);
-                  setTopbarOpen(e.target.value.trim().length >= 2);
+                  const qualifies = e.target.value.trim().length >= 2;
+                  setTopbarOpen(qualifies);
+                  if (qualifies) ensureTicketsLoaded();
                 }}
-                onFocus={() => topbarQuery.trim().length >= 2 && setTopbarOpen(true)}
+                onFocus={() => {
+                  if (topbarQuery.trim().length < 2) return;
+                  setTopbarOpen(true);
+                  ensureTicketsLoaded();
+                }}
                 className="w-full h-9 pl-10 pr-4 rounded-lg border border-gray-200 bg-gray-50 text-sm placeholder-gray-400 focus:outline-none focus:ring-1 focus:ring-blue-500 focus:border-blue-500 focus:bg-white transition-colors"
               />
               {topbarQuery && (
