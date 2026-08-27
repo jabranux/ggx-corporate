@@ -3,6 +3,33 @@
 > Lightweight resume/checkpoint file. Detailed June 2026 history was archived to
 > `docs/archive/session_log_2026-06.md`.
 
+## Most Recent Work — ticket-detail adaptive polling (2026-08-27)
+
+Replaced `useTicketConversation`'s fixed 5s ticket-detail poll with an
+adaptive 15s cadence. Observed latency (~6s cold, ~1.3–1.4s on a `304`) made
+the old 5s fixed interval too aggressive and, being a plain `setInterval`,
+theoretically able to stack a slow request behind an in-flight one.
+
+- **New cadence:** request-completes → wait 15s → next poll, via a
+  `setTimeout` chain re-armed in each poll's own `finally` (never a fixed
+  `setInterval`) — single-flight by construction, not just by an `isPolling`
+  guard. Commit `9ccead5`.
+- **New:** `isTerminalTicketStatus` (`heyqService.ts`, re-exported via
+  `ticketsService.ts`) — `resolved`/`closed` pause the cadence entirely; a
+  reply that reopens one (existing behavior, unchanged) resumes it
+  immediately via a small `restartPollingRef` the hook exposes from its
+  polling effect to `submit`.
+- **Unchanged:** hidden-tab pause + one immediate refresh on visibility
+  restore (now re-arming a 15s cadence instead of a 5s one), the post-reply
+  confirmation GET, initial-load behavior, UUID routing, and every BFF/Bridge
+  contract.
+- **Tests:** `tests/heyq-request-lifecycle.test.mjs` — retimed existing
+  detail-poll coverage to 15s and added single-flight (slow-request,
+  `__detailDelayMs`) and terminal-status (new resolved-ticket fixture)
+  coverage. `tests/heyq-realtime.test.mjs`'s detail-poll test retimed to
+  match (was asserting on the old 5s cadence). Full suite **105/105**,
+  typecheck clean, build clean.
+
 ## Most Recent Work — live Concern Categories: HTTP no-store audit fix (2026-08-27)
 
 Closed the single remaining audit finding on the live Concern Categories work
