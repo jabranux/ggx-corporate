@@ -1876,7 +1876,57 @@ exist at all (both docblocks say so directly), and it predates Quick Login
 entirely. A fix would mean changing the project's default local dev command
 for every route, not something scoped to Quick Login — left as-is.
 
-### 21.6 Response status summary
+### 21.7 Follow-up — hide the Quick Login UI on deployed builds (2026-08-28)
+
+§21.5 pass 2 raised a P2 alongside its P1 (the Preview gap): the Login page
+kept rendering the Quick Login cards on every deployed environment even
+though the endpoint was now guaranteed to `404` there. At the time the
+trade-off was presented and the decision was **leave the UI untouched** — a
+click just produces the existing generic failure alert. This follow-up
+revisits that decision: **hide the cards outright wherever the endpoint is
+gated off**, so a deployed build never shows a control that cannot work.
+
+- **`src/app/pages/Login.tsx`** — new `SHOW_QUICK_LOGIN = !import.meta.env.PROD`
+  gates the "Quick Login" heading/divider and both cards. Vite's build-time
+  `import.meta.env.PROD` is `true` for any real build — what both Production
+  and Preview deploy — and `false` for plain `vite` dev and `vercel dev`,
+  the same two environments `api/auth/quick-login.ts`'s
+  `isPubliclyReachable()` already leaves open. No new env var; the client
+  boundary mirrors the server boundary using Vite's own built-in flag.
+  `handleQuickLogin`/`quickLoginMockUser` and the rest of the manual-login
+  form are unchanged; only the conditional render is new.
+- **Confirmed via a real production build** (`npm run build` + a fresh
+  `dist/assets/*.js` grep, same method as §19.4/§21.4): neither Quick Login
+  card's text (`Access to the main corporate account...`,
+  `Access scoped to a managed subaccount...`) nor the literal string
+  `/api/auth/quick-login` appears anywhere in the built bundle — Vite/esbuild
+  statically resolves `import.meta.env.PROD` to `true` at build time, so the
+  entire `SHOW_QUICK_LOGIN` branch (including the otherwise-unreachable
+  `handleQuickLogin` call and its `fetch` target) is dead-code-eliminated,
+  not just hidden at runtime. Manual sign-in is fully present and unaffected.
+- **Dev/tests untouched by design**: `tests/login-quick-login.test.mjs` drives
+  a plain `vite` dev server (`tests/helpers.mjs`'s `startDevServer`), where
+  `import.meta.env.PROD` is `false`, so `SHOW_QUICK_LOGIN` stays `true` and
+  every existing Quick Login browser test still exercises the real cards
+  unchanged. Same for a developer running `vercel dev` locally.
+- **New test**: `tests/login-quick-login.test.mjs` — a static source check
+  asserting `Login.tsx` defines `SHOW_QUICK_LOGIN` from `import.meta.env.PROD`
+  and gates the cards block on it, so the guard can't be silently removed
+  without failing the suite.
+- **Validated**: `npm run typecheck` clean; `npm run build` clean (same
+  pre-existing chunk-size warning only); bundle scan as above; full suite
+  `npm test` **162/162 passed, 0 fail** (up from 161 — the new source-guard
+  test), re-run clean for stability after one transient run flagged 2
+  failures with no attributable detail (buffered-output artifact per this
+  project's own documented gotcha — re-run with explicit log redirection came
+  back fully green); focused `tests/api-auth-quick-login.test.mjs` +
+  `tests/login-quick-login.test.mjs` also independently green (14/14).
+  **Codex review** (`codex review --uncommitted`, scoped to this diff): no
+  findings — confirmed the Quick Login UI is correctly omitted from
+  production builds while remaining available in local development, and that
+  the strings/endpoint path are absent from the built assets.
+
+### 21.8 Response status summary
 
 - **CLIENT_CREDENTIAL_EXPOSURE**: FIXED — `Login.tsx` no longer contains the
   seeded email/password in any form; Quick Login sends only an opaque scope,
@@ -1891,6 +1941,13 @@ for every route, not something scoped to Quick Login — left as-is.
   live Bridge credentials per §15.3) before resolving any scope or minting a
   session; unaffected under `vercel dev` or plain local dev. Manual
   password login is unaffected in every environment.
+- **CODEX_P2_DEAD_UI_ON_DEPLOYED_BUILDS**: FIXED (§21.7) — the Quick Login
+  cards no longer render (and are dead-code-eliminated from the bundle) on
+  any build where the endpoint itself is gated off; Main Account / Subaccount
+  presentation is fully preserved for local dev and `vercel dev`.
+- **CODEX_P2_NPM_RUN_DEV_NO_API**: ACKNOWLEDGED, unchanged (§21.5 pass 4) —
+  pre-existing, repo-wide (`/api/**` under plain `npm run dev`), not scoped
+  to Quick Login; not acted on.
 - **SCOPE**: GGX Corporate only — no change to QuadX Bridge, `api/support/**`,
   Bridge identity resolution, or account/role architecture.
 

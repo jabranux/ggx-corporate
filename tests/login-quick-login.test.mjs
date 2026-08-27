@@ -52,6 +52,25 @@ describe('Login.tsx source — no client-side seeded credentials', () => {
   });
 });
 
+// §21.7: the endpoint 404s on any publicly reachable deployment
+// (`isPubliclyReachable()`, api/auth/quick-login.ts); this guards the client
+// side of that same boundary so the dead-click cards don't ship to prod.
+describe('Login.tsx source — Quick Login UI is gated to non-production builds', () => {
+  it('renders the Quick Login cards only when `import.meta.env.PROD` is false', () => {
+    const source = fs.readFileSync(LOGIN_TSX, 'utf-8');
+    assert.match(
+      source,
+      /const SHOW_QUICK_LOGIN = !import\.meta\.env\.PROD;/,
+      'expected a SHOW_QUICK_LOGIN flag derived from import.meta.env.PROD'
+    );
+    assert.match(
+      source,
+      /\{SHOW_QUICK_LOGIN && \(/,
+      'expected the Quick Login heading/cards block to be conditionally rendered on SHOW_QUICK_LOGIN'
+    );
+  });
+});
+
 describe('Login page — Quick Login', () => {
   it('shows Main Account and Subaccount options with their descriptions, and no underlying credentials', async () => {
     const context = await browser.newContext({ viewport: { width: 1280, height: 900 } });
