@@ -211,6 +211,33 @@ describe('API response mapping', () => {
   });
 });
 
+describe('ticketsService.getTicketsList — shared search filter matches the reference', () => {
+  it('matches the full human-readable reference, a partial substring, and still matches the id (UUID)', async () => {
+    const ticket = { ...HEYQ_TICKET, id: 'd1f847ee-d472-483c-9774-971070242891', reference: 'HQS-2026-0001-3116' };
+    const search = (q) =>
+      page.evaluate(
+        async ({ q, response }) => {
+          const orig = window.fetch;
+          window.fetch = async () =>
+            new Response(JSON.stringify(response), { status: 200, headers: { 'Content-Type': 'application/json' } });
+          try {
+            const svc = await import('/src/app/services/ticketsService.ts');
+            const rows = await svc.getTicketsList({ search: q });
+            return rows.length;
+          } finally {
+            window.fetch = orig;
+          }
+        },
+        { q, response: [ticket] },
+      );
+
+    assert.equal(await search('HQS-2026-0001-3116'), 1, 'full reference must match');
+    assert.equal(await search('0001-3116'), 1, 'partial reference must match');
+    assert.equal(await search('d1f847ee-d472-483c-9774-971070242891'), 1, 'the id (UUID) must still match — existing behavior retained');
+    assert.equal(await search('no-such-ticket'), 0, 'an unrelated query must not match');
+  });
+});
+
 describe('privacy filtering', () => {
   it('drops agent-only fields even when the response carries them', async () => {
     const { result } = await withStub((svc) => svc.getMyTicket('tkt_abc123'), { response: HEYQ_TICKET });

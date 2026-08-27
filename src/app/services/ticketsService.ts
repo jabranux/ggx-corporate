@@ -143,6 +143,7 @@ export async function getTicketsList(filters?: TicketFilters): Promise<SupportTi
     rows = rows.filter(
       (t) =>
         t.id.toLowerCase().includes(q) ||
+        (t.reference?.toLowerCase().includes(q) ?? false) ||
         t.trackingNumbers.some((n) => n.toLowerCase().includes(q)) ||
         t.subject.toLowerCase().includes(q),
     );

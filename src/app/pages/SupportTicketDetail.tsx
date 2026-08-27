@@ -84,7 +84,7 @@ export function SupportTicketDetail() {
           <CardContent className="p-12 text-center">
             <p className="text-base font-semibold text-gray-700">Ticket not found</p>
             <p className="text-sm text-gray-400 mt-1">
-              The ticket {id} doesn’t exist or isn’t available on your account.
+              This ticket doesn’t exist or isn’t available on your account.
             </p>
           </CardContent>
         </Card>

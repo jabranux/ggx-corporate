@@ -618,7 +618,11 @@ export function RootLayout() {
                 .filter((c) => c.id.toLowerCase().includes(q) || c.trackingNumber.toLowerCase().includes(q))
                 .slice(0, 3);
               const ticketResults = searchTickets
-                .filter((t) => t.id.toLowerCase().includes(q) || t.trackingNumber.toLowerCase().includes(q))
+                .filter((t) =>
+                  t.id.toLowerCase().includes(q) ||
+                  (t.reference?.toLowerCase().includes(q) ?? false) ||
+                  t.trackingNumber.toLowerCase().includes(q),
+                )
                 .slice(0, 3);
               const hasResults = txResults.length > 0 || claimResults.length > 0 || ticketResults.length > 0;
               return (
@@ -675,7 +679,7 @@ export function RootLayout() {
                               >
                                 <IconMessage className="w-4 h-4 text-gray-400 flex-shrink-0" />
                                 <div className="min-w-0">
-                                  <p className="text-sm font-medium text-gray-900 leading-snug">{t.id}</p>
+                                  <p className="text-sm font-medium text-gray-900 leading-snug">{t.reference?.trim() || t.id}</p>
                                   <p className="text-xs text-gray-500 leading-snug truncate">{t.issueType} · {t.trackingNumber}</p>
                                 </div>
                               </button>

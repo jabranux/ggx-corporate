@@ -90,6 +90,7 @@ export function SupportTickets() {
       const searchOk =
         q.length < 2 ||
         t.id.toLowerCase().includes(q) ||
+        (t.reference?.toLowerCase().includes(q) ?? false) ||
         t.trackingNumbers.some((n) => n.toLowerCase().includes(q)) ||
         t.subject.toLowerCase().includes(q);
       const statusOk = statusFilter === 'all' || t.status === statusFilter;
@@ -134,7 +135,7 @@ export function SupportTickets() {
           <div className="flex flex-col lg:flex-row lg:items-center gap-4">
             <div className="flex-1">
               <SearchInput
-                placeholder="Search by ticket ID, order, or subject..."
+                placeholder="Search by ticket #, order, or subject..."
                 value={searchQuery}
                 onChange={setSearchQuery}
               />
@@ -160,7 +161,7 @@ export function SupportTickets() {
             <Table>
               <TableHeader>
                 <TableRow>
-                  <TableHead>Ticket ID</TableHead>
+                  <TableHead>Ticket #</TableHead>
                   <TableHead>Linked Order</TableHead>
                   <TableHead>Issue Type</TableHead>
                   <TableHead>Priority</TableHead>
@@ -197,7 +198,7 @@ export function SupportTickets() {
                             className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${isUnread ? 'bg-blue-600' : 'bg-transparent'}`}
                             title={isUnread ? 'New activity' : undefined}
                           />
-                          {ticket.id}
+                          {ticket.reference?.trim() || ticket.id}
                         </span>
                       </TableCell>
                       <TableCell className="whitespace-nowrap">{ticket.trackingNumber}</TableCell>
