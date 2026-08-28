@@ -1935,19 +1935,69 @@ gated off**, so a deployed build never shows a control that cannot work.
   mint the identical `ggx_session` cookie via the identical
   `createSessionToken`/`buildSessionCookie` path; no client-only session, no
   `demoAccountId`-style trust reintroduced.
-- **CODEX_P1_ZERO_SECRET_ENDPOINT**: FIXED (§21.5, all three passes) —
-  `/api/auth/quick-login` now 404s whenever it's publicly reachable
-  (`isPubliclyReachable()` — Production and Preview, since Preview shares
-  live Bridge credentials per §15.3) before resolving any scope or minting a
-  session; unaffected under `vercel dev` or plain local dev. Manual
-  password login is unaffected in every environment.
-- **CODEX_P2_DEAD_UI_ON_DEPLOYED_BUILDS**: FIXED (§21.7) — the Quick Login
-  cards no longer render (and are dead-code-eliminated from the bundle) on
-  any build where the endpoint itself is gated off; Main Account / Subaccount
-  presentation is fully preserved for local dev and `vercel dev`.
+- **CODEX_P1_ZERO_SECRET_ENDPOINT**: FIXED (§21.5, all three passes), then
+  **DELIBERATELY REVERTED (§22, 2026-08-28)** — `/api/auth/quick-login` no
+  longer 404s on Production/Preview; see §22 for why and what still bounds
+  the risk.
+- **CODEX_P2_DEAD_UI_ON_DEPLOYED_BUILDS**: FIXED (§21.7), then
+  **INTENTIONALLY UNDONE (§22, 2026-08-28)** — the Quick Login cards render
+  on every build again, including hosted Production/Preview; see §22.
 - **CODEX_P2_NPM_RUN_DEV_NO_API**: ACKNOWLEDGED, unchanged (§21.5 pass 4) —
   pre-existing, repo-wide (`/api/**` under plain `npm run dev`), not scoped
   to Quick Login; not acted on.
 - **SCOPE**: GGX Corporate only — no change to QuadX Bridge, `api/support/**`,
   Bridge identity resolution, or account/role architecture.
+
+---
+
+## 22. Hosted Quick Login intentionally re-enabled for stakeholder testing (2026-08-28)
+
+§21 gated Quick Login off every publicly reachable Vercel tier in response to
+a Codex P1 (a zero-secret way to mint a real session anywhere internet-
+reachable). This section reverts that gate **by explicit request**, for the
+hosted test app's stakeholder-testing needs — it is a deliberate product
+decision, not a re-discovery of a bug or a regression of §21's fix. §§21.1–21.8
+above are left as-is: they remain an accurate record of the audit that
+produced the original gate.
+
+- **What changed**: `api/auth/quick-login.ts` no longer calls
+  `isPubliclyReachable()` / checks `VERCEL_ENV`/`NODE_ENV` before resolving a
+  scope and minting a session — the 404 short-circuit is removed entirely.
+  `src/app/pages/Login.tsx` no longer defines or checks `SHOW_QUICK_LOGIN`
+  (`!import.meta.env.PROD`) — the Quick Login heading and both cards render
+  unconditionally, same as local dev always rendered them.
+- **What did not change (the remaining security boundary)**: `POST
+  /api/auth/quick-login` still only accepts the two fixed opaque scopes
+  (`'main'`, `'subaccount'`); `resolveQuickLoginUser`
+  (`api/_lib/demoUsers.ts`) still rejects anything else, including a
+  client-supplied user/account id. Session issuance is still the identical
+  `createSessionToken`/`buildSessionCookie` path manual login uses — no new,
+  weaker, or client-trusted session mechanism was introduced. No password or
+  credential of any kind was added to the frontend. QuadX Bridge, HeyQ, and
+  the `/api/support/**` proxy are untouched.
+- **Accepted risk, explicitly**: anyone who can reach the hosted URL can now
+  sign in as either seeded demo account (`Max Rodriguez` / `Rina Lopez`) with
+  no password. This is the exact zero-secret-endpoint condition §21.5's
+  Codex P1 flagged — it is being re-opened on purpose because the hosted
+  deployment's current purpose is stakeholder demoing of both account scopes,
+  not production use with real customer data. Revisit (e.g. a time-boxed
+  flag, a referer/allowlist check, or re-gating) before that changes.
+- **Tests updated** (not weakened, inverted to match the new intended
+  behavior): `tests/api-auth-quick-login.test.mjs`'s two former
+  "disabled on deployed tiers" cases now assert the endpoint stays enabled
+  (200 + `Set-Cookie`) under `VERCEL_ENV=production`, `VERCEL_ENV=preview`,
+  and `NODE_ENV=production`. `tests/login-quick-login.test.mjs`'s former
+  "gated to non-production builds" source assertion now asserts
+  `SHOW_QUICK_LOGIN` is absent from `Login.tsx` entirely.
+- **Validated**: `npm run typecheck` clean; focused suite
+  (`tests/api-auth-quick-login.test.mjs` + `tests/login-quick-login.test.mjs`)
+  **14/14** green, including the full browser-driven Login page flow for
+  both Quick Login cards. Codex reviewed the change and found no
+  implementation issues — the only open item was that the change was
+  uncommitted, closed by this session's commit/push.
+- **Response status summary (supersedes §21.8 for these two rows only)**:
+  `CODEX_P1_ZERO_SECRET_ENDPOINT` and `CODEX_P2_DEAD_UI_ON_DEPLOYED_BUILDS`
+  are both **intentionally reopened**, not unresolved — see the accepted-risk
+  note above for the reasoning and the bound that still applies
+  (`resolveQuickLoginUser`'s fixed two-scope mapping).
 

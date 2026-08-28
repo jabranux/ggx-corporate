@@ -118,17 +118,17 @@ describe('POST /api/auth/quick-login', () => {
     assert.equal(res._status, 405);
   });
 
-  it('is disabled on every deployed Vercel tier (VERCEL_ENV=production or preview) — 404, no session, even for a valid scope', async () => {
-    // Preview shares the same live QuadX Bridge credentials as Production
-    // (§15.3) — there is no "safe" deployed tier to leave this open on.
+  it('stays enabled on every deployed Vercel tier (VERCEL_ENV=production or preview) — issues a session for a valid scope', async () => {
+    // §21.7 reverted the deploy-tier gate: the fixed scope→user mapping is
+    // the security boundary here, not environment.
     for (const tier of ['production', 'preview']) {
       const prevVercelEnv = process.env.VERCEL_ENV;
       process.env.VERCEL_ENV = tier;
       try {
         const res = makeRes();
         await quickLoginHandler(makeReq('POST', { scope: 'main' }), res);
-        assert.equal(res._status, 404, `VERCEL_ENV=${tier} should be rejected`);
-        assert.equal(res._headers['Set-Cookie'], undefined, `VERCEL_ENV=${tier} must not issue a Quick Login session`);
+        assert.equal(res._status, 200, `VERCEL_ENV=${tier} should still issue a session`);
+        assert.ok(res._headers['Set-Cookie'], `VERCEL_ENV=${tier} must still issue a Quick Login session`);
       } finally {
         if (prevVercelEnv === undefined) delete process.env.VERCEL_ENV;
         else process.env.VERCEL_ENV = prevVercelEnv;
@@ -136,7 +136,7 @@ describe('POST /api/auth/quick-login', () => {
     }
   });
 
-  it('is disabled when NODE_ENV=production even with VERCEL_ENV unset', async () => {
+  it('stays enabled when NODE_ENV=production even with VERCEL_ENV unset', async () => {
     const prevVercelEnv = process.env.VERCEL_ENV;
     const prevNodeEnv = process.env.NODE_ENV;
     delete process.env.VERCEL_ENV;
@@ -144,7 +144,7 @@ describe('POST /api/auth/quick-login', () => {
     try {
       const res = makeRes();
       await quickLoginHandler(makeReq('POST', { scope: 'main' }), res);
-      assert.equal(res._status, 404);
+      assert.equal(res._status, 200);
     } finally {
       if (prevVercelEnv === undefined) delete process.env.VERCEL_ENV; else process.env.VERCEL_ENV = prevVercelEnv;
       if (prevNodeEnv === undefined) delete process.env.NODE_ENV; else process.env.NODE_ENV = prevNodeEnv;

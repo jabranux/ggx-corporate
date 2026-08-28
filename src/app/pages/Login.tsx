@@ -17,18 +17,12 @@ import { loginMockUser, quickLoginMockUser } from '../services/authService';
  * (`resolveQuickLoginUser`, `api/_lib/demoUsers.ts`) and mints the same
  * signed `ggx_session` cookie manual login does (see `handleQuickLogin`).
  *
- * The endpoint itself already 404s on any publicly reachable deployment
- * (`isPubliclyReachable()`, `api/auth/quick-login.ts`) — Production and
- * Preview alike, since Preview shares live Bridge credentials. `SHOW_QUICK_LOGIN`
- * mirrors that same boundary on the client so the cards don't sit there
- * producing a dead click: Vite's build-time `import.meta.env.PROD` is `true`
- * for any real build (what both Production and Preview deploy) and `false`
- * for both plain `vite` dev and `vercel dev` — the same two environments the
- * server-side gate leaves open. See
+ * Rendered on every environment, including hosted Vercel Preview/Production
+ * (§21.7 reverted the earlier deploy-tier gate on both the client and
+ * `api/auth/quick-login.ts`) — the fixed scope→user mapping is the security
+ * boundary, not build target. See
  * docs/migration/ggx-corporate-heyq-live-ticketing.md §21.7.
  */
-const SHOW_QUICK_LOGIN = !import.meta.env.PROD;
-
 export const QUICK_LOGIN_ACCOUNTS = [
   {
     scope: 'main',
@@ -197,32 +191,28 @@ export function Login() {
 
                   <Button type="submit" className="w-full">Sign in</Button>
 
-                  {SHOW_QUICK_LOGIN && (
-                    <>
-                      <div className="relative pt-2">
-                        <div className="absolute inset-0 flex items-center">
-                          <div className="w-full border-t border-gray-200" />
-                        </div>
-                        <div className="relative flex justify-center text-xs">
-                          <span className="px-2 bg-white text-gray-500 font-medium">Quick Login</span>
-                        </div>
-                      </div>
+                  <div className="relative pt-2">
+                    <div className="absolute inset-0 flex items-center">
+                      <div className="w-full border-t border-gray-200" />
+                    </div>
+                    <div className="relative flex justify-center text-xs">
+                      <span className="px-2 bg-white text-gray-500 font-medium">Quick Login</span>
+                    </div>
+                  </div>
 
-                      <div className="grid grid-cols-2 gap-2">
-                        {QUICK_LOGIN_ACCOUNTS.map((account) => (
-                          <button
-                            key={account.scope}
-                            type="button"
-                            onClick={() => handleQuickLogin(account)}
-                            className="flex flex-col items-start gap-0.5 rounded-lg border border-gray-300 bg-white px-3 py-2.5 text-left hover:bg-gray-50 hover:border-gray-400 transition-colors"
-                          >
-                            <span className="text-sm font-medium text-gray-900">{account.label}</span>
-                            <span className="text-[11px] text-gray-500 leading-snug">{account.description}</span>
-                          </button>
-                        ))}
-                      </div>
-                    </>
-                  )}
+                  <div className="grid grid-cols-2 gap-2">
+                    {QUICK_LOGIN_ACCOUNTS.map((account) => (
+                      <button
+                        key={account.scope}
+                        type="button"
+                        onClick={() => handleQuickLogin(account)}
+                        className="flex flex-col items-start gap-0.5 rounded-lg border border-gray-300 bg-white px-3 py-2.5 text-left hover:bg-gray-50 hover:border-gray-400 transition-colors"
+                      >
+                        <span className="text-sm font-medium text-gray-900">{account.label}</span>
+                        <span className="text-[11px] text-gray-500 leading-snug">{account.description}</span>
+                      </button>
+                    ))}
+                  </div>
 
                   <div className="relative">
                     <div className="absolute inset-0 flex items-center">

@@ -3,6 +3,43 @@
 > Lightweight resume/checkpoint file. Detailed June 2026 history was archived to
 > `docs/archive/session_log_2026-06.md`.
 
+## Most Recent Work — hosted Quick Login intentionally re-enabled for stakeholder testing (2026-08-28)
+
+Reverses §21's deploy-tier gate on the Login page's Quick Login cards
+("Main Account" / "Subaccount"). This is a deliberate, stakeholder-requested
+product decision for the hosted test app, not a regression of §21's audit
+fix — full write-up and updated response-status table:
+`docs/migration/ggx-corporate-heyq-live-ticketing.md` §22.
+
+- **Removed**: `isPubliclyReachable()`/`PUBLICLY_REACHABLE_VERCEL_ENVS` and the
+  404 short-circuit in `api/auth/quick-login.ts`; the `SHOW_QUICK_LOGIN`
+  (`!import.meta.env.PROD`) conditional in `src/app/pages/Login.tsx`. Quick
+  Login now behaves identically on local dev, `vercel dev`, and every hosted
+  Vercel tier (Preview and Production).
+- **Unchanged (still the security boundary)**: `resolveQuickLoginUser`
+  (`api/_lib/demoUsers.ts`) still only maps the two fixed scopes
+  (`'main'` → seeded admin, `'subaccount'` → seeded manager) — no arbitrary
+  user/account id accepted, no credential ever reaches the frontend, same
+  signed `ggx_session` cookie flow (`createSessionToken`/`buildSessionCookie`)
+  as manual password login. QuadX Bridge / HeyQ untouched.
+- **Tests updated**: `tests/api-auth-quick-login.test.mjs` — the two
+  "disabled on production/preview/NODE_ENV=production" cases now assert the
+  endpoint stays enabled (200 + session cookie) in those environments.
+  `tests/login-quick-login.test.mjs` — the "gated to non-production builds"
+  source assertion now asserts `SHOW_QUICK_LOGIN` no longer appears in
+  `Login.tsx` at all.
+- **Validated**: `npm run typecheck` clean; focused suite
+  (`tests/api-auth-quick-login.test.mjs` + `tests/login-quick-login.test.mjs`)
+  **14/14** green, including the browser-driven Login page flow for both
+  Quick Login cards. Codex found no implementation issues on review.
+- **Known accepted risk**: the hosted app can now mint a real signed session
+  for either seeded demo account with no password from anyone who can reach
+  the URL. Acceptable for the current stakeholder-testing purpose because the
+  scope→user mapping is fixed and non-arbitrary; revisit before any real
+  customer data lives behind these demo accounts.
+- Committed and pushed to `origin/master` — see the `GGX_AGENT_STATUS` block
+  at the end of this file for the final commit reference.
+
 ## Most Recent Work — typing presence: event-driven RECEIVER shipped (Supabase Realtime Broadcast, replacing the 3s poll) (2026-08-27)
 
 HEYQ/QuadX Bridge shipped the companion architecture this session's earlier
@@ -1414,3 +1451,34 @@ production stage, after a BFF exists.
 - Some historical Figma notes remain archived and may not reflect current app
   state.
 - Real BFF endpoint shapes are still provisional until backend contracts exist.
+
+```
+GGX_AGENT_STATUS
+task: hosted-quick-login-enablement
+status: COMPLETE
+date: 2026-08-28
+scope: GGX Corporate only — QuadX Bridge / HEYQ not modified
+change: removed the Vercel deploy-tier gate (server + client) on the Login
+  page's Quick Login cards; Main Account and Subaccount Quick Login are now
+  available on every environment, including hosted Preview/Production
+security_boundary_preserved: yes — resolveQuickLoginUser (api/_lib/demoUsers.ts)
+  still only maps 2 fixed scopes to 2 fixed demo users; no arbitrary
+  user/account selection; no credentials in the frontend; same signed
+  ggx_session flow as manual login
+files_changed: api/auth/quick-login.ts, src/app/pages/Login.tsx,
+  tests/api-auth-quick-login.test.mjs, tests/login-quick-login.test.mjs,
+  docs/session_state.md, docs/migration/ggx-corporate-heyq-live-ticketing.md
+validated: npm run typecheck clean; focused suite 14/14 green
+  (tests/api-auth-quick-login.test.mjs + tests/login-quick-login.test.mjs);
+  Codex review — no implementation issues found
+committed: yes
+pushed: yes — origin/master
+commit: HEAD of origin/master at push time (see `git log -1 origin/master`
+  for the exact hash)
+known_risk: hosted app can mint a signed session for either seeded demo
+  account with no password; acceptable for stakeholder-testing purposes only,
+  revisit before real customer data is reachable from these accounts
+next_step: none required to ship this change; optional follow-up is a
+  time-boxed or referer-scoped guard if the hosted app moves past
+  stakeholder testing
+```
