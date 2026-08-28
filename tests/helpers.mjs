@@ -193,7 +193,9 @@ export async function addHeyQApiStubScript(page, tickets, categories = CONCERN_C
         try { body = init?.body ? JSON.parse(init.body) : {}; } catch { body = {}; }
         const linkedTransactions = body.linkedTransactions;
         const now = new Date().toISOString();
-        const category = categories.find((c) => c.id === body.categoryId);
+        const category = categories.find(
+          (c) => c.id === body.categoryId || c.subcategories?.some((s) => s.id === body.categoryId),
+        );
         return json({
           id: 'tkt-created-1', reference: 'HQ-2026-9001', subject: body.subject,
           concernType: body.concernType, issueType: category?.name ?? 'Reported issue', status: 'open',

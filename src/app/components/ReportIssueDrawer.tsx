@@ -4,12 +4,25 @@ import {
   IconX, IconHeadset, IconSend, IconCircleCheck, IconAlertTriangle, IconLoader2,
 } from '@tabler/icons-react';
 import { Button } from './ui/Button';
-import { Select } from './ui/Select';
+import { ConcernCategoryPicker } from './ui/ConcernCategoryPicker';
 import { TransactionMultiSelect } from './TransactionMultiSelect';
 import {
   submitOrderReport, listConcernCategories,
   type CustomerTicket, type ConcernCategory, type AuthorizedTransactionOption,
 } from '../services/ticketsService';
+
+function isCategoryOrSubcategoryPresent(categories: ConcernCategory[], id: string): boolean {
+  return categories.some((c) => c.id === id || (c.subcategories && c.subcategories.some((s) => s.id === id)));
+}
+
+function getInitialCategoryId(categories: ConcernCategory[]): string {
+  if (categories.length === 0) return '';
+  const first = categories[0];
+  if (first.subcategories && first.subcategories.length > 0) {
+    return first.subcategories[0].id;
+  }
+  return first.id;
+}
 
 /**
  * The live category selector's load state. `empty`/`error` are distinct: zero
@@ -84,7 +97,7 @@ export function ReportIssueDrawer({ open, onClose, preselected, onSubmitted }: R
       return;
     }
     setCategoriesPhase({ kind: 'ready', categories: res.data });
-    setCategoryId((prev) => (prev && res.data.some((c) => c.id === prev) ? prev : res.data[0].id));
+    setCategoryId((prev) => (prev && isCategoryOrSubcategoryPresent(res.data, prev) ? prev : getInitialCategoryId(res.data)));
   };
 
   // Reset to a clean form each time the drawer opens. Preselection seeds both the
@@ -138,7 +151,7 @@ export function ReportIssueDrawer({ open, onClose, preselected, onSubmitted }: R
       return;
     }
     setCategoriesPhase({ kind: 'ready', categories: fresh.data });
-    if (!fresh.data.some((c) => c.id === categoryId)) {
+    if (!isCategoryOrSubcategoryPresent(fresh.data, categoryId)) {
       setCategoryId('');
       setCategoryStale(true);
       setPhase({ kind: 'form' });
@@ -238,17 +251,13 @@ export function ReportIssueDrawer({ open, onClose, preselected, onSubmitted }: R
                 )}
                 {categoriesPhase.kind === 'ready' && (
                   <>
-                    <Select
+                    <ConcernCategoryPicker
                       id="report-category"
+                      categories={categoriesPhase.categories}
                       value={categoryId}
-                      onChange={(e) => { setCategoryId(e.target.value); setCategoryStale(false); }}
+                      onChange={(val) => { setCategoryId(val); setCategoryStale(false); }}
                       disabled={submitting}
-                    >
-                      {categoryId === '' && <option value="" disabled>Select a category…</option>}
-                      {categoriesPhase.categories.map((c) => (
-                        <option key={c.id} value={c.id}>{c.name}</option>
-                      ))}
-                    </Select>
+                    />
                     {categoryStale && (
                       <p className="mt-1.5 text-xs text-red-600">
                         Your selected category is no longer available. Please choose again.

@@ -500,6 +500,23 @@ describe('submitting an order report (create via the customer API)', () => {
     assert.equal(body.concernType, undefined, 'no locally-invented legacy label for an unmapped category');
   });
 
+  it('sends the canonical subcategory ID unchanged when a subcategory is selected', async () => {
+    const { result, calls } = await withStub(
+      (svc) => svc.submitOrderReport({
+        externalOrderIds: ['GGX-2026-90008'],
+        categoryId: 'sub-del-late',
+        subject: 'Late delivery',
+        description: 'Package missed SLA.',
+      }),
+      { response: CREATED },
+    );
+    assert.equal(result.status, 'ok');
+    const posts = creates(calls);
+    assert.equal(posts.length, 1);
+    const body = JSON.parse(posts[0].body);
+    assert.equal(body.categoryId, 'sub-del-late', 'canonical subcategory ID must be sent unchanged');
+  });
+
   it('creates ONE ticket linking ALL selected transactions (not one per transaction)', async () => {
     const { result, calls } = await withStub(
       (svc) => svc.submitOrderReport({

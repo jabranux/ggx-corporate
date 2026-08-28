@@ -237,7 +237,20 @@ const CATEGORY_ID_TO_CONCERN_TYPE: Record<string, string> = {
   'cat-payment': 'payment_issue',
   'cat-general': 'general_inquiry',
   'cat-account': 'account_concern',
+  // Subcategory ID mappings
+  'sub-gen-info': 'general_inquiry',
+  'sub-gen-account': 'account_concern',
+  'sub-del-late': 'delivery_delay',
+  'sub-del-delay': 'delivery_delay',
+  'sub-del-failed': 'failed_delivery',
+  'sub-del-damage': 'damaged_parcel',
+  'sub-cod-remit': 'cod_concern',
 };
+
+function getConcernTypeHint(categoryId?: string): string | undefined {
+  if (!categoryId || typeof categoryId !== 'string') return undefined;
+  return CATEGORY_ID_TO_CONCERN_TYPE[categoryId];
+}
 
 function toSnapshot(s: HeyQApiSnapshot): HeyQOrderSnapshot {
   const mapped = SHIPMENT_FROM_HEYQ[s.shipmentStatus] ?? { key: s.shipmentStatus, label: s.shipmentStatus };
@@ -633,7 +646,7 @@ export async function apiCreateTicket(
     // Best-effort legacy label hint only — see CATEGORY_ID_TO_CONCERN_TYPE's docblock.
     // Omitted (not defaulted) when the category has no obvious legacy equivalent, so
     // Bridge applies its own generic label rather than this adapter guessing one.
-    concernType: CATEGORY_ID_TO_CONCERN_TYPE[input.categoryId],
+    concernType: getConcernTypeHint(input.categoryId),
     subject: input.subject,
     description: input.description,
     trackingNumber,

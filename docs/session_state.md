@@ -3,6 +3,24 @@
 > Lightweight resume/checkpoint file. Detailed June 2026 history was archived to
 > `docs/archive/session_log_2026-06.md`.
 
+## Most Recent Work — Hierarchical Concern Category Picker (2026-08-29)
+
+Completed the hierarchical Concern Category picker in GGX Corporate (`ReportIssueDrawer.tsx` / `ConcernCategoryPicker.tsx`).
+Full write-up: `docs/migration/ggx-corporate-live-concern-categories.md` §15.
+
+- **Component**: `src/app/components/ui/ConcernCategoryPicker.tsx`
+  - **Desktop**: Integrated 2-column layout (parent categories on left, subcategories of hovered/selected parent on right) within popover box.
+  - **Mobile (< 640px)**: Inline drill-in navigation view with a top `< Back to categories` button.
+  - **Selected Label**: Formatted as `"Parent Category > Subcategory"` when a subcategory is selected, or `"Parent Category"` for top-level leaves.
+- **BFF / Validation**:
+  - `api/_lib/bridge.ts` (`verifyLiveCategoryId`): Validates subcategory IDs alongside parent category IDs against live taxonomy.
+  - `src/app/services/heyqCustomerApi.ts`: `getConcernTypeHint` handles missing/empty category IDs safely.
+- **Validation**:
+  - `npm run typecheck`: clean.
+  - `npm run build`: clean.
+  - `npm test`: **169/169** passing across 52 test suites.
+  - Codex audit reviewed and cleared.
+
 ## Most Recent Work — hosted Quick Login intentionally re-enabled for stakeholder testing (2026-08-28)
 
 Reverses §21's deploy-tier gate on the Login page's Quick Login cards

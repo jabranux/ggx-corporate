@@ -390,3 +390,27 @@ previously (§3) is unmodified.
 `tests/api-support-categories.test.mjs` (new), `package.json` (new `esbuild`
 devDependency + `test` script entry), `package-lock.json`,
 `docs/migration/ggx-corporate-live-concern-categories.md` (this file).
+
+## 15. Hierarchical Concern Category Picker (2026-08-29)
+
+Replaced the flat `<Select>` category dropdown in `ReportIssueDrawer` with a hierarchical picker component (`ConcernCategoryPicker.tsx`) that renders parent categories and their subcategories.
+
+- **Component**: `src/app/components/ui/ConcernCategoryPicker.tsx`
+  - **Desktop**: Renders an integrated 2-column layout (parent categories on the left, subcategories of the hovered/selected category on the right) within the popover box, avoiding horizontal scrollbars or backdrop overlay clipping.
+  - **Mobile (< 640px)**: Inline drill-in view with a top `< Back to categories` navigation control.
+  - **Selection Label**: Formatted as `"Parent Category > Subcategory"` when a subcategory is selected, or `"Category Name"` when a top-level category without subcategories is selected.
+  - **Accessibility**: Full keyboard / focus management, `role="listbox"` & `role="option"`, `aria-expanded` and `aria-haspopup`, and Escape key to close.
+- **BFF / Adapter Updates**:
+  - `api/_lib/bridge.ts` (`verifyLiveCategoryId`): Extended live category validation to check subcategory IDs (`c.subcategories.some(s => s.id === categoryId)`) alongside parent IDs.
+  - `src/app/services/heyqCustomerApi.ts`: Updated `getConcernTypeHint` to safely look up `CATEGORY_ID_TO_CONCERN_TYPE` without throwing on missing/empty category IDs.
+  - `src/app/components/ReportIssueDrawer.tsx`: Replaced `<Select>` with `ConcernCategoryPicker`. Updated category presence checks (`isCategoryOrSubcategoryPresent`) and default selection (`getInitialCategoryId`).
+- **Tests**:
+  - `tests/hierarchical-category-picker.test.mjs` (new): 3 focused end-to-end tests for desktop flyout, subcategory selection, canonical ID submission, formatted hierarchy label, and mobile drill-in / back navigation.
+  - `tests/heyq-adapter.test.mjs`: Added subcategory canonical ID creation assertion.
+  - `tests/helpers.mjs`: Updated category stub helper to look up subcategories as well.
+- **Validation**:
+  - `npm run typecheck`: clean.
+  - `npm run build`: clean.
+  - `npm test`: **169/169** passing across 52 test suites.
+  - Visual browser verification via Playwright screenshot script: verified desktop flyout and mobile drill-in rendering.
+

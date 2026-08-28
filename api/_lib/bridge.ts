@@ -274,7 +274,14 @@ export async function verifyLiveCategoryId(
   }
   if (!Array.isArray(categories)) return 'unavailable';
   const isLive = categories.some(
-    (c) => c && typeof c === 'object' && (c as { id?: unknown }).id === categoryId,
+    (c) =>
+      c &&
+      typeof c === 'object' &&
+      ((c as { id?: unknown }).id === categoryId ||
+        (Array.isArray((c as { subcategories?: unknown }).subcategories) &&
+          (c as { subcategories: Array<{ id?: unknown }> }).subcategories.some(
+            (s) => s && typeof s === 'object' && s.id === categoryId,
+          ))),
   );
   return isLive ? 'ok' : 'invalid';
 }
