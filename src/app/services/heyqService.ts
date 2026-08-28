@@ -293,17 +293,50 @@ export function isTerminalTicketStatus(status: HeyQTicketStatus): boolean {
 // ── Concern Categories (live, for the report drawer's selector) ──────────────
 
 /**
- * The live, active Concern Category taxonomy for the report drawer's selector,
- * fetched fresh through the Corporate BFF on every call (no local caching —
- * matches Bridge's own "no caching anywhere" contract). Gated the same way as
- * every other read here: an unauthenticated caller gets `forbidden` without a
- * network call, a UX shortcut rather than the authorization boundary itself
- * (the BFF's own session check is that boundary).
+ * Short-TTL cache for the report drawer's category list — network-request
+ * audit: the drawer re-fetched on every open, so reopening it repeatedly in
+ * one session cost a fresh round trip every time for taxonomy data that
+ * rarely changes. `Cache-Control: no-store` stays on the underlying fetch
+ * (heyqCustomerApi.ts) — that guards the HTTP layer itself (the browser's
+ * own cache silently serving a stale 200), a different concern from this
+ * explicit, short-lived, app-level cache sitting in front of it.
  */
-export async function listConcernCategories(): Promise<HeyQResult<ConcernCategory[]>> {
+const CATEGORIES_CACHE_TTL_MS = 60_000;
+let categoriesCache: { at: number; result: Promise<HeyQResult<ConcernCategory[]>> } | undefined;
+
+export function invalidateConcernCategoriesCache(): void {
+  categoriesCache = undefined;
+}
+
+/**
+ * The live, active Concern Category taxonomy for the report drawer's
+ * selector. Cached for `CATEGORIES_CACHE_TTL_MS` by default — pass
+ * `forceFresh: true` to bypass the cache and hit Bridge directly, which the
+ * ticket-creation pre-submit re-verification uses: its whole purpose is
+ * catching a category deactivated in the seconds since the drawer opened,
+ * so it must never read a cached answer. Gated the same way as every other
+ * read here: an unauthenticated caller gets `forbidden` without a network
+ * call, a UX shortcut rather than the authorization boundary itself (the
+ * BFF's own session check is that boundary).
+ */
+export async function listConcernCategories(options: { forceFresh?: boolean } = {}): Promise<HeyQResult<ConcernCategory[]>> {
   const session = await getSessionContext();
   if (!session.isAuthenticated) return { status: 'forbidden' };
-  return apiListConcernCategories();
+
+  if (options.forceFresh) invalidateConcernCategoriesCache();
+  const now = Date.now();
+  if (!categoriesCache || now - categoriesCache.at >= CATEGORIES_CACHE_TTL_MS) {
+    const pending = apiListConcernCategories();
+    categoriesCache = { at: now, result: pending };
+    const result = await pending;
+    // A failed fetch (forbidden/not_found/unavailable) must not squat on the
+    // cache for the full TTL — the next call should retry, not replay the
+    // same failure. An 'ok' result (including a legitimate empty list) is
+    // exactly what's meant to be cached, so it's left in place.
+    if (result.status !== 'ok' && categoriesCache?.result === pending) categoriesCache = undefined;
+    return result;
+  }
+  return categoriesCache.result;
 }
 
 // ── Identity ─────────────────────────────────────────────────────────────────

@@ -66,10 +66,11 @@ export function ReportIssueDrawer({ open, onClose, preselected, onSubmitted }: R
   const [phase, setPhase] = useState<Phase>({ kind: 'form' });
 
   /**
-   * Load the live category taxonomy fresh (no local caching). Keeps whatever
-   * category the caller already has selected if it's still present in the
-   * new list; otherwise leaves it unselected — never silently substitutes
-   * another category or a fabricated default.
+   * Load the live category taxonomy — short-TTL cached (heyqService.ts), so
+   * reopening the drawer repeatedly in one session doesn't re-fetch every
+   * time. Keeps whatever category the caller already has selected if it's
+   * still present in the new list; otherwise leaves it unselected — never
+   * silently substitutes another category or a fabricated default.
    */
   const loadCategories = async () => {
     setCategoriesPhase({ kind: 'loading' });
@@ -121,9 +122,11 @@ export function ReportIssueDrawer({ open, onClose, preselected, onSubmitted }: R
 
     // Re-verify the selection against a FRESH fetch right before submit — the
     // category may have been deactivated/removed while the drawer sat open.
-    // Never send a possibly-stale id; fail safely and let the user reselect
-    // without losing subject/description/linked transactions.
-    const fresh = await listConcernCategories();
+    // forceFresh bypasses loadCategories' cache: this check's whole purpose
+    // is catching a JUST-NOW deactivation, so it must never read a cached
+    // answer. Never send a possibly-stale id; fail safely and let the user
+    // reselect without losing subject/description/linked transactions.
+    const fresh = await listConcernCategories({ forceFresh: true });
     if (fresh.status !== 'ok') {
       setCategoriesPhase({ kind: 'error' });
       setPhase({ kind: 'form' });

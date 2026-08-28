@@ -558,7 +558,7 @@ describe('live Concern Categories (report drawer selector)', () => {
   ];
 
   it('fetches from the same-origin Corporate proxy, never Bridge/Railway directly', async () => {
-    const { result, calls } = await withStub((svc) => svc.listConcernCategories(), { response: CATEGORIES });
+    const { result, calls } = await withStub((svc) => { svc.invalidateConcernCategoriesCache(); return svc.listConcernCategories(); }, { response: CATEGORIES });
     assert.equal(result.status, 'ok');
     const reads = calls.filter((c) => c.method === 'GET' && c.url.includes('/api/support/categories'));
     assert.equal(reads.length, 1);
@@ -567,14 +567,14 @@ describe('live Concern Categories (report drawer selector)', () => {
   });
 
   it('requests the live list with cache: "no-store" — no browser/HTTP cache may serve a stale list', async () => {
-    const { calls } = await withStub((svc) => svc.listConcernCategories(), { response: CATEGORIES });
+    const { calls } = await withStub((svc) => { svc.invalidateConcernCategoriesCache(); return svc.listConcernCategories(); }, { response: CATEGORIES });
     const reads = calls.filter((c) => c.method === 'GET' && c.url.includes('/api/support/categories'));
     assert.equal(reads.length, 1);
     assert.equal(reads[0].cache, 'no-store');
   });
 
   it('carries requiresTracking/requiresOrderRef and subcategories through untouched', async () => {
-    const { result } = await withStub((svc) => svc.listConcernCategories(), { response: CATEGORIES });
+    const { result } = await withStub((svc) => { svc.invalidateConcernCategoriesCache(); return svc.listConcernCategories(); }, { response: CATEGORIES });
     const delivery = result.data.find((c) => c.id === 'cat-delivery');
     assert.equal(delivery.requiresTracking, true);
     const general = result.data.find((c) => c.id === 'cat-general');
@@ -582,7 +582,7 @@ describe('live Concern Categories (report drawer selector)', () => {
   });
 
   it('never exposes a team/routing field even if the response carried one', async () => {
-    const { result } = await withStub((svc) => svc.listConcernCategories(), {
+    const { result } = await withStub((svc) => { svc.invalidateConcernCategoriesCache(); return svc.listConcernCategories(); }, {
       response: [{ ...CATEGORIES[0], defaultTeamId: 'team-cs', internalNotes: 'x' }],
     });
     const blob = JSON.stringify(result.data).toLowerCase();
@@ -591,27 +591,68 @@ describe('live Concern Categories (report drawer selector)', () => {
   });
 
   it('treats zero eligible categories as a distinct, valid "empty" outcome — not a failure', async () => {
-    const { result } = await withStub((svc) => svc.listConcernCategories(), { response: [] });
+    const { result } = await withStub((svc) => { svc.invalidateConcernCategoriesCache(); return svc.listConcernCategories(); }, { response: [] });
     assert.equal(result.status, 'ok');
     assert.deepEqual(result.data, []);
   });
 
   it('maps a fetch failure to unavailable — never a fabricated fallback category list', async () => {
-    const { result } = await withStub((svc) => svc.listConcernCategories(), { response: { error: 'down' }, status: 503 });
+    const { result } = await withStub((svc) => { svc.invalidateConcernCategoriesCache(); return svc.listConcernCategories(); }, { response: { error: 'down' }, status: 503 });
     assert.equal(result.status, 'unavailable');
   });
 
   it('maps a network error to unavailable', async () => {
-    const { result } = await withStub((svc) => svc.listConcernCategories(), { reject: true });
+    const { result } = await withStub((svc) => { svc.invalidateConcernCategoriesCache(); return svc.listConcernCategories(); }, { reject: true });
     assert.equal(result.status, 'unavailable');
   });
 
   it('drops a malformed entry (missing id/name) rather than passing it through', async () => {
-    const { result } = await withStub((svc) => svc.listConcernCategories(), {
+    const { result } = await withStub((svc) => { svc.invalidateConcernCategoriesCache(); return svc.listConcernCategories(); }, {
       response: [...CATEGORIES, { slug: 'broken', subcategories: [] }],
     });
     assert.equal(result.status, 'ok');
     assert.equal(result.data.length, 2, 'the malformed entry is filtered out, not defaulted or passed through');
+  });
+
+  // Network-request audit: the report drawer re-fetched categories on every
+  // open, then again right before submit — up to 3 Bridge round trips per
+  // ticket-creation flow for taxonomy data that rarely changes. These pin
+  // the short-TTL cache added to fix that, and the pre-submit re-verification
+  // that must stay genuinely uncached.
+  it('serves a second call from cache — only one network request for two reads', async () => {
+    const { calls } = await withStub(
+      (svc) => {
+        svc.invalidateConcernCategoriesCache();
+        return svc.listConcernCategories().then(() => svc.listConcernCategories());
+      },
+      { response: CATEGORIES },
+    );
+    const reads = calls.filter((c) => c.method === 'GET' && c.url.includes('/api/support/categories'));
+    assert.equal(reads.length, 1, 'the second call must be served from cache, not a new request');
+  });
+
+  it('forceFresh bypasses the cache — always a new network request', async () => {
+    const { calls } = await withStub(
+      (svc) => {
+        svc.invalidateConcernCategoriesCache();
+        return svc.listConcernCategories().then(() => svc.listConcernCategories({ forceFresh: true }));
+      },
+      { response: CATEGORIES },
+    );
+    const reads = calls.filter((c) => c.method === 'GET' && c.url.includes('/api/support/categories'));
+    assert.equal(reads.length, 2, 'forceFresh must never read the cached answer');
+  });
+
+  it('does not cache a failed fetch — the next call retries instead of replaying the failure', async () => {
+    const { calls } = await withStub(
+      (svc) => {
+        svc.invalidateConcernCategoriesCache();
+        return svc.listConcernCategories().then(() => svc.listConcernCategories());
+      },
+      { response: { error: 'down' }, status: 503 },
+    );
+    const reads = calls.filter((c) => c.method === 'GET' && c.url.includes('/api/support/categories'));
+    assert.equal(reads.length, 2, 'a failed result must not squat on the cache');
   });
 });
 
