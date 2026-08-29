@@ -43,3 +43,9 @@ Three rounds, `codex exec -s read-only -C <Projects dir>` against both repos' un
 - **Round 3** (re-audit of the one-shot timer specifically): **PASS, no new findings** — confirmed the timer fires once, cleans up correctly on unmount/id-change, doesn't leak stale closures, and doesn't reintroduce a polling loop; confirmed existing "no continuous poll" and the new closure-test expectations remain compatible.
 
 **Final verdict: PASS.**
+
+## Deployment
+
+Commit `a0aa9c0f80108aa357c0c0cd65f6d89bf4549a59`, pushed to `jamesabran/ggx-corporate` master via the `james` remote (this repo's `origin` points to a different GitHub account). Auto-deployed to production via the existing Vercel GitHub integration (project `ggx-corporate`, `ggx-corporate.vercel.app`) — confirmed via the Vercel API that the latest production deployment's `githubCommitSha` matches this commit and its state is `READY`; no separate `vercel deploy` step was needed or invented.
+
+See `HeyQ/docs/handoffs/agents-visibility-and-24h-closure.md`'s "Deployment" section for the full hosted smoke-test results (both repos were validated together against the real hosted QuadX Bridge project and the real GGX Quick Login staff accounts). Items specific to this repo's own UI (ticket beyond the 24h window is read-only; no repeated polling on a closed ticket) were validated via this repo's own Playwright suite (real Chromium against the real dev server running the identical shipped bundle) rather than re-tested against a live hosted session, since wiring a disposable hosted ticket to a real Quick Login demo identity adds meaningful complexity for no additional coverage beyond what those tests already exercise.
