@@ -26,6 +26,7 @@ import {
   TICKET_PRIORITY_META,
   TICKET_STATUS_OPTIONS,
   isTerminalTicketStatus,
+  isPermanentlyClosed,
   type CustomerTicket,
   type CustomerTicketMessage,
   type HeyQAttachment,
@@ -48,6 +49,7 @@ export {
   TICKET_PRIORITY_META,
   TICKET_STATUS_OPTIONS,
   isTerminalTicketStatus,
+  isPermanentlyClosed,
 };
 
 // Re-exported so pages have one import site for the HeyQ handoff + report actions.

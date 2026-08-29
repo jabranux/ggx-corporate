@@ -115,6 +115,11 @@ export interface PendingMessage {
   body: string;
   createdAt: string;
   status: 'sending' | 'failed';
+  /** Set when a 'failed' send was Bridge's deterministic "ticket permanently
+   * closed" rejection (HeyQResult status 'closed'), not a transient failure —
+   * the UI shows a specific message and skips Retry, since retrying an
+   * identical request will always fail identically. */
+  closed?: boolean;
 }
 
 export interface TicketConversation {
@@ -297,6 +302,41 @@ export function useTicketConversation(id: string, initialTicket: CustomerTicket)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [id]);
 
+  // ── One-shot reopen-window-expiry refetch (fixed after Codex review) ───────
+  // A resolved-and-still-reopenable ticket gets NO recurring poll (see the
+  // pause condition above) — by design, a reply is what reopens it, not a
+  // timer. But that means nothing else notices the exact moment its 24-hour
+  // reopen window elapses while the tab just sits open: `isPermanentlyClosed`
+  // (heyqService.ts) would keep reading the composer as available, off this
+  // device's own clock, until SOME refetch happens (a reply attempt's
+  // resync, a visibility-restore, or a manual reload) — a real but low-
+  // severity delay, not a false positive (a reply is still safely rejected
+  // and resynced either way). Rather than reintroducing a recurring poll,
+  // this schedules exactly ONE refetch timed to land right at that boundary,
+  // closing the gap with no new interval and no extra requests before or
+  // after it fires.
+  useEffect(() => {
+    if (ticket.status !== 'resolved' || !ticket.canReopen || !ticket.resolvedAt) return;
+    const resolvedAtMs = new Date(ticket.resolvedAt).getTime();
+    if (Number.isNaN(resolvedAtMs)) return;
+    const msUntilExpiry = resolvedAtMs + 24 * 60 * 60 * 1000 - Date.now();
+    // setTimeout's delay is a 32-bit int (~24.8 days) — a fresh resolution's
+    // deadline is always ~24h out, comfortably under that, but this caps it
+    // defensively rather than assume the call site never changes.
+    const delay = Math.max(0, Math.min(msUntilExpiry, 2_147_000_000));
+    let cancelled = false;
+    const timer = setTimeout(() => {
+      if (cancelled) return;
+      void getTicketById(id).then((res) => {
+        if (!cancelled && res.status === 'ok') mergeTicket(res.data);
+      });
+    }, delay);
+    return () => {
+      cancelled = true;
+      clearTimeout(timer);
+    };
+  }, [id, ticket.status, ticket.canReopen, ticket.resolvedAt, mergeTicket]);
+
   // ── Typing presence (own path — see the module docblock) ───────────────────
   // Entirely separate from the ticket-detail polling effect above: its own
   // Realtime subscription for the remote (agent) signal, its own
@@ -434,7 +474,16 @@ export function useTicketConversation(id: string, initialTicket: CustomerTicket)
         restartTypingRealtimeRef.current(res.data.status); // reopen the typing subscription if a reply just reopened a terminal ticket
         setPending((prev) => prev.filter((p) => p.tempId !== tempId));
       } else {
-        setPending((prev) => prev.map((p) => (p.tempId === tempId ? { ...p, status: 'failed' } : p)));
+        setPending((prev) => prev.map((p) => (p.tempId === tempId ? { ...p, status: 'failed', closed: res.status === 'closed' } : p)));
+        if (res.status === 'closed') {
+          // The server is authoritative and just said so: this client's local
+          // ticket data was stale about the reopen window. Resync immediately
+          // rather than waiting for the next poll (which may not even be
+          // scheduled — a terminal ticket's cadence is paused) so the UI
+          // reflects the closed state right away.
+          const fresh = await getTicketById(id);
+          if (fresh.status === 'ok') mergeTicket(fresh.data);
+        }
       }
     },
     [id, mergeTicket],

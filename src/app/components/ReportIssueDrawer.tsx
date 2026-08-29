@@ -55,10 +55,14 @@ type Phase =
   | { kind: 'error'; message: string }
   | { kind: 'success'; ticket: CustomerTicket };
 
-const FAILURE_MESSAGE: Record<'forbidden' | 'not_found' | 'unavailable', string> = {
+const FAILURE_MESSAGE: Record<'forbidden' | 'not_found' | 'unavailable' | 'closed', string> = {
   forbidden: 'One of the selected transactions isn’t available for support on your account. Remove it and try again.',
   not_found: 'We couldn’t find one of the selected transactions to attach it. Please try again.',
   unavailable: 'GGX Support is temporarily unreachable. Your details are kept — try again in a moment.',
+  // Not a real outcome of ticket CREATION (the 24h reopen-window rejection
+  // only applies to replying on an existing ticket) — present only because
+  // this drawer's result type is the shared HeyQResult union. Kept generic.
+  closed: 'This request could not be completed. Please try again.',
 };
 
 /**

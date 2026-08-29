@@ -159,6 +159,7 @@ interface HeyQApiCustomerTicket {
   updatedAt: string;
   resolvedAt?: string;
   reopenedAt?: string;
+  closedAt?: string;
   linkedOrder?: HeyQApiLinkedOrder;
   linkedTransactions?: HeyQApiLinkedOrder[];
   messages?: HeyQApiMessage[];
@@ -344,6 +345,7 @@ function toCustomerTicket(t: HeyQApiCustomerTicket): CustomerTicket {
     updatedAt: t.updatedAt,
     resolvedAt: t.resolvedAt,
     reopenedAt: t.reopenedAt,
+    closedAt: t.closedAt,
     linkedOrder: linkedTransactions?.[0],
     linkedTransactions,
     messages: (t.messages ?? []).map(toMessage),
@@ -383,9 +385,13 @@ function notifySessionExpired(): void {
 }
 
 /** Map an HTTP status to the adapter's production-shaped result union. */
-function resultForStatus(status: number): 'forbidden' | 'not_found' | 'unavailable' {
+function resultForStatus(status: number): 'forbidden' | 'not_found' | 'unavailable' | 'closed' {
   if (status === 401 || status === 403) return 'forbidden'; // 401: no/invalid session
   if (status === 404) return 'not_found';
+  // 409: QuadX Bridge's deterministic "ticket permanently closed" rejection
+  // (add_customer_message_bridge's QXCLS errcode) — unused for any other
+  // purpose in this proxy, so the mapping is unambiguous.
+  if (status === 409) return 'closed';
   return 'unavailable'; // 5xx, 429, and anything else transient/unknown
 }
 
@@ -399,7 +405,7 @@ function resultForStatus(status: number): 'forbidden' | 'not_found' | 'unavailab
  * caller, leaving their existing (default) caching behavior unchanged.
  */
 async function getJson(base: string, path: string, cache?: RequestCache): Promise<
-  { ok: true; data: unknown } | { ok: false; result: 'forbidden' | 'not_found' | 'unavailable' }
+  { ok: true; data: unknown } | { ok: false; result: 'forbidden' | 'not_found' | 'unavailable' | 'closed' }
 > {
   try {
     const res = await fetch(`${base}${path}`, {
@@ -420,7 +426,7 @@ async function getJson(base: string, path: string, cache?: RequestCache): Promis
 /** POST JSON, no response body needed. `headers` carries idempotency headers
  * (Idempotency-Key / X-Bridge-Message-Id) through to the proxy unchanged. */
 async function post(base: string, path: string, body?: unknown, headers?: Record<string, string>): Promise<
-  { ok: true } | { ok: false; result: 'forbidden' | 'not_found' | 'unavailable' }
+  { ok: true } | { ok: false; result: 'forbidden' | 'not_found' | 'unavailable' | 'closed' }
 > {
   try {
     const res = await fetch(`${base}${path}`, {
@@ -440,7 +446,7 @@ async function post(base: string, path: string, body?: unknown, headers?: Record
 
 /** POST JSON, response body returned as the created/updated resource. */
 async function postJson(base: string, path: string, body: unknown, headers?: Record<string, string>): Promise<
-  { ok: true; data: unknown } | { ok: false; result: 'forbidden' | 'not_found' | 'unavailable' }
+  { ok: true; data: unknown } | { ok: false; result: 'forbidden' | 'not_found' | 'unavailable' | 'closed' }
 > {
   try {
     const res = await fetch(`${base}${path}`, {

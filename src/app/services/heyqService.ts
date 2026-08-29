@@ -184,7 +184,13 @@ export type HeyQResult<T> =
   | { status: 'ok'; data: T }
   | { status: 'forbidden' }
   | { status: 'not_found' }
-  | { status: 'unavailable' };
+  | { status: 'unavailable' }
+  /** The ticket's 24-hour reopen window has elapsed (or it is already
+   * `closed`) — Bridge's deterministic rejection (HTTP 409, see
+   * `resultForStatus`) for a reply attempt, distinct from a transient
+   * failure so the UI can show a specific "this ticket is closed" message
+   * instead of a generic retry prompt. */
+  | { status: 'closed' };
 
 // ── Customer-facing view models ──────────────────────────────────────────────
 
@@ -230,6 +236,10 @@ export interface CustomerTicket {
   updatedAt: string;
   resolvedAt?: string;
   reopenedAt?: string;
+  /** Stamped once the 24-hour reopen window elapsed and the ticket was
+   * permanently closed server-side. Absent while open, resolved-and-still-
+   * reopenable, or never resolved. See `isPermanentlyClosed`. */
+  closedAt?: string;
   /** Primary/first linked order — legacy mirror of `linkedTransactions[0]`. */
   linkedOrder?: HeyQLinkedOrder;
   /**
@@ -288,6 +298,44 @@ const TERMINAL_TICKET_STATUSES: ReadonlySet<HeyQTicketStatus> = new Set(['resolv
 
 export function isTerminalTicketStatus(status: HeyQTicketStatus): boolean {
   return TERMINAL_TICKET_STATUSES.has(status);
+}
+
+/** The 24-hour reopen window (QuadX Bridge's ticket_reply_window_closed —
+ * see 20260902090000_ticket_permanent_closure.sql in that repo). Mirrored
+ * here only to compute the client's OWN best-effort display state; Bridge
+ * is the sole authority (see `isPermanentlyClosed`'s docblock). */
+const REOPEN_WINDOW_MS = 24 * 60 * 60 * 1000;
+
+/**
+ * True once a ticket is (or, by this client's own clock, should already be)
+ * permanently closed to further conversation: `status === 'closed'`, or
+ * `resolved` with `resolvedAt` more than 24 hours old.
+ *
+ * This is a CLIENT-SIDE, best-effort read for immediate UI feedback (hiding
+ * the composer without waiting on the server-side closure cron, or a
+ * refetch) — it is NOT the authorization boundary. Bridge's
+ * `ticket_reply_window_closed` derives the same 24-hour rule from the same
+ * `resolvedAt` and enforces it server-side on every reply regardless of
+ * what this function (or a stale/modified client) computes; `submit()` in
+ * `useTicketConversation` resyncs from the server whenever a reply comes
+ * back rejected.
+ *
+ * `canReopen === true` (the server's own last word, computed from the same
+ * `resolvedAt` against ITS clock) is trusted to override a "closed" read
+ * from this device's clock alone (fixed after initial review: a customer's
+ * clock running even slightly ahead of the boundary would otherwise hide
+ * the composer for a ticket Bridge would still accept a reply on, with no
+ * server round trip to self-correct since a hidden composer can never be
+ * submitted). `canReopen === false`/absent is deliberately NOT treated as
+ * proof of closure on its own — many callers across this codebase populate
+ * it as an inert default unrelated to this feature — only an elapsed
+ * `resolvedAt` is.
+ */
+export function isPermanentlyClosed(ticket: Pick<CustomerTicket, 'status' | 'resolvedAt' | 'canReopen'>): boolean {
+  if (ticket.status === 'closed') return true;
+  if (ticket.status !== 'resolved' || ticket.canReopen || !ticket.resolvedAt) return false;
+  const resolvedAtMs = new Date(ticket.resolvedAt).getTime();
+  return !Number.isNaN(resolvedAtMs) && Date.now() - resolvedAtMs >= REOPEN_WINDOW_MS;
 }
 
 // ── Concern Categories (live, for the report drawer's selector) ──────────────

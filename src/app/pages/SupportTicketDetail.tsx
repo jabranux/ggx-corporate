@@ -17,7 +17,7 @@ import { Alert } from '../components/ui/Alert';
 // data comes from OMS.
 import {
   getTicketById, getLiveOrderStatus, getRequesterIdentity, buildAttachmentUrl,
-  TICKET_STATUS_META, TICKET_PRIORITY_META,
+  TICKET_STATUS_META, TICKET_PRIORITY_META, isPermanentlyClosed,
   type CustomerTicket, type CustomerTicketMessage, type HeyQAttachment,
   type HeyQRequesterIdentity,
 } from '../services/ticketsService';
@@ -27,6 +27,7 @@ import { formatTicketDate } from '../lib/utils';
 import { markTicketSeen } from '../lib/ticketReadState';
 import { useTicketConversation, type PendingMessage } from '../hooks/useTicketConversation';
 import type { RealtimeStatus } from '../services/heyqRealtimeClient';
+import { ReportIssueDrawer } from '../components/ReportIssueDrawer';
 
 type LoadState =
   | { kind: 'loading' }
@@ -110,6 +111,8 @@ function LiveTicketView({
   const [reply, setReply] = useState('');
   // The signed-in requester identity — needed to build authorized attachment URLs.
   const [who, setWho] = useState<HeyQRequesterIdentity | null>(null);
+  const [reportOpen, setReportOpen] = useState(false);
+  const navigate = useNavigate();
 
   // Mark the ticket seen (clears the unread dot on the list) on open and whenever
   // its latest activity advances while it's open. Read-state is customer-side only.
@@ -127,6 +130,11 @@ function LiveTicketView({
 
   const status = TICKET_STATUS_META[ticket.status];
   const priority = TICKET_PRIORITY_META[ticket.priority];
+  // Reads the server-computed `canReopen`/`status` (see isPermanentlyClosed's
+  // docblock) — QuadX Bridge is the actual authority and enforces the same
+  // 24h rule on every reply attempt regardless (see useTicketConversation's
+  // submit(), which resyncs from the server if a reply is ever rejected).
+  const permanentlyClosed = isPermanentlyClosed(ticket);
 
   const handleSend = async () => {
     if (!reply.trim() || sending) return;
@@ -159,7 +167,11 @@ function LiveTicketView({
         </div>
       </div>
 
-      {ticket.status === 'resolved' && (
+      {permanentlyClosed ? (
+        <Alert variant="warning" title="This ticket is closed">
+          This ticket is closed. Create a new ticket if you still need assistance.
+        </Alert>
+      ) : ticket.status === 'resolved' && (
         <Alert variant="success" title="This ticket has been resolved">
           If this isn’t sorted, replying below will bring it back to our support team.
         </Alert>
@@ -193,38 +205,51 @@ function LiveTicketView({
               {/* Agent typing indicator. */}
               {agentTyping && <TypingBubble />}
 
-              {/* Reply box. A reply to a resolved/closed ticket reopens it in HeyQ. */}
-              <div className="border-t border-gray-100 pt-4 space-y-3">
-                <label htmlFor="ticket-reply" className="block text-sm font-medium text-gray-700">
-                  Add a reply
-                </label>
-                <textarea
-                  id="ticket-reply"
-                  className="w-full h-24 px-3 py-2 rounded-lg border border-gray-300 text-sm focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent"
-                  placeholder="Type your message to the support team..."
-                  value={reply}
-                  onChange={(e) => handleReplyChange(e.target.value)}
-                  onBlur={() => convo.stopTyping()}
-                  disabled={sending}
-                />
-                <p className="text-[11px] text-gray-400">
-                  Attachments aren’t available in this demo integration yet.
-                </p>
-                {connection === 'reconnecting' && (
-                  <p className="text-[11px] text-amber-600 flex items-center gap-1.5">
-                    <IconWifi className="w-3.5 h-3.5" />
-                    Reconnecting… you can still send — it will go through on the next successful check.
+              {/* Reply box. A reply to a resolved ticket (within its 24h window)
+                  reopens it in HeyQ. Once permanently closed, the composer is
+                  replaced with a read-only notice and a new-ticket CTA. */}
+              {permanentlyClosed ? (
+                <div className="border-t border-gray-100 pt-4">
+                  <p className="text-sm text-gray-500 mb-3">
+                    This ticket is closed. Create a new ticket if you still need assistance.
                   </p>
-                )}
-                <div className="flex items-center justify-end gap-3">
-                  <Button disabled={!reply.trim() || sending} onClick={handleSend}>
-                    {sending
-                      ? <IconLoader2 className="w-4 h-4 mr-2 animate-spin" />
-                      : <IconSend className="w-4 h-4 mr-2" />}
-                    {sending ? 'Sending…' : 'Send Reply'}
+                  <Button variant="outline" onClick={() => setReportOpen(true)}>
+                    Create a new ticket
                   </Button>
                 </div>
-              </div>
+              ) : (
+                <div className="border-t border-gray-100 pt-4 space-y-3">
+                  <label htmlFor="ticket-reply" className="block text-sm font-medium text-gray-700">
+                    Add a reply
+                  </label>
+                  <textarea
+                    id="ticket-reply"
+                    className="w-full h-24 px-3 py-2 rounded-lg border border-gray-300 text-sm focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent"
+                    placeholder="Type your message to the support team..."
+                    value={reply}
+                    onChange={(e) => handleReplyChange(e.target.value)}
+                    onBlur={() => convo.stopTyping()}
+                    disabled={sending}
+                  />
+                  <p className="text-[11px] text-gray-400">
+                    Attachments aren’t available in this demo integration yet.
+                  </p>
+                  {connection === 'reconnecting' && (
+                    <p className="text-[11px] text-amber-600 flex items-center gap-1.5">
+                      <IconWifi className="w-3.5 h-3.5" />
+                      Reconnecting… you can still send — it will go through on the next successful check.
+                    </p>
+                  )}
+                  <div className="flex items-center justify-end gap-3">
+                    <Button disabled={!reply.trim() || sending} onClick={handleSend}>
+                      {sending
+                        ? <IconLoader2 className="w-4 h-4 mr-2 animate-spin" />
+                        : <IconSend className="w-4 h-4 mr-2" />}
+                      {sending ? 'Sending…' : 'Send Reply'}
+                    </Button>
+                  </div>
+                </div>
+              )}
             </CardContent>
           </Card>
         </div>
@@ -248,6 +273,12 @@ function LiveTicketView({
           {ticket.linkedOrder && <LinkedOrderCard ticket={ticket} />}
         </div>
       </div>
+
+      <ReportIssueDrawer
+        open={reportOpen}
+        onClose={() => setReportOpen(false)}
+        onSubmitted={(created) => { setReportOpen(false); navigate(`/dashboard/support-tickets/${created.id}`); }}
+      />
     </div>
   );
 }
@@ -295,10 +326,14 @@ function PendingBubble({ pending: p, onRetry, onDismiss }: { pending: PendingMes
         {failed ? (
           <p className="text-[11px] text-red-600 mt-1 flex items-center justify-end gap-2">
             <IconAlertTriangle className="w-3.5 h-3.5" />
-            Not sent.
-            <button type="button" onClick={onRetry} className="inline-flex items-center gap-1 font-medium text-red-700 hover:underline">
-              <IconReload className="w-3.5 h-3.5" /> Retry
-            </button>
+            {p.closed ? 'Not sent — this ticket is closed.' : 'Not sent.'}
+            {/* Retrying an identical request against a closed ticket would only
+                fail again the same way — offer Dismiss only. */}
+            {!p.closed && (
+              <button type="button" onClick={onRetry} className="inline-flex items-center gap-1 font-medium text-red-700 hover:underline">
+                <IconReload className="w-3.5 h-3.5" /> Retry
+              </button>
+            )}
             <button type="button" onClick={onDismiss} className="inline-flex items-center gap-1 text-gray-400 hover:text-gray-600">
               <IconX className="w-3.5 h-3.5" /> Dismiss
             </button>
