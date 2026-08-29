@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useNavigate, useParams, Link } from 'react-router';
 import { IconArrowLeft, IconStar, IconFileText, IconShare, IconMessage, IconPackage, IconPackageOff, IconUpload, IconArrowRight, IconReceiptRefund, IconX, IconCircleCheck, IconCheck, IconPhoto, IconExternalLink, IconBolt, IconMapPin, IconHeadset, IconBuildingStore, IconEdit } from '@tabler/icons-react';
 import { Card, CardContent, CardHeader, CardTitle } from '../components/ui/Card';
@@ -32,6 +32,9 @@ import {
 // ticket DIRECTLY to HeyQ's customer API with the order attached — the user stays
 // on this page and is never redirected to HeyQ's Contact Us form.
 import { ReportIssueDrawer } from '../components/ReportIssueDrawer';
+// Active-ticket lookup — one batched fetch (see getActiveTicketsByTrackingNumber's
+// docblock) so the two support CTAs on this page never issue their own requests.
+import { getActiveTicketsByTrackingNumber, TICKET_STATUS_META, type ActiveTicketLink } from '../services/ticketsService';
 import { useJourney } from '../contexts/JourneyContext';
 import { JOURNEY_P3_TRACKING_NUMBER } from '../data/journeyRegistry';
 import { buildJourneyEditFixtureTransaction, applyJourneyEditDraft } from '../data/journeyTransactionFixture';
@@ -68,6 +71,16 @@ export function TransactionDetails() {
   const [showCancelConfirm, setShowCancelConfirm] = useState(false);
   const [cancelled, setCancelled] = useState(false);
 
+  // Active support tickets already linked to this tracking number (empty until
+  // the batched fetch resolves — the report CTAs render their normal "no ticket
+  // yet" state in the meantime, then swap in place once this settles).
+  const [activeTickets, setActiveTickets] = useState<ActiveTicketLink[]>([]);
+  // Request-generation guard shared by the load effect below and the
+  // post-submit refresh — whichever active-tickets request was started LAST
+  // wins, so an in-flight mount-time lookup can never overwrite the result of
+  // a later submit-triggered refresh (or vice versa) if it resolves after it.
+  const activeTicketsRequestRef = useRef(0);
+
   useEffect(() => {
     if (isJourneyP3) {
       // Journey-local fixture, merged with any confirmed edit-drawer draft.
@@ -91,8 +104,49 @@ export function TransactionDetails() {
     return () => { cancelledLoad = true; };
   }, [id]);
 
+  // ONE batched fetch resolves active tickets for every tracking number the
+  // requester has; this page only reads its own entry out of it. Cleared
+  // immediately on an id change so a transaction never briefly renders the
+  // PREVIOUS transaction's active-ticket state while the new lookup is in flight.
+  useEffect(() => {
+    let cancelledLoad = false;
+    const myRequest = ++activeTicketsRequestRef.current;
+    setActiveTickets([]);
+    if (!id) return;
+    getActiveTicketsByTrackingNumber()
+      .then((map) => { if (!cancelledLoad && activeTicketsRequestRef.current === myRequest) setActiveTickets(map.get(id) ?? []); })
+      .catch(() => { if (!cancelledLoad && activeTicketsRequestRef.current === myRequest) setActiveTickets([]); });
+    return () => { cancelledLoad = true; };
+  }, [id]);
+
   /** Open the in-app report drawer for this order (no external navigation). */
   const openReport = () => setReportOpen(true);
+
+  /** Go to the existing active ticket (or the filtered list when there's more than one). */
+  const viewActiveTickets = () => {
+    if (activeTickets.length === 1) {
+      navigate(`/dashboard/support-tickets/${activeTickets[0].id}`);
+    } else if (transaction) {
+      navigate(`/dashboard/support-tickets?search=${encodeURIComponent(transaction.trackingNumber)}`);
+    }
+  };
+
+  /** After a new ticket is created from this page, re-derive this transaction's
+   * active tickets immediately — a user who stays on this page (closes the
+   * drawer via "Done" instead of "Open ticket") must see the new ticket right
+   * away, not the pre-submit state until some unrelated remount. Cache
+   * invalidation itself happens centrally in ReportIssueDrawer on every
+   * successful submit, not here — this just re-reads the now-fresh result.
+   * Shares the request-generation guard with the load effect above so a
+   * slow mount-time lookup that resolves AFTER this refresh can never
+   * overwrite it with the stale pre-submit state. */
+  const handleTicketSubmitted = () => {
+    const myRequest = ++activeTicketsRequestRef.current;
+    if (!id) return;
+    getActiveTicketsByTrackingNumber()
+      .then((map) => { if (activeTicketsRequestRef.current === myRequest) setActiveTickets(map.get(id) ?? []); })
+      .catch(() => {});
+  };
 
   // Loading state — brief async fetch from the service facade.
   if (transaction === undefined) {
@@ -285,9 +339,15 @@ export function TransactionDetails() {
                       <IconMapPin className="w-4 h-4 mr-2" />
                       Track live delivery
                     </Button>
-                    <Button variant="outline" className="flex-1" onClick={openReport}>
+                    <Button
+                      variant="outline"
+                      className="flex-1"
+                      onClick={activeTickets.length > 0 ? viewActiveTickets : openReport}
+                    >
                       <IconHeadset className="w-4 h-4 mr-2" />
-                      Contact support
+                      {activeTickets.length === 0
+                        ? 'Contact support'
+                        : activeTickets.length === 1 ? 'View Ticket' : 'View Tickets'}
                     </Button>
                     {cancelled ? (
                       <Button variant="ghost" className="flex-1 text-gray-400" disabled>
@@ -565,15 +625,53 @@ export function TransactionDetails() {
               <div className="flex items-start gap-3">
                 <IconMessage className="w-5 h-5 text-blue-600 flex-shrink-0 mt-0.5" />
                 <div className="flex-1">
-                  <h4 className="font-semibold text-blue-900 mb-1">Need Help?</h4>
-                  <p className="text-sm text-blue-800 mb-3">
-                    Have questions or issues with this delivery? Report it here and we’ll open a
-                    support ticket for this order — without leaving this page.
-                  </p>
-                  <Button size="sm" onClick={openReport}>
-                    <IconHeadset className="w-4 h-4 mr-2" />
-                    Report an issue
-                  </Button>
+                  {activeTickets.length === 0 ? (
+                    <>
+                      <h4 className="font-semibold text-blue-900 mb-1">Need Help?</h4>
+                      <p className="text-sm text-blue-800 mb-3">
+                        Have questions or issues with this delivery? Report it here and we’ll open a
+                        support ticket for this order — without leaving this page.
+                      </p>
+                      <Button size="sm" onClick={openReport}>
+                        <IconHeadset className="w-4 h-4 mr-2" />
+                        Report an issue
+                      </Button>
+                    </>
+                  ) : (
+                    <>
+                      {activeTickets.length === 1 ? (
+                        <>
+                          <h4 className="font-semibold text-blue-900 mb-1">Active support ticket</h4>
+                          <p className="text-sm text-blue-800">
+                            <span className="font-medium">{activeTickets[0].reference}</span>
+                            <span className="mx-1.5 text-blue-400">·</span>
+                            {TICKET_STATUS_META[activeTickets[0].status].label}
+                          </p>
+                          <p className="text-sm text-blue-800 mb-3">
+                            There’s already an active ticket for this transaction.
+                          </p>
+                        </>
+                      ) : (
+                        <>
+                          <h4 className="font-semibold text-blue-900 mb-1">
+                            {activeTickets.length} active tickets for this transaction
+                          </h4>
+                          <p className="text-sm text-blue-800 mb-3">
+                            There are already {activeTickets.length} active tickets linked to this transaction.
+                          </p>
+                        </>
+                      )}
+                      <div className="flex flex-col sm:flex-row gap-2.5">
+                        <Button size="sm" onClick={viewActiveTickets}>
+                          {activeTickets.length === 1 ? 'View Ticket' : 'View Tickets'}
+                        </Button>
+                        <Button size="sm" variant="outline" onClick={openReport}>
+                          <IconHeadset className="w-4 h-4 mr-2" />
+                          Create New Ticket
+                        </Button>
+                      </div>
+                    </>
+                  )}
                 </div>
               </div>
             </CardContent>
@@ -745,6 +843,7 @@ export function TransactionDetails() {
       <ReportIssueDrawer
         open={reportOpen}
         onClose={() => setReportOpen(false)}
+        onSubmitted={handleTicketSubmitted}
         preselected={[
           {
             externalOrderId: transaction.trackingNumber,

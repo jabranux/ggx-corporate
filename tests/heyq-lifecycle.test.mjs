@@ -94,8 +94,11 @@ describe('transaction → in-app report drawer', () => {
     await page.goto(`${server.base}/dashboard/transactions/${ORDER}`, { waitUntil: 'networkidle' });
     const before = (await handoffs()).length;
 
-    // Open the drawer from the Need Help banner.
-    await page.getByRole('button', { name: /report an issue/i }).first().click();
+    // ORDER already has an active ticket (HQ-10241) in the TICKETS fixture
+    // above, so the Need Help banner shows the active-ticket state — open the
+    // drawer via "Create New Ticket" instead of the (now hidden) "Report an
+    // issue" CTA; it's the same drawer for a separate concern.
+    await page.getByRole('button', { name: /create new ticket/i }).first().click();
     await page.getByRole('dialog', { name: /report an issue/i }).waitFor({ state: 'visible', timeout: 10_000 });
     // The drawer carries the order context.
     await page.getByRole('dialog').getByText(ORDER).waitFor();
@@ -120,7 +123,8 @@ describe('transaction → in-app report drawer', () => {
     try {
       await addHeyQApiStubScript(mgr.page, TICKETS);
       await mgr.page.goto(`${server.base}/dashboard/transactions/${ORDER}`, { waitUntil: 'networkidle' });
-      await mgr.page.getByRole('button', { name: /report an issue/i }).first().click();
+      // Same fixture-driven active-ticket state as above.
+      await mgr.page.getByRole('button', { name: /create new ticket/i }).first().click();
       await mgr.page.locator('#report-category').waitFor({ state: 'visible', timeout: 10_000 });
       await mgr.page.locator('#report-description').fill('Please check this order.');
       await mgr.page.getByRole('button', { name: /submit report/i }).click();

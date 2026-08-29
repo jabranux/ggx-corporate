@@ -7,7 +7,7 @@ import { Button } from './ui/Button';
 import { ConcernCategoryPicker } from './ui/ConcernCategoryPicker';
 import { TransactionMultiSelect } from './TransactionMultiSelect';
 import {
-  submitOrderReport, listConcernCategories,
+  submitOrderReport, listConcernCategories, invalidateActiveTicketsCache,
   type CustomerTicket, type ConcernCategory, type AuthorizedTransactionOption,
 } from '../services/ticketsService';
 
@@ -169,6 +169,10 @@ export function ReportIssueDrawer({ open, onClose, preselected, onSubmitted }: R
       description: description.trim(),
     });
     if (res.status === 'ok') {
+      // Centralized here so every caller (Transaction Details, Support
+      // Tickets, Support Ticket Detail) gets a fresh active-ticket read on
+      // its next check, not just whichever page happens to call this drawer.
+      invalidateActiveTicketsCache();
       onSubmitted?.(res.data);
       setPhase({ kind: 'success', ticket: res.data });
     } else {

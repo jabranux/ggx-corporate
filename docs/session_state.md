@@ -3,6 +3,67 @@
 > Lightweight resume/checkpoint file. Detailed June 2026 history was archived to
 > `docs/archive/session_log_2026-06.md`.
 
+## Most Recent Work — Transaction Details: active-ticket indicator on the support/report CTA (2026-08-29)
+
+Transaction Details' "Report an issue" (general card) and On-Demand "Contact
+support" button now check for an existing active support ticket linked to
+that tracking number before offering a fresh report, so a user can't
+accidentally file a duplicate without noticing one already exists.
+
+- **New:** `getActiveTicketsByTrackingNumber()` (`ticketsService.ts`) — ONE
+  `listMyTickets()` fetch, mapped to `Map<trackingNumber, ActiveTicketLink[]>`,
+  filtered by the existing canonical `isPermanentlyClosed` lifecycle rule (a
+  resolved ticket still inside its 24h reopen window counts as active; closed
+  or reopen-window-elapsed does not — no new lifecycle logic invented).
+  Short-TTL (15s) request-dedup cache, same pattern as the concern-categories
+  cache, keyed by requester identity (`externalUserId:externalOrgId`) so a
+  Quick-Login account switch within the TTL can never read a previous
+  account's tickets. `invalidateActiveTicketsCache()` is called centrally
+  from `ReportIssueDrawer.tsx` on every successful submit (not duplicated
+  per-caller), so Support Tickets / Support Ticket Detail / Transaction
+  Details all get a fresh read on their next check.
+- **`TransactionDetails.tsx`:** no active ticket → unchanged "Report an
+  issue" / "Contact support" CTAs. One or more active tickets → the general
+  card shows "Active support ticket" (reference + status) or "N active
+  tickets for this transaction", with **View Ticket(s)** (primary — the
+  single ticket, or `/dashboard/support-tickets?search=<tracking>` for
+  several, since "which one" would be arbitrary) and **Create New Ticket**
+  (secondary — opens the same drawer, preselected). The On-Demand button
+  swaps label to View Ticket(s) directly (kept single-button; the full
+  context/copy lives in the general card on the same page). A request-
+  generation ref (`activeTicketsRequestRef`) guards against the mount-time
+  lookup and a post-submit refresh resolving out of order; state is cleared
+  immediately on an `id` change so a new transaction never briefly shows the
+  previous one's ticket.
+- **`SupportTickets.tsx`:** now syncs `searchQuery` fully (set-or-clear) from
+  a new `?search=` param — the deep-link target for "View Tickets" (plural).
+  Reuses the page's existing search box (already matches `trackingNumbers`)
+  instead of a second filter path.
+- **Tests:** new `tests/transaction-active-ticket.test.mjs` (7 cases: no
+  ticket, only-permanently-closed, one active, multiple active + deep link,
+  Create New Ticket still works, post-submit refresh with no stale state,
+  and an explicit N+1 assertion — one On-Demand transaction renders BOTH
+  support CTAs from exactly one `GET /api/support/tickets` call). Updated
+  `tests/heyq-lifecycle.test.mjs`'s two report-drawer tests: their fixture
+  order already had an active ticket linked, so the correct entry point is
+  now "Create New Ticket", not "Report an issue" — this is the new feature
+  working as intended, not a regression. Wired the new test file into
+  `package.json`'s `test` script (repo convention: explicit file list).
+- **Validated:** `npm run typecheck` clean, `npm run build` clean, full suite
+  **179/179** (`npm test`, up from 172). Two Codex CLI audit passes: the
+  first found 3 real issues (cache not scoped to requester — cross-account
+  leak risk on a Quick-Login switch; no refresh after creating a ticket
+  without navigating away; `?search=` never cleared) — all fixed. The
+  second pass found 3 more (stale ticket state briefly shown when navigating
+  directly between two transactions; ticket creation from Support Tickets /
+  Support Ticket Detail didn't invalidate the cache; a slow mount-time
+  lookup could race a post-submit refresh and win) — all fixed (state clear
+  on `id` change, centralized invalidation in the drawer, shared request-
+  generation guard). Third Codex pass: clean, no findings.
+- Not pushed yet this session (pending explicit instruction per project
+  rules) — see the commit/push status at the point this file was last
+  updated for the exact state.
+
 ## Most Recent Work — Hierarchical Concern Category Picker (2026-08-29)
 
 Completed the hierarchical Concern Category picker in GGX Corporate (`ReportIssueDrawer.tsx` / `ConcernCategoryPicker.tsx`).

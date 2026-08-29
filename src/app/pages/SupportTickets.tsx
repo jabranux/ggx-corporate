@@ -91,6 +91,17 @@ export function SupportTickets() {
     if (searchParams.get('new') === '1') setReportOpen(true);
   }, [searchParams]);
 
+  // Deep-link from Transaction Details' "View Tickets" (multiple active
+  // tickets linked to one transaction) — seeds the existing search box, which
+  // already matches on trackingNumbers, rather than adding a second filter path.
+  // Syncs fully (including clearing) so a later navigation to the plain route
+  // doesn't leave a stale filter behind — `searchParams` only changes here on
+  // an actual navigation, never from typing in the box (that's local state,
+  // not reflected into the URL).
+  useEffect(() => {
+    setSearchQuery(searchParams.get('search') ?? '');
+  }, [searchParams]);
+
   /** Open the in-app Report an Issue drawer (no preselected transaction). */
   const handleSubmitTicket = () => setReportOpen(true);
 
