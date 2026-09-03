@@ -74,9 +74,9 @@ in the sibling HeyQ repo).
   validation was not run in this environment (no `QUADX_BRIDGE_URL`/
   `QUADX_BRIDGE_API_KEY` configured here — the same recurring constraint as
   every prior HeyQ-integration session in this project).
-- Committed in both repos (see the `GGX_AGENT_STATUS` block for exact
-  commit references); not pushed per this project's standing rule (push
-  only on explicit instruction).
+- Committed in both repos — GGX Corporate `45a93dc`, HeyQ (QuadX Bridge)
+  `bac6ac2` — not pushed per this project's standing rule (push only on
+  explicit instruction).
 
 ## Most Recent Work — Transaction Details: active-ticket indicator on the support/report CTA (2026-08-29)
 
