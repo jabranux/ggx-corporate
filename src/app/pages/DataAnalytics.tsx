@@ -539,7 +539,7 @@ export function DataAnalytics() {
               <p className="text-sm text-gray-500">No claims filed.</p>
             ) : (
               <div className="space-y-3">
-                {(['open', 'in-review', 'approved', 'denied', 'settled'] as const).map((st) => {
+                {(['open', 'in-review', 'approved', 'processing', 'on_hold', 'denied', 'settled'] as const).map((st) => {
                   const count = claims.filter((c) => c.status === st).length;
                   if (count === 0) return null;
                   const meta = CLAIM_STATUS_META[st];

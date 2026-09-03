@@ -197,18 +197,18 @@ export async function replyToClaim(claimId: string, body: string): Promise<Claim
   return getClaimBridgeState(claimId);
 }
 
-/** Map Bridge's 6-value claim status to GGX's existing `ClaimStatus` for
- * display + the local write-through cache (`claimsService.syncLocalClaimStatus`).
- * `processing` and `on_hold` are both presented as `approved` (internal
- * Finance sub-states — Finance has started or paused work on an already-
- * agent-approved claim — never a distinct public status, see the migration
- * doc); there is no `For Finance Review` status anywhere in this mapping. */
-export function mapBridgeStatusToLocal(status: BridgeClaimStatus): 'open' | 'in-review' | 'approved' | 'denied' | 'settled' {
+/** Map Bridge's 6-value claim status to GGX's `ClaimStatus` for display + the
+ * local write-through cache (`claimsService.syncLocalClaimStatus`) — a 1:1
+ * rename, never collapsed: GGX shows Bridge's actual status (Pending
+ * Approval / Approved / Processing / On Hold / Rejected / Settled), Bridge
+ * stays the source of truth. There is no `For Finance Review` (or any other
+ * obsolete) status anywhere in this mapping. */
+export function mapBridgeStatusToLocal(status: BridgeClaimStatus): 'open' | 'in-review' | 'approved' | 'processing' | 'on_hold' | 'denied' | 'settled' {
   switch (status) {
     case 'pending_approval': return 'in-review';
     case 'approved': return 'approved';
-    case 'processing': return 'approved';
-    case 'on_hold': return 'approved';
+    case 'processing': return 'processing';
+    case 'on_hold': return 'on_hold';
     case 'rejected': return 'denied';
     case 'settled': return 'settled';
     default: return 'in-review';

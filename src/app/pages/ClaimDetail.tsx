@@ -33,19 +33,32 @@ const TICKET_STATUS_LABEL: Record<string, string> = {
   resolved: 'Resolved', closed: 'Closed',
 };
 
+// A coarse 4-milestone journey view, not a literal 6-step rendering of every
+// Bridge status — the "Status" badge elsewhere on this page shows the exact
+// current Bridge status (Pending Approval/Approved/Processing/On Hold/
+// Rejected/Settled). `processing` and `on_hold` are both internal Finance
+// sub-states of an already-agent-approved claim, so both land on the same
+// "Approved" milestone here — this stepper has never had, and still doesn't
+// need, a distinct step for them.
 const STATUS_STEPS: Array<{ key: string; label: string; description: string }> = [
-  { key: 'open',      label: 'Claim Filed',      description: 'Claim received and queued for review.' },
-  { key: 'in-review', label: 'Under Review',      description: 'Claims team is reviewing the submission.' },
-  { key: 'approved',  label: 'Approved',          description: 'Claim approved. Refund is being processed.' },
-  { key: 'settled',   label: 'Settled',           description: 'Refund has been issued to your account.' },
+  { key: 'open',      label: 'Claim Filed',        description: 'Claim received and queued for review.' },
+  { key: 'in-review', label: 'Pending Approval',    description: 'Claims team is reviewing the submission.' },
+  { key: 'approved',  label: 'Approved',            description: 'Claim approved. Refund is being processed.' },
+  { key: 'settled',   label: 'Settled',             description: 'Refund has been issued to your account.' },
 ];
 
 const STATUS_ORDER = ['open', 'in-review', 'approved', 'settled'];
 
+/** Collapses status onto this stepper's 4 milestones only — never used for
+ * the Status badge, which always shows the real status as-is. */
+function stepperMilestone(status: ClaimStatus): string {
+  if (status === 'denied') return 'in-review';
+  if (status === 'processing' || status === 'on_hold') return 'approved';
+  return status;
+}
+
 function ClaimTimeline({ status }: { status: ClaimStatus }) {
-  const currentIdx = STATUS_ORDER.indexOf(
-    status === 'denied' ? 'in-review' : status
-  );
+  const currentIdx = STATUS_ORDER.indexOf(stepperMilestone(status));
 
   if (status === 'denied') {
     return (
@@ -412,7 +425,7 @@ export function ClaimDetail() {
             </CardContent>
           </Card>
 
-          {(effectiveStatus === 'approved' || effectiveStatus === 'settled') && claim.amount && (
+          {(effectiveStatus === 'approved' || effectiveStatus === 'processing' || effectiveStatus === 'on_hold' || effectiveStatus === 'settled') && claim.amount && (
             <Card className="bg-emerald-50 border-emerald-200">
               <CardContent className="p-5">
                 <div className="flex items-start gap-3">

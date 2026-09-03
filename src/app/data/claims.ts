@@ -10,14 +10,22 @@ import { getAccountIdByName } from './accounts';
 import { loadState, saveState } from '../lib/storage';
 import type { TransactionStatus } from './transactions';
 
-export type ClaimStatus = 'open' | 'in-review' | 'approved' | 'denied' | 'settled';
+// 'open' is a GGX-only transient state (just clicked Submit, haven't heard
+// back from Bridge yet — Bridge itself has no "just filed" status, it starts
+// everything at pending_approval too) — the other six values are QuadX
+// Bridge's own canonical claim-status vocabulary, shown as-is, never
+// collapsed (see mapBridgeStatusToLocal in claimBridgeService.ts — 'in-review'
+// is this file's stand-in key for Bridge's 'pending_approval').
+export type ClaimStatus = 'open' | 'in-review' | 'approved' | 'processing' | 'on_hold' | 'denied' | 'settled';
 
 export const CLAIM_STATUS_META: Record<ClaimStatus, { label: string; variant: 'pending' | 'info' | 'success' | 'danger' }> = {
-  open:        { label: 'Claim Filed', variant: 'pending' },
-  'in-review': { label: 'Under Review', variant: 'info' },
-  approved:    { label: 'Approved',    variant: 'success' },
-  denied:      { label: 'Rejected',    variant: 'danger' },
-  settled:     { label: 'Settled',     variant: 'success' },
+  open:        { label: 'Claim Filed',       variant: 'pending' },
+  'in-review': { label: 'Pending Approval',  variant: 'info' },
+  approved:    { label: 'Approved',          variant: 'success' },
+  processing:  { label: 'Processing',        variant: 'info' },
+  on_hold:     { label: 'On Hold',           variant: 'pending' },
+  denied:      { label: 'Rejected',          variant: 'danger' },
+  settled:     { label: 'Settled',           variant: 'success' },
 };
 
 export const CLAIM_REASONS = [
@@ -53,9 +61,9 @@ export interface Claim {
 // ClaimDetail.tsx) overwrite this the moment a live read succeeds, exactly
 // like the pre-existing CLM-1001..CLM-1008 claims below already work.
 // Mapping used (mirrors mapBridgeStatusToLocal in claimBridgeService.ts):
-// pending_approval->in-review, approved/processing/on_hold->approved
-// (processing/on_hold are internal Finance sub-states, never a distinct
-// public status), rejected->denied, settled->settled. Linked to Bridge via
+// pending_approval->in-review, approved->approved, processing->processing,
+// on_hold->on_hold, rejected->denied, settled->settled — Bridge's status is
+// shown as-is, never collapsed. Linked to Bridge via
 // scripts/supabase-link-claims-ggx-corporate.mjs (HeyQ repo) — see
 // docs/migration/ggx-corporate-quadx-bridge-claims-integration.md.
 const SEED_CLAIMS: Claim[] = [
@@ -63,10 +71,10 @@ const SEED_CLAIMS: Claim[] = [
   { id: 'CLM-1019', trackingNumber: 'GGX-2026-CLM-0011', reason: 'Lost in transit', details: 'Parcel confirmed lost in the network; claim settled with a Finance reference on file.', amount: 2999, status: 'settled', createdAt: 'May 14, 2026' },
   { id: 'CLM-1018', trackingNumber: 'GGX-2026-CLM-0010', reason: 'Damaged item', details: 'Photos show packaging damage consistent with handling prior to pickup, not transit.', amount: 3400, status: 'denied', createdAt: 'May 17, 2026' },
   { id: 'CLM-1017', trackingNumber: 'GGX-2026-CLM-0009', reason: 'Other', details: 'Declared value not substantiated; claim reviewed and denied.', amount: 1500, status: 'denied', createdAt: 'May 18, 2026' },
-  { id: 'CLM-1016', trackingNumber: 'GGX-2026-CLM-0008', reason: 'Lost in transit', details: 'High-value parcel lost in transit; claim on hold mid-processing.', amount: 6100, status: 'approved', createdAt: 'May 21, 2026' },
-  { id: 'CLM-1015', trackingNumber: 'GGX-2026-CLM-0007', reason: 'Undelivered — returned to sender', details: 'Approved, but placed on hold pending an outstanding balance check.', amount: 2750, status: 'approved', createdAt: 'May 22, 2026' },
-  { id: 'CLM-1014', trackingNumber: 'GGX-2026-CLM-0006', reason: 'Other', details: 'Booking fee charged for a shipment that was never created.', amount: 980, status: 'approved', createdAt: 'May 23, 2026' },
-  { id: 'CLM-1013', trackingNumber: 'GGX-2026-CLM-0005', reason: 'Lost in transit', details: 'Escalated after 6 days with no tracking movement. Claim approved and now with Finance.', amount: 4200, status: 'approved', createdAt: 'May 24, 2026' },
+  { id: 'CLM-1016', trackingNumber: 'GGX-2026-CLM-0008', reason: 'Lost in transit', details: 'High-value parcel lost in transit; claim on hold mid-processing.', amount: 6100, status: 'on_hold', createdAt: 'May 21, 2026' },
+  { id: 'CLM-1015', trackingNumber: 'GGX-2026-CLM-0007', reason: 'Undelivered — returned to sender', details: 'Approved, but placed on hold pending an outstanding balance check.', amount: 2750, status: 'on_hold', createdAt: 'May 22, 2026' },
+  { id: 'CLM-1014', trackingNumber: 'GGX-2026-CLM-0006', reason: 'Other', details: 'Booking fee charged for a shipment that was never created.', amount: 980, status: 'processing', createdAt: 'May 23, 2026' },
+  { id: 'CLM-1013', trackingNumber: 'GGX-2026-CLM-0005', reason: 'Lost in transit', details: 'Escalated after 6 days with no tracking movement. Claim approved and now with Finance.', amount: 4200, status: 'processing', createdAt: 'May 24, 2026' },
   { id: 'CLM-1012', trackingNumber: 'GGX-2026-CLM-0004', reason: 'Delivery failed', details: 'Three failed delivery attempts logged; requesting a refund instead of redelivery.', amount: 1875, status: 'approved', createdAt: 'May 27, 2026' },
   { id: 'CLM-1011', trackingNumber: 'GGX-2026-CLM-0003', reason: 'Undelivered — returned to sender', details: 'Parcel was mishandled at the sort facility and returned without a proper delivery attempt.', amount: 3300, status: 'approved', createdAt: 'May 28, 2026' },
   { id: 'CLM-1010', trackingNumber: 'GGX-2026-CLM-0002', reason: 'Damaged item', details: 'Item arrived with a cracked housing; photos submitted with the claim.', amount: 5120, status: 'in-review', createdAt: 'May 30, 2026' },
