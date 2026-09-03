@@ -88,20 +88,39 @@ unlinked legacy claim — see `docs/migration/quadx-bridge-claims-customer-api.m
 Bridge status         GGX ClaimStatus     Displayed label
 pending_approval   →  in-review           "Under Review"
 approved           →  approved            "Approved"
+processing         →  approved            "Approved"   (internal Finance detail, not a public status)
 on_hold            →  approved            "Approved"   (internal Finance detail, not a public status)
 rejected           →  denied              "Rejected"
-processed          →  settled             "Settled"
+settled            →  settled             "Settled"
 ```
+
+> **UPDATE (GGX sample-data alignment pass):** Bridge later added an
+> explicit `processing` state (Approved → Processing → Settled — Finance
+> must start processing before settling) and renamed the terminal state
+> from `processed` to `settled`
+> (`20260918090000_claims_finance_processing_and_settle.sql` in the Bridge
+> repo). `claimBridgeService.ts`'s `BridgeClaimStatus` union and
+> `mapBridgeStatusToLocal` were stale against that rename (still listed
+> `processed`, had no `processing` case) — a real claim in either of those
+> two live states fell through `BRIDGE_STATUSES.includes(...)` and
+> `toClaimBridgeState` silently defaulted it to `pending_approval`
+> ("Under Review"), the wrong displayed status. Fixed here: `processing` is
+> treated exactly like `on_hold` (an internal Finance sub-state of
+> `approved`, never its own public status — consistent with this table's
+> existing `on_hold` treatment), and `settled` replaces `processed`
+> everywhere. Confirmed against a real local Bridge round trip for all six
+> current statuses — see the GGX-side sample-data-alignment session notes.
 
 GGX's `open`/`in-review` labels were relabeled to "Claim Filed"/"Under
 Review" and `denied`'s label to "Rejected" (`CLAIM_STATUS_META`,
 `src/app/data/claims.ts`) to match the task's required wording — the
 underlying `ClaimStatus` union keys are unchanged, so this was a
-label-only, zero-blast-radius edit. `on_hold` is deliberately **not** a
-distinct GGX status — it's an internal Finance sub-state of `approved` (see
-the Bridge-side doc's trigger design), consistent with never exposing
-internal operational metadata. **No "For Finance Review" status exists
-anywhere in either repo, before or after this pass.**
+label-only, zero-blast-radius edit. `on_hold` (and now `processing`) are
+deliberately **not** distinct GGX statuses — both are internal Finance
+sub-states of `approved` (see the Bridge-side doc's trigger design),
+consistent with never exposing internal operational metadata. **No "For
+Finance Review" status exists anywhere in either repo, before or after this
+pass.**
 
 Claim status and ticket status are independently rendered: `ClaimDetail.tsx`
 shows the claim's own status badge (driven by the mapping above) and a

@@ -224,6 +224,20 @@ import { mapOmsOrderToTransaction, type OmsOrderAttribution } from '../lib/omsOr
 
 /** Business+ account/origin context, keyed by tracking number. */
 const ATTRIBUTION: Record<string, OmsOrderAttribution> = {
+  // ── QuadX Bridge canonical Claims sample data (see data/claims.ts's
+  // CLM-1009..CLM-1020 and data/omsOrders.ts's matching specs) ────────────
+  'GGX-2026-CLM-0001': { subaccount: 'Acme Corporation' },
+  'GGX-2026-CLM-0002': { subaccount: 'Acme Luzon' },
+  'GGX-2026-CLM-0003': { subaccount: 'Acme Corporation' },
+  'GGX-2026-CLM-0004': { subaccount: 'Acme Luzon' },
+  'GGX-2026-CLM-0005': { subaccount: 'Acme Corporation' },
+  'GGX-2026-CLM-0006': { subaccount: 'Acme Luzon' },
+  'GGX-2026-CLM-0007': { subaccount: 'Acme Corporation' },
+  'GGX-2026-CLM-0008': { subaccount: 'Acme Luzon' },
+  'GGX-2026-CLM-0009': { subaccount: 'Acme Corporation' },
+  'GGX-2026-CLM-0010': { subaccount: 'Acme Luzon' },
+  'GGX-2026-CLM-0011': { subaccount: 'Acme Corporation' },
+  'GGX-2026-CLM-0012': { subaccount: 'Acme Luzon' },
   // ── Shopify-sourced orders (booked via the GGX Shopify plugin) ───────────
   'GGX-2026-90021': { subaccount: 'Acme Luzon', source: 'shopify', shopifyStoreName: 'Acme Luzon Online' },
   'GGX-2026-90020': { subaccount: 'Acme Corporation', source: 'shopify', shopifyStoreName: 'Acme Corporation Store' },

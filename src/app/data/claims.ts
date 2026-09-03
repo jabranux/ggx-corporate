@@ -42,7 +42,35 @@ export interface Claim {
 }
 
 // Seed claims linked to existing undelivered transactions.
+//
+// CLM-1009..CLM-1020: the 12 canonical QuadX Bridge claims (2 per Bridge
+// status — Pending Approval, Approved, Processing, On Hold, Rejected,
+// Settled). Bridge is the source of truth for claim status/processing; the
+// `status` values below are the last-known-good display fallback (what
+// ClaimDetail.tsx shows before its live Bridge sync resolves, or if Bridge
+// is unreachable) — NOT a second status source to keep in sync by hand.
+// `ensureClaimLinked`/`syncLocalClaimStatus` (claimBridgeService.ts,
+// ClaimDetail.tsx) overwrite this the moment a live read succeeds, exactly
+// like the pre-existing CLM-1001..CLM-1008 claims below already work.
+// Mapping used (mirrors mapBridgeStatusToLocal in claimBridgeService.ts):
+// pending_approval->in-review, approved/processing/on_hold->approved
+// (processing/on_hold are internal Finance sub-states, never a distinct
+// public status), rejected->denied, settled->settled. Linked to Bridge via
+// scripts/supabase-link-claims-ggx-corporate.mjs (HeyQ repo) — see
+// docs/migration/ggx-corporate-quadx-bridge-claims-integration.md.
 const SEED_CLAIMS: Claim[] = [
+  { id: 'CLM-1020', trackingNumber: 'GGX-2026-CLM-0012', reason: 'Delivery failed', details: 'Repeated failed delivery attempts; refund claim settled by Finance.', amount: 1120, status: 'settled', createdAt: 'May 12, 2026' },
+  { id: 'CLM-1019', trackingNumber: 'GGX-2026-CLM-0011', reason: 'Lost in transit', details: 'Parcel confirmed lost in the network; claim settled with a Finance reference on file.', amount: 2999, status: 'settled', createdAt: 'May 14, 2026' },
+  { id: 'CLM-1018', trackingNumber: 'GGX-2026-CLM-0010', reason: 'Damaged item', details: 'Photos show packaging damage consistent with handling prior to pickup, not transit.', amount: 3400, status: 'denied', createdAt: 'May 17, 2026' },
+  { id: 'CLM-1017', trackingNumber: 'GGX-2026-CLM-0009', reason: 'Other', details: 'Declared value not substantiated; claim reviewed and denied.', amount: 1500, status: 'denied', createdAt: 'May 18, 2026' },
+  { id: 'CLM-1016', trackingNumber: 'GGX-2026-CLM-0008', reason: 'Lost in transit', details: 'High-value parcel lost in transit; claim on hold mid-processing.', amount: 6100, status: 'approved', createdAt: 'May 21, 2026' },
+  { id: 'CLM-1015', trackingNumber: 'GGX-2026-CLM-0007', reason: 'Undelivered — returned to sender', details: 'Approved, but placed on hold pending an outstanding balance check.', amount: 2750, status: 'approved', createdAt: 'May 22, 2026' },
+  { id: 'CLM-1014', trackingNumber: 'GGX-2026-CLM-0006', reason: 'Other', details: 'Booking fee charged for a shipment that was never created.', amount: 980, status: 'approved', createdAt: 'May 23, 2026' },
+  { id: 'CLM-1013', trackingNumber: 'GGX-2026-CLM-0005', reason: 'Lost in transit', details: 'Escalated after 6 days with no tracking movement. Claim approved and now with Finance.', amount: 4200, status: 'approved', createdAt: 'May 24, 2026' },
+  { id: 'CLM-1012', trackingNumber: 'GGX-2026-CLM-0004', reason: 'Delivery failed', details: 'Three failed delivery attempts logged; requesting a refund instead of redelivery.', amount: 1875, status: 'approved', createdAt: 'May 27, 2026' },
+  { id: 'CLM-1011', trackingNumber: 'GGX-2026-CLM-0003', reason: 'Undelivered — returned to sender', details: 'Parcel was mishandled at the sort facility and returned without a proper delivery attempt.', amount: 3300, status: 'approved', createdAt: 'May 28, 2026' },
+  { id: 'CLM-1010', trackingNumber: 'GGX-2026-CLM-0002', reason: 'Damaged item', details: 'Item arrived with a cracked housing; photos submitted with the claim.', amount: 5120, status: 'in-review', createdAt: 'May 30, 2026' },
+  { id: 'CLM-1009', trackingNumber: 'GGX-2026-CLM-0001', reason: 'Lost in transit', details: 'Tracking has shown no scan update in 4 days past the committed delivery window.', amount: 2450, status: 'in-review', createdAt: 'May 31, 2026' },
   { id: 'CLM-1008', trackingNumber: 'GGX-2026-90006', reason: 'Delivery failed', details: 'Rider attempted delivery but building was closed. High-value COD shipment.', amount: 43200, status: 'open',      createdAt: 'May 30, 2026', accountId: 'acme-luzon',        accountName: 'Acme Luzon' },
   { id: 'CLM-1007', trackingNumber: 'GGX-2026-90008', reason: 'Delivery failed', details: 'Package marked undelivered without delivery attempt logged.', amount: 9400,  status: 'open',      createdAt: 'May 31, 2026', accountId: 'acme-corporation', accountName: 'Acme Corporation' },
   { id: 'CLM-1006', trackingNumber: 'GGX-2026-90003', reason: 'Lost in transit', details: 'Package departed origin hub but never arrived at destination hub.', amount: 55000, status: 'in-review', createdAt: 'May 29, 2026', accountId: 'acme-luzon',        accountName: 'Acme Luzon' },

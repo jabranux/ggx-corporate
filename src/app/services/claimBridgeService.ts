@@ -39,7 +39,17 @@ export interface ClaimBridgeMessage {
   createdAt: string;
 }
 
-export type BridgeClaimStatus = 'pending_approval' | 'approved' | 'rejected' | 'on_hold' | 'processed';
+// Bridge's canonical 6-value claim status vocabulary (public.claims.status,
+// QuadX Bridge repo). Was 'pending_approval' | 'approved' | 'rejected' |
+// 'on_hold' | 'processed' — Bridge later added an explicit 'processing'
+// state (Approved -> Processing -> Settled, Finance must start processing
+// before settling) and renamed the terminal state from 'processed' to
+// 'settled' (see that repo's 20260918090000_claims_finance_processing_and_settle.sql).
+// Bridge's GET /customer/claims/:reference passes claims.status straight
+// through with no server-side relabeling ("the caller — GGX BFF — owns
+// display mapping", per that route's own comment) — this union and
+// mapBridgeStatusToLocal below are that one required mapping point.
+export type BridgeClaimStatus = 'pending_approval' | 'approved' | 'processing' | 'on_hold' | 'rejected' | 'settled';
 
 export interface ClaimBridgeState {
   status: BridgeClaimStatus;
@@ -116,7 +126,7 @@ interface RawClaimState {
   messages?: { id?: string; from?: string; authorLabel?: string; body?: string; createdAt?: string }[];
 }
 
-const BRIDGE_STATUSES: BridgeClaimStatus[] = ['pending_approval', 'approved', 'rejected', 'on_hold', 'processed'];
+const BRIDGE_STATUSES: BridgeClaimStatus[] = ['pending_approval', 'approved', 'processing', 'on_hold', 'rejected', 'settled'];
 
 /** Build the state by an explicit allowlist — never spread the raw response
  * (same discipline `heyqCustomerApi.ts`'s `toCustomerTicket` uses). */
@@ -187,18 +197,20 @@ export async function replyToClaim(claimId: string, body: string): Promise<Claim
   return getClaimBridgeState(claimId);
 }
 
-/** Map Bridge's 5-value claim status to GGX's existing `ClaimStatus` for
+/** Map Bridge's 6-value claim status to GGX's existing `ClaimStatus` for
  * display + the local write-through cache (`claimsService.syncLocalClaimStatus`).
- * `on_hold` is presented as `approved` (an internal Finance sub-state, not a
- * distinct public status — see the migration doc); there is no `For Finance
- * Review` status anywhere in this mapping. */
+ * `processing` and `on_hold` are both presented as `approved` (internal
+ * Finance sub-states — Finance has started or paused work on an already-
+ * agent-approved claim — never a distinct public status, see the migration
+ * doc); there is no `For Finance Review` status anywhere in this mapping. */
 export function mapBridgeStatusToLocal(status: BridgeClaimStatus): 'open' | 'in-review' | 'approved' | 'denied' | 'settled' {
   switch (status) {
     case 'pending_approval': return 'in-review';
     case 'approved': return 'approved';
+    case 'processing': return 'approved';
     case 'on_hold': return 'approved';
     case 'rejected': return 'denied';
-    case 'processed': return 'settled';
+    case 'settled': return 'settled';
     default: return 'in-review';
   }
 }
