@@ -3,6 +3,81 @@
 > Lightweight resume/checkpoint file. Detailed June 2026 history was archived to
 > `docs/archive/session_log_2026-06.md`.
 
+## Most Recent Work — GGX ↔ QuadX Bridge Claims integration (2026-09-03)
+
+Wired GGX's Claims feature to QuadX Bridge's real internal Claims Phase 1
+system (structured `public.claims` table + approve/reject/Finance RPCs,
+shipped this cycle but 100% internal/staff-session-only before this pass —
+no external HTTP surface existed). Full write-up:
+`docs/migration/ggx-corporate-quadx-bridge-claims-integration.md` (GGX side)
+and `docs/migration/quadx-bridge-claims-customer-api.md` (HeyQ/Bridge side,
+in the sibling HeyQ repo).
+
+- **HeyQ/Bridge repo** (new migration
+  `20260917093000_quadx_bridge_claims_external.sql` + two new routes in
+  `supabase/functions/quadx-bridge/index.ts`): additive `claims.
+  external_reference`/`source` columns + a partial unique index (the
+  idempotency guarantee), a new `create_external_claim_bridge` RPC
+  (service_role-only — structurally separate from every staff-session
+  Phase 1 RPC, which are untouched), and a trigger that projects claim
+  status transitions into `ticket_activities` as `visibility =
+  'customer_visible'` rows (covers both staff-filed and portal-filed claims
+  without editing `approve_claim`/`reject_claim`/`finance_*_claim`'s bodies
+  at all). New routes: `POST /customer/claims` (idempotent file-or-link,
+  reuses the existing `create_customer_ticket_bridge` RPC for the ticket
+  with an explicit `cat-claims` category), `GET /customer/claims/:reference`
+  (public claim state — never returns `rejection_reason`/`hold_reason`/
+  `finance_reference`/`reviewed_by`/`processed_by`, enforced server-side by
+  the query shape itself, not by GGX hiding fields).
+- **GGX Corporate repo**: new `api/claims/[claimId]/{sync,state,messages}.ts`
+  BFF routes (same `requireSessionIdentity`/`bridgeFetch` boundary the
+  support-ticket proxy already established — no new auth mechanism), new
+  `src/app/services/claimBridgeService.ts` (same `HeyQResult`-style pattern
+  as `heyqCustomerApi.ts`). `ClaimDetail.tsx`'s old dead-end "Questions
+  about this claim? → Open Support Ticket" link (it never actually linked
+  to anything) is replaced with a "Claim Updates & Messages" card: a merged
+  chronological timeline (claim status events + the linked ticket's public
+  message thread) plus a reply composer, refreshed on a plain 25s poll
+  (paused while the tab is hidden) — deliberately not new realtime
+  infrastructure. A separate small "Related ticket: Open/…" badge keeps
+  claim status and ticket status visibly independent (an Approved claim
+  next to an Open ticket is expected, not a bug).
+- **Idempotency / legacy claims**: GGX's own claim reference (`CLM-1008`)
+  IS the idempotency key throughout — no separate "remember the Bridge id"
+  step (GGX has no backend DB of its own). `ensureClaimLinked` runs both
+  eagerly (right after filing, `TransactionDetails.tsx`) and lazily (every
+  `ClaimDetail.tsx` mount) — covers the 8 pre-existing seed claims
+  (`CLM-1001`–`CLM-1008`) automatically, first view links them once,
+  every view after that just re-reads.
+- **Status mapping — no "For Finance Review" anywhere** (confirmed absent
+  from both codebases before and after this pass): Bridge's
+  `pending_approval|approved|on_hold|rejected|processed` maps to GGX's
+  existing `in-review|approved|approved|denied|settled` (labels relabeled
+  to "Under Review"/"Rejected"/etc. to match the task's required wording —
+  the `ClaimStatus` union keys themselves are unchanged). `on_hold` is
+  deliberately not a distinct public status.
+- **Deferred, documented as a dependency, not built this pass**: real
+  evidence/attachment upload — Bridge has no working attachment
+  infrastructure anywhere (every write route already 400s an `attachments`
+  payload); the two new claims routes follow the identical convention.
+- **Validated**: `npm run typecheck` clean, `npm run build` clean (`dist/`
+  scanned, no Bridge secret/header string present), new
+  `tests/api-claims.test.mjs` (11/11, esbuild-bundled against a real local
+  fake Bridge HTTP server — identity-spoofing rejection, reason mapping,
+  attachment-payload rejection, server-side ticket-id resolution for
+  replies, 404 propagation), full existing suite re-run for regressions
+  from the `CLAIM_STATUS_META` label changes.
+- **Operational dependency, not a code gap**: `app_settings.claims_enabled`
+  is `false` for `ggx` on Bridge by default — `POST /customer/claims` fails
+  closed (`409` → GGX's `claims_disabled` state) until an operator with
+  Supabase access runs `set_claims_enabled('ggx', true)`. Live round-trip
+  validation was not run in this environment (no `QUADX_BRIDGE_URL`/
+  `QUADX_BRIDGE_API_KEY` configured here — the same recurring constraint as
+  every prior HeyQ-integration session in this project).
+- Committed in both repos (see the `GGX_AGENT_STATUS` block for exact
+  commit references); not pushed per this project's standing rule (push
+  only on explicit instruction).
+
 ## Most Recent Work — Transaction Details: active-ticket indicator on the support/report CTA (2026-08-29)
 
 Transaction Details' "Report an issue" (general card) and On-Demand "Contact

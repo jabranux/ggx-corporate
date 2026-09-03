@@ -28,6 +28,7 @@ import {
   getClaimByTrackingNumber, fileClaim, cancelBooking, isBookingCancelled,
   claimEligible, cancelEligible, CLAIM_STATUS_META, CLAIM_REASONS, type Claim,
 } from '../services/claimsService';
+import { ensureClaimLinked } from '../services/claimBridgeService';
 // Support runs on HeyQ. "Report an issue" opens an in-app drawer that submits the
 // ticket DIRECTLY to HeyQ's customer API with the order attached — the user stays
 // on this page and is never redirected to HeyQ's Contact Us form.
@@ -211,6 +212,17 @@ export function TransactionDetails() {
     setClaim(created);
     setShowClaimForm(false);
     setClaimForm({ reason: '', details: '' });
+
+    // Best-effort, non-blocking: link the newly-filed claim to QuadX Bridge
+    // right away rather than waiting for the customer to open Claim Details.
+    // Idempotent (safe to call again) — a failure here is silently recovered
+    // by ClaimDetail's own lazy-link-on-view retry, never surfaced as a
+    // filing error.
+    ensureClaimLinked(created.id, {
+      reason: created.reason,
+      trackingNumber: created.trackingNumber,
+      details: created.details,
+    }).catch(() => {});
   };
 
   const handleCancel = async () => {

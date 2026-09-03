@@ -13,11 +13,11 @@ import type { TransactionStatus } from './transactions';
 export type ClaimStatus = 'open' | 'in-review' | 'approved' | 'denied' | 'settled';
 
 export const CLAIM_STATUS_META: Record<ClaimStatus, { label: string; variant: 'pending' | 'info' | 'success' | 'danger' }> = {
-  open:        { label: 'Open',      variant: 'pending' },
-  'in-review': { label: 'In Review', variant: 'info' },
-  approved:    { label: 'Approved',  variant: 'success' },
-  denied:      { label: 'Denied',    variant: 'danger' },
-  settled:     { label: 'Settled',   variant: 'success' },
+  open:        { label: 'Claim Filed', variant: 'pending' },
+  'in-review': { label: 'Under Review', variant: 'info' },
+  approved:    { label: 'Approved',    variant: 'success' },
+  denied:      { label: 'Rejected',    variant: 'danger' },
+  settled:     { label: 'Settled',     variant: 'success' },
 };
 
 export const CLAIM_REASONS = [
@@ -72,6 +72,19 @@ export function getClaim(id: string): Claim | undefined {
 
 export function getClaimByTracking(tracking: string): Claim | undefined {
   return CLAIMS.find((c) => c.trackingNumber === tracking);
+}
+
+/**
+ * Best-effort write-through from a live QuadX Bridge claim read (see
+ * `claimBridgeService.ts`) so the Claims list page shows reasonably fresh
+ * status without itself making a live Bridge call per row. Never throws,
+ * never notifies — this is a display-cache sync, not a status transition.
+ */
+export function updateLocalClaimStatus(id: string, status: ClaimStatus): void {
+  const claim = CLAIMS.find((c) => c.id === id);
+  if (!claim || claim.status === status) return;
+  claim.status = status;
+  persistClaims();
 }
 
 export interface SubmitClaimInput {

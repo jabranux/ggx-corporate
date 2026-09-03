@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useNavigate, useParams, Link } from 'react-router';
 import {
   IconArrowLeft,
@@ -9,13 +9,29 @@ import {
   IconClock,
   IconAlertCircle,
   IconInfoCircle,
-  IconMessage,
+  IconSend,
+  IconLoader2,
 } from '@tabler/icons-react';
 import { Card, CardContent, CardHeader, CardTitle } from '../components/ui/Card';
 import { Button } from '../components/ui/Button';
 import { Badge } from '../components/ui/Badge';
-import { getClaimById, CLAIM_STATUS_META, type Claim } from '../services/claimsService';
+import { getClaimById, CLAIM_STATUS_META, syncLocalClaimStatus, type Claim, type ClaimStatus } from '../services/claimsService';
 import { getTransactionById, statusConfig, type Transaction } from '../services/transactionService';
+import {
+  ensureClaimLinked, getClaimBridgeState, replyToClaim, mapBridgeStatusToLocal,
+  type ClaimBridgeState, type ClaimBridgeResult,
+} from '../services/claimBridgeService';
+
+/** Moderate refresh cadence — a claim's Bridge status changes on staff/
+ * Finance action cadence (minutes-to-hours), not real time, so a simple
+ * poll is the right tool here (matches the task's own "don't over-engineer
+ * realtime" guidance) rather than the ticket path's faster adaptive poll. */
+const CLAIM_STATE_POLL_MS = 25_000;
+
+const TICKET_STATUS_LABEL: Record<string, string> = {
+  new: 'New', open: 'Open', in_progress: 'In Progress', on_hold: 'On Hold',
+  resolved: 'Resolved', closed: 'Closed',
+};
 
 const STATUS_STEPS: Array<{ key: string; label: string; description: string }> = [
   { key: 'open',      label: 'Claim Filed',      description: 'Claim received and queued for review.' },
@@ -26,12 +42,12 @@ const STATUS_STEPS: Array<{ key: string; label: string; description: string }> =
 
 const STATUS_ORDER = ['open', 'in-review', 'approved', 'settled'];
 
-function ClaimTimeline({ claim }: { claim: Claim }) {
+function ClaimTimeline({ status }: { status: ClaimStatus }) {
   const currentIdx = STATUS_ORDER.indexOf(
-    claim.status === 'denied' ? 'in-review' : claim.status
+    status === 'denied' ? 'in-review' : status
   );
 
-  if (claim.status === 'denied') {
+  if (status === 'denied') {
     return (
       <div className="flex items-start gap-3 rounded-lg bg-red-50 border border-red-200 px-4 py-3">
         <IconAlertCircle className="w-5 h-5 text-red-500 flex-shrink-0 mt-0.5" />
@@ -85,6 +101,15 @@ export function ClaimDetail() {
 
   const [claim,       setClaim]       = useState<Claim | null | undefined>(undefined);
   const [transaction, setTransaction] = useState<Transaction | null | undefined>(undefined);
+  const [displayStatus, setDisplayStatus] = useState<ClaimStatus | null>(null);
+
+  // 'loading' | claim's live Bridge state | a typed failure (unavailable /
+  // claims_disabled / forbidden / not_found) — distinct from `claim` itself,
+  // which stays the local mock record regardless of Bridge reachability.
+  const [bridgeResult, setBridgeResult] = useState<'loading' | ClaimBridgeResult<ClaimBridgeState>>('loading');
+  const [replyText, setReplyText] = useState('');
+  const [sending, setSending] = useState(false);
+  const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -93,6 +118,7 @@ export function ClaimDetail() {
       .then((c) => {
         if (cancelled) return;
         setClaim(c);
+        setDisplayStatus(c?.status ?? null);
         if (c) {
           getTransactionById(c.trackingNumber)
             .then((tx) => { if (!cancelled) setTransaction(tx); })
@@ -104,6 +130,60 @@ export function ClaimDetail() {
       .catch(() => { if (!cancelled) setClaim(null); });
     return () => { cancelled = true; };
   }, [id]);
+
+  // Ensure the claim is linked to QuadX Bridge (idempotent — safe on every
+  // mount, including for a legacy/never-linked claim), then start a moderate
+  // poll for its live status/timeline/messages. Paused while the tab is
+  // hidden, same discipline the ticket-detail poll uses.
+  useEffect(() => {
+    if (!claim) return;
+    const currentClaim = claim;
+    let cancelled = false;
+
+    function applyResult(result: ClaimBridgeResult<ClaimBridgeState>) {
+      if (cancelled) return;
+      setBridgeResult(result);
+      if (result.status === 'ok') {
+        const mapped = mapBridgeStatusToLocal(result.data.status);
+        setDisplayStatus(mapped);
+        syncLocalClaimStatus(currentClaim.id, mapped);
+      }
+    }
+
+    ensureClaimLinked(currentClaim.id, {
+      reason: currentClaim.reason,
+      trackingNumber: currentClaim.trackingNumber,
+      details: currentClaim.details,
+    }).then(applyResult);
+
+    function poll() {
+      if (document.hidden) return;
+      getClaimBridgeState(currentClaim.id).then(applyResult);
+    }
+    pollRef.current = setInterval(poll, CLAIM_STATE_POLL_MS);
+    document.addEventListener('visibilitychange', poll);
+
+    return () => {
+      cancelled = true;
+      if (pollRef.current) clearInterval(pollRef.current);
+      document.removeEventListener('visibilitychange', poll);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [claim?.id]);
+
+  async function handleSendReply() {
+    if (!claim || !replyText.trim() || sending) return;
+    setSending(true);
+    const result = await replyToClaim(claim.id, replyText.trim());
+    setSending(false);
+    if (result.status === 'ok') {
+      setReplyText('');
+      setBridgeResult(result);
+      const mapped = mapBridgeStatusToLocal(result.data.status);
+      setDisplayStatus(mapped);
+      syncLocalClaimStatus(claim.id, mapped);
+    }
+  }
 
   if (claim === undefined) {
     return (
@@ -138,7 +218,8 @@ export function ClaimDetail() {
     );
   }
 
-  const meta = CLAIM_STATUS_META[claim.status];
+  const effectiveStatus = displayStatus ?? claim.status;
+  const meta = CLAIM_STATUS_META[effectiveStatus];
 
   return (
     <div className="p-6 space-y-6">
@@ -244,21 +325,80 @@ export function ClaimDetail() {
             </Card>
           )}
 
-          {/* Need Help */}
-          <Card className="bg-blue-50 border-blue-200">
-            <CardContent className="p-5">
-              <div className="flex items-start gap-3">
-                <IconMessage className="w-5 h-5 text-blue-600 flex-shrink-0 mt-0.5" />
-                <div>
-                  <p className="font-semibold text-blue-900 mb-1">Questions about this claim?</p>
-                  <p className="text-sm text-blue-800 mb-3">
-                    Our claims team typically responds within 2–3 business days. You can also raise a support ticket for faster assistance.
-                  </p>
-                  <Button size="sm" onClick={() => navigate('/dashboard/support-tickets')}>
-                    Open Support Ticket
-                  </Button>
+          {/* Claim Updates & Messages */}
+          <Card>
+            <CardHeader className="flex flex-row items-center justify-between gap-3">
+              <CardTitle>Claim Updates &amp; Messages</CardTitle>
+              {bridgeResult !== 'loading' && bridgeResult.status === 'ok' && (
+                <Badge variant="info">
+                  Related ticket: {TICKET_STATUS_LABEL[bridgeResult.data.ticket.status] ?? bridgeResult.data.ticket.status}
+                </Badge>
+              )}
+            </CardHeader>
+            <CardContent>
+              {bridgeResult === 'loading' && (
+                <div className="flex items-center gap-2 text-sm text-gray-400 py-6 justify-center">
+                  <IconLoader2 className="w-4 h-4 animate-spin" />Loading updates…
                 </div>
-              </div>
+              )}
+
+              {bridgeResult !== 'loading' && bridgeResult.status === 'claims_disabled' && (
+                <p className="text-sm text-gray-500 py-4">
+                  Claim updates aren't available for this account yet. Check back soon.
+                </p>
+              )}
+
+              {bridgeResult !== 'loading' && (bridgeResult.status === 'unavailable' || bridgeResult.status === 'not_found' || bridgeResult.status === 'forbidden') && (
+                <p className="text-sm text-gray-500 py-4">
+                  Claim updates are temporarily unavailable. This page will keep checking automatically.
+                </p>
+              )}
+
+              {bridgeResult !== 'loading' && bridgeResult.status === 'ok' && (
+                <>
+                  <div className="space-y-4 max-h-96 overflow-y-auto pr-1">
+                    {[
+                      ...bridgeResult.data.timelineEvents.map((e) => ({ kind: 'event' as const, at: e.occurredAt, summary: e.summary })),
+                      ...bridgeResult.data.messages.map((m) => ({ kind: 'message' as const, at: m.createdAt, message: m })),
+                    ]
+                      .sort((a, b) => a.at.localeCompare(b.at))
+                      .map((item, i) =>
+                        item.kind === 'event' ? (
+                          <div key={`e-${i}`} className="flex items-center gap-2 text-xs text-gray-500">
+                            <IconClock className="w-3.5 h-3.5 flex-shrink-0" />
+                            <span>{item.summary}</span>
+                          </div>
+                        ) : (
+                          <div key={item.message.id} className={`flex gap-3 ${item.message.from === 'you' ? 'flex-row-reverse' : ''}`}>
+                            <div className={`w-7 h-7 rounded-full flex items-center justify-center flex-shrink-0 text-xs font-medium ${item.message.from === 'you' ? 'bg-blue-600 text-white' : 'bg-gray-200 text-gray-600'}`}>
+                              {item.message.from === 'you' ? 'You' : 'CS'}
+                            </div>
+                            <div className={`max-w-[80%] rounded-lg px-3 py-2 text-sm ${item.message.from === 'you' ? 'bg-blue-600 text-white' : 'bg-gray-100 text-gray-800'}`}>
+                              <p>{item.message.body}</p>
+                            </div>
+                          </div>
+                        ),
+                      )}
+                    {bridgeResult.data.timelineEvents.length === 0 && bridgeResult.data.messages.length === 0 && (
+                      <p className="text-sm text-gray-400 text-center py-4">No updates yet.</p>
+                    )}
+                  </div>
+                  <div className="pt-4 mt-4 border-t border-gray-100 space-y-2">
+                    <textarea
+                      className="w-full h-20 px-3 py-2 rounded-lg border border-gray-300 text-sm focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent"
+                      placeholder="Ask a question about this claim…"
+                      value={replyText}
+                      onChange={(e) => setReplyText(e.target.value)}
+                    />
+                    <div className="flex justify-end">
+                      <Button size="sm" disabled={!replyText.trim() || sending} onClick={handleSendReply}>
+                        {sending ? <IconLoader2 className="w-4 h-4 mr-2 animate-spin" /> : <IconSend className="w-4 h-4 mr-2" />}
+                        {sending ? 'Sending…' : 'Send'}
+                      </Button>
+                    </div>
+                  </div>
+                </>
+              )}
             </CardContent>
           </Card>
         </div>
@@ -268,22 +408,22 @@ export function ClaimDetail() {
           <Card>
             <CardHeader><CardTitle>Claim Status</CardTitle></CardHeader>
             <CardContent>
-              <ClaimTimeline claim={claim} />
+              <ClaimTimeline status={effectiveStatus} />
             </CardContent>
           </Card>
 
-          {(claim.status === 'approved' || claim.status === 'settled') && claim.amount && (
+          {(effectiveStatus === 'approved' || effectiveStatus === 'settled') && claim.amount && (
             <Card className="bg-emerald-50 border-emerald-200">
               <CardContent className="p-5">
                 <div className="flex items-start gap-3">
                   <IconCircleCheck className="w-5 h-5 text-emerald-600 flex-shrink-0 mt-0.5" />
                   <div>
                     <p className="font-semibold text-emerald-900 mb-1">
-                      {claim.status === 'settled' ? 'Refund Issued' : 'Refund Approved'}
+                      {effectiveStatus === 'settled' ? 'Refund Issued' : 'Refund Approved'}
                     </p>
                     <p className="text-2xl font-bold text-emerald-800">₱{claim.amount.toLocaleString()}</p>
                     <p className="text-sm text-emerald-700 mt-1">
-                      {claim.status === 'settled'
+                      {effectiveStatus === 'settled'
                         ? 'This refund has been credited to your linked account.'
                         : 'Refund is being processed and will arrive within 3–5 business days.'}
                     </p>

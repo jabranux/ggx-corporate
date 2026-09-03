@@ -245,6 +245,26 @@ export function failUpstream(res: ProxyResponse, route: string, err: unknown): v
   res.status(502).json({ error: 'QuadX Bridge is temporarily unreachable.' });
 }
 
+// GGX's free-text CLAIM_REASONS (src/app/data/claims.ts) → Bridge's 5-value
+// claims.reason check constraint (public.claims, 20260917091000). One-way,
+// display-string → canonical-code, same pattern as CATEGORY_ID_TO_CONCERN_TYPE
+// already uses for support tickets — GGX's own reason text never changes.
+const CLAIM_REASON_TO_BRIDGE: Record<string, string> = {
+  'Undelivered — returned to sender': 'mishandled_shipment',
+  'Delivery failed': 'delivery_failure',
+  'Lost in transit': 'lost_parcel',
+  'Damaged item': 'damaged_parcel',
+  'Significant delay': 'delivery_failure',
+  'Other': 'other',
+};
+
+/** Map a GGX claim reason string to Bridge's canonical reason code, falling
+ * back to 'other' for anything unrecognized (never blocks filing on a
+ * cosmetic label mismatch). */
+export function mapClaimReasonToBridge(reason: string): string {
+  return CLAIM_REASON_TO_BRIDGE[reason] ?? 'other';
+}
+
 /**
  * Re-verify a category id against Bridge's LIVE `GET /customer/categories`
  * response, fresh, right before a ticket is created — never against anything

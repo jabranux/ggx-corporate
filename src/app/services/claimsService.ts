@@ -33,6 +33,7 @@ import {
   isCancelled,
   isClaimEligible,
   isCancelEligible,
+  updateLocalClaimStatus,
   CLAIM_STATUS_META,
   CLAIM_REASONS,
   type Claim,
@@ -94,4 +95,10 @@ export function claimEligible(status: TransactionStatus): boolean {
 }
 export function cancelEligible(status: TransactionStatus): boolean {
   return isCancelEligible(status);
+}
+
+/** Best-effort local display-cache sync from a live QuadX Bridge claim read
+ * — see `claimBridgeService.ts`. Never a status transition of its own. */
+export function syncLocalClaimStatus(id: string, status: ClaimStatus): void {
+  updateLocalClaimStatus(id, status);
 }
