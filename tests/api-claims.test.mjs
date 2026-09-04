@@ -37,6 +37,7 @@ function fakeClaimState(overrides = {}) {
     reason: 'delivery_failure',
     trackingNumber: 'GGX-2026-90006',
     filedAt: '2026-08-30T00:00:00.000Z',
+    holdReason: null,
     ticket: { id: TICKET_ID, status: 'open', customerVisible: true },
     timelineEvents: [{ type: 'claim_filed', summary: 'Claim filed', occurredAt: '2026-08-30T00:00:00.000Z' }],
     messages: [],
@@ -70,6 +71,11 @@ before(async () => {
         if (ref === 'CLM-MISSING') {
           res.writeHead(404, { 'Content-Type': 'application/json' });
           res.end(JSON.stringify({ error: 'Claim not found' }));
+          return;
+        }
+        if (ref === 'CLM-ONHOLD') {
+          res.writeHead(200, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify(fakeClaimState({ externalReference: ref, status: 'on_hold', holdReason: 'outstanding balance' })));
           return;
         }
         res.writeHead(200, { 'Content-Type': 'application/json' });
@@ -194,6 +200,14 @@ describe('GET /api/claims/:claimId/state', () => {
     const res = makeRes();
     await stateHandler({ method: 'GET', query: { claimId: 'CLM-MISSING' }, headers: sessionCookie() }, res);
     assert.equal(res._status, 404);
+  });
+
+  it('relays holdReason through unchanged for an on-hold claim (a pure relay proxy — the timeline reads this straight from Bridge)', async () => {
+    const res = makeRes();
+    await stateHandler({ method: 'GET', query: { claimId: 'CLM-ONHOLD' }, headers: sessionCookie() }, res);
+    assert.equal(res._status, 200);
+    assert.equal(res._body.status, 'on_hold');
+    assert.equal(res._body.holdReason, 'outstanding balance');
   });
 });
 

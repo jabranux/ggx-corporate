@@ -33,33 +33,81 @@ const TICKET_STATUS_LABEL: Record<string, string> = {
   resolved: 'Resolved', closed: 'Closed',
 };
 
-// A coarse 4-milestone journey view, not a literal 6-step rendering of every
-// Bridge status — the "Status" badge elsewhere on this page shows the exact
-// current Bridge status (Pending Approval/Approved/Processing/On Hold/
-// Rejected/Settled). `processing` and `on_hold` are both internal Finance
-// sub-states of an already-agent-approved claim, so both land on the same
-// "Approved" milestone here — this stepper has never had, and still doesn't
-// need, a distinct step for them.
-const STATUS_STEPS: Array<{ key: string; label: string; description: string }> = [
-  { key: 'open',      label: 'Claim Filed',        description: 'Claim received and queued for review.' },
-  { key: 'in-review', label: 'Pending Approval',    description: 'Claims team is reviewing the submission.' },
-  { key: 'approved',  label: 'Approved',            description: 'Claim approved. Refund is being processed.' },
-  { key: 'settled',   label: 'Settled',             description: 'Refund has been issued to your account.' },
+// The permanent lifecycle — every claim passes through these five nodes in
+// order. `On Hold` is NOT one of them: it is inserted conditionally (see
+// `buildTimelineSteps` below) only while the claim is currently on hold, and
+// removed the moment it resumes — the timeline answers "where is my claim
+// now," not "everywhere it has ever been" (historical hold detail stays in
+// Claim Updates & Messages).
+const STATUS_STEPS: Array<{ key: ClaimStatus; label: string; description: string }> = [
+  { key: 'open',       label: 'Claim Filed',      description: 'Claim received and queued for review.' },
+  { key: 'in-review',  label: 'Pending Approval',  description: 'Claims team is reviewing the submission.' },
+  { key: 'approved',   label: 'Approved',          description: 'Claim has been approved.' },
+  { key: 'processing', label: 'Processing',        description: 'Finance is processing the refund.' },
+  { key: 'settled',    label: 'Settled',           description: 'Refund has been issued to your account.' },
 ];
 
-const STATUS_ORDER = ['open', 'in-review', 'approved', 'settled'];
+const FALLBACK_HOLD_MESSAGE = 'Placed on hold. See Claim Updates & Messages below for details.';
 
-/** Collapses status onto this stepper's 4 milestones only — never used for
- * the Status badge, which always shows the real status as-is. */
-function stepperMilestone(status: ClaimStatus): string {
-  if (status === 'denied') return 'in-review';
-  if (status === 'processing' || status === 'on_hold') return 'approved';
-  return status;
+type TimelineStep = { key: ClaimStatus; label: string; description: string; isHold?: boolean };
+
+/** Bridge only ever reaches `on_hold` from 'approved' or 'processing' (both
+ * counted as "processing has started" — see finance_hold_claim), so the node
+ * always lands in the same place: right after Processing, right before
+ * Settled — the last completed lifecycle state and the next applicable one. */
+function buildTimelineSteps(status: ClaimStatus, holdReason: string | null): TimelineStep[] {
+  if (status !== 'on_hold') return STATUS_STEPS;
+  return [
+    ...STATUS_STEPS.slice(0, 4),
+    { key: 'on_hold', label: 'On Hold', description: holdReason ? `Placed on hold due to ${holdReason}.` : FALLBACK_HOLD_MESSAGE, isHold: true },
+    STATUS_STEPS[4],
+  ];
 }
 
-function ClaimTimeline({ status }: { status: ClaimStatus }) {
-  const currentIdx = STATUS_ORDER.indexOf(stepperMilestone(status));
+type NodeVisual = 'done' | 'processing' | 'onhold' | 'active' | 'future';
 
+function nodeVisual(step: TimelineStep, i: number, currentIdx: number): NodeVisual {
+  if (i < currentIdx) return 'done';
+  if (i > currentIdx) return 'future';
+  if (step.key === 'processing') return 'processing';
+  if (step.key === 'on_hold') return 'onhold';
+  if (step.key === 'settled') return 'done'; // terminal state — fully complete, not a "current" highlight
+  return 'active';
+}
+
+const CIRCLE_CLASSES: Record<NodeVisual, string> = {
+  done: 'bg-green-500 border-green-500',
+  processing: 'bg-amber-500 border-amber-500',
+  onhold: 'bg-orange-500 border-orange-500',
+  active: 'bg-white border-blue-500',
+  future: 'bg-white border-gray-300',
+};
+
+const LABEL_CLASSES: Record<NodeVisual, string> = {
+  done: 'text-gray-900',
+  processing: 'text-amber-700',
+  onhold: 'text-orange-700',
+  active: 'text-blue-700',
+  future: 'text-gray-400',
+};
+
+const DESCRIPTION_CLASSES: Record<NodeVisual, string> = {
+  done: 'text-gray-500',
+  processing: 'text-amber-600',
+  onhold: 'text-orange-600',
+  active: 'text-blue-600',
+  future: 'text-gray-300',
+};
+
+const LINE_CLASSES: Record<NodeVisual, string> = {
+  done: 'bg-green-400',
+  processing: 'bg-gray-200',
+  onhold: 'bg-gray-200',
+  active: 'bg-gray-200',
+  future: 'bg-gray-200',
+};
+
+function ClaimTimeline({ status, holdReason }: { status: ClaimStatus; holdReason: string | null }) {
   if (status === 'denied') {
     return (
       <div className="flex items-start gap-3 rounded-lg bg-red-50 border border-red-200 px-4 py-3">
@@ -74,30 +122,30 @@ function ClaimTimeline({ status }: { status: ClaimStatus }) {
     );
   }
 
+  const steps = buildTimelineSteps(status, holdReason);
+  const currentIdx = steps.findIndex((s) => s.key === status);
+
   return (
-    <div className="space-y-0">
-      {STATUS_STEPS.map((step, i) => {
-        const done   = i <= currentIdx;
-        const active = i === currentIdx;
-        const last   = i === STATUS_STEPS.length - 1;
+    <div className="space-y-0" data-testid="claim-timeline">
+      {steps.map((step, i) => {
+        const visual = nodeVisual(step, i, currentIdx);
+        const last = i === steps.length - 1;
         return (
           <div key={step.key} className="relative flex gap-4">
             {!last && (
-              <div className={`absolute left-[11px] top-6 bottom-0 w-0.5 ${done && !active ? 'bg-green-400' : 'bg-gray-200'}`} />
+              <div className={`absolute left-[11px] top-6 bottom-0 w-0.5 ${LINE_CLASSES[visual]}`} />
             )}
-            <div className={`relative z-10 flex-shrink-0 w-6 h-6 rounded-full border-2 mt-0.5 flex items-center justify-center ${
-              done && !active ? 'bg-green-500 border-green-500' :
-              active         ? 'bg-white border-blue-500' :
-                               'bg-white border-gray-300'
-            }`}>
-              {done && !active && <IconCircleCheck className="w-3.5 h-3.5 text-white" />}
-              {active         && <div className="w-2.5 h-2.5 rounded-full bg-blue-500 animate-pulse" />}
+            <div className={`relative z-10 flex-shrink-0 w-6 h-6 rounded-full border-2 mt-0.5 flex items-center justify-center ${CIRCLE_CLASSES[visual]}`}>
+              {visual === 'done' && <IconCircleCheck className="w-3.5 h-3.5 text-white" />}
+              {visual === 'processing' && <div className="w-2.5 h-2.5 rounded-full bg-white animate-pulse" />}
+              {visual === 'onhold' && <div className="w-2.5 h-2.5 rounded-full bg-white animate-pulse" />}
+              {visual === 'active' && <div className="w-2.5 h-2.5 rounded-full bg-blue-500 animate-pulse" />}
             </div>
             <div className={`flex-1 pb-6 ${last ? 'pb-0' : ''}`}>
-              <p className={`text-sm font-medium ${active ? 'text-blue-700' : done ? 'text-gray-900' : 'text-gray-400'}`}>
+              <p className={`text-sm font-medium ${LABEL_CLASSES[visual]}`}>
                 {step.label}
               </p>
-              <p className={`text-xs mt-0.5 ${active ? 'text-blue-600' : done ? 'text-gray-500' : 'text-gray-300'}`}>
+              <p className={`text-xs mt-0.5 break-words ${DESCRIPTION_CLASSES[visual]}`}>
                 {step.description}
               </p>
             </div>
@@ -152,6 +200,14 @@ export function ClaimDetail() {
     if (!claim) return;
     const currentClaim = claim;
     let cancelled = false;
+
+    // Clear any previous claim's Bridge data immediately on an id change —
+    // otherwise, while the fresh fetch below is in flight, this would keep
+    // rendering the PREVIOUS claim's live state (including its holdReason)
+    // under the new claim's id, a stale cross-claim leak in the timeline/
+    // refund banner. `effectiveStatus` already resets synchronously via the
+    // claim-load effect above; this keeps `bridgeResult` in step with it.
+    setBridgeResult('loading');
 
     function applyResult(result: ClaimBridgeResult<ClaimBridgeState>) {
       if (cancelled) return;
@@ -233,6 +289,8 @@ export function ClaimDetail() {
 
   const effectiveStatus = displayStatus ?? claim.status;
   const meta = CLAIM_STATUS_META[effectiveStatus];
+  const holdReason = bridgeResult !== 'loading' && bridgeResult.status === 'ok' ? bridgeResult.data.holdReason : null;
+  const isOnHold = effectiveStatus === 'on_hold';
 
   return (
     <div className="p-6 space-y-6">
@@ -421,24 +479,28 @@ export function ClaimDetail() {
           <Card>
             <CardHeader><CardTitle>Claim Status</CardTitle></CardHeader>
             <CardContent>
-              <ClaimTimeline status={effectiveStatus} />
+              <ClaimTimeline status={effectiveStatus} holdReason={holdReason} />
             </CardContent>
           </Card>
 
           {(effectiveStatus === 'approved' || effectiveStatus === 'processing' || effectiveStatus === 'on_hold' || effectiveStatus === 'settled') && claim.amount && (
-            <Card className="bg-emerald-50 border-emerald-200">
+            <Card className={isOnHold ? 'bg-orange-50 border-orange-200' : 'bg-emerald-50 border-emerald-200'}>
               <CardContent className="p-5">
                 <div className="flex items-start gap-3">
-                  <IconCircleCheck className="w-5 h-5 text-emerald-600 flex-shrink-0 mt-0.5" />
+                  {isOnHold
+                    ? <IconAlertCircle className="w-5 h-5 text-orange-600 flex-shrink-0 mt-0.5" />
+                    : <IconCircleCheck className="w-5 h-5 text-emerald-600 flex-shrink-0 mt-0.5" />}
                   <div>
-                    <p className="font-semibold text-emerald-900 mb-1">
-                      {effectiveStatus === 'settled' ? 'Refund Issued' : 'Refund Approved'}
+                    <p className={`font-semibold mb-1 ${isOnHold ? 'text-orange-900' : 'text-emerald-900'}`}>
+                      {effectiveStatus === 'settled' ? 'Refund Issued' : isOnHold ? 'Refund On Hold' : 'Refund Approved'}
                     </p>
-                    <p className="text-2xl font-bold text-emerald-800">₱{claim.amount.toLocaleString()}</p>
-                    <p className="text-sm text-emerald-700 mt-1">
+                    <p className={`text-2xl font-bold ${isOnHold ? 'text-orange-800' : 'text-emerald-800'}`}>₱{claim.amount.toLocaleString()}</p>
+                    <p className={`text-sm mt-1 break-words ${isOnHold ? 'text-orange-700' : 'text-emerald-700'}`}>
                       {effectiveStatus === 'settled'
                         ? 'This refund has been credited to your linked account.'
-                        : 'Refund is being processed and will arrive within 3–5 business days.'}
+                        : isOnHold
+                          ? (holdReason ? `Processing is paused — placed on hold due to ${holdReason}.` : 'Processing is paused while this claim is on hold.')
+                          : 'Refund is being processed and will arrive within 3–5 business days.'}
                     </p>
                   </div>
                 </div>

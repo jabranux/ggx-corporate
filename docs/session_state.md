@@ -3,6 +3,84 @@
 > Lightweight resume/checkpoint file. Detailed June 2026 history was archived to
 > `docs/archive/session_log_2026-06.md`.
 
+## Most Recent Work — Claim Details status timeline enhancement (2026-09-04)
+
+UX flow change on top of the Claims ↔ QuadX Bridge integration below: the
+"Where is my claim now?" status timeline in `ClaimDetail.tsx` now renders the
+5 permanent lifecycle nodes (Claim Filed, Pending Approval, Approved,
+Processing, Settled) plus a conditional On Hold node, with color rules that
+emphasize only the current state. Bridge stays the source of truth; no
+lifecycle rule changed.
+
+- **`ClaimDetail.tsx`**: `ClaimTimeline` rewritten — `buildTimelineSteps`
+  inserts the On Hold node only while `status === 'on_hold'` (always right
+  after Processing, before Settled — Bridge's `finance_hold_claim` only ever
+  reaches `on_hold` from `approved`/`processing`, both of which count as
+  "processing started," so this placement is unconditional, not branchy).
+  `nodeVisual` maps each node to `done` (green) / `processing` (amber,
+  current) / `onhold` (orange, current) / `active` (blue, current — the
+  pre-existing treatment, kept for Claim Filed/Pending Approval/Approved) /
+  `future` (gray) / and `settled`-as-current also renders green per the
+  task's own "all completed, including Settled, are green" spec (no blue
+  ring on the terminal state). Denied still renders the pre-existing red
+  "Claim Denied" box (regression-checked, unchanged). The refund banner card
+  now has a dedicated On Hold state ("Refund On Hold," orange, no "3–5
+  business days" ETA copy) instead of reusing the Approved/Processing copy.
+  Added `data-testid="claim-timeline"` (test-only, zero visual effect) so
+  the new DOM tests can scope queries without colliding with the Claim
+  Summary card's own `font-medium` text.
+- **Real API gap found and closed, with permission from the task's own
+  scope note** ("...unless a missing API field prevents GGX from rendering
+  the required state"): Bridge's customer-facing `GET /customer/claims/:reference`
+  deliberately never returned `hold_reason` (staff-only, by original
+  design — see `docs/migration/quadx-bridge-claims-customer-api.md`), but
+  the task requires showing "Placed on hold due to [reason]." **Sibling
+  HeyQ repo** (`supabase/functions/quadx-bridge/index.ts`,
+  `getCustomerClaim`): now returns `holdReason`, gated server-side to
+  `status === 'on_hold'` only (defense-in-depth on top of
+  `finance_resume_claim` already nulling `claims.hold_reason` in the DB the
+  moment a hold clears) — read-only projection change, no RPC/capability/
+  lifecycle rule touched. Contract doc updated to match. Codex review of
+  this repo's uncommitted diff: no findings.
+- **`claimBridgeService.ts`**: `ClaimBridgeState.holdReason: string | null`,
+  re-gated client-side too (never trust the network hop alone — a stale/
+  tampered response claiming a hold reason for a non-on_hold status is
+  discarded).
+- **Real bug found by Codex and fixed**: `bridgeResult` (and therefore
+  `holdReason`) wasn't reset when `claim?.id` changed — direct navigation
+  between two claim detail URLs (same mounted route component, only the
+  `:id` param changes) could transiently render the PREVIOUS claim's hold
+  reason under the NEW claim's id until the fresh fetch resolved, a
+  cross-claim data leak. Fixed: `setBridgeResult('loading')` synchronously
+  at the top of the id-keyed Bridge-sync effect, before the async
+  `ensureClaimLinked` call.
+- **Missing/long hold reason handling**: no reason → generic fallback
+  ("Placed on hold. See Claim Updates & Messages below for details.");
+  long reason → wraps (`break-words`), never clipped.
+- **Tests**: `tests/claim-detail-timeline.test.mjs` (new, 11 cases, DOM-level
+  against the real running app — Pending Approval/Approved/Processing/
+  Settled node states and colors, Rejected regression, On Hold with/without/
+  with-a-long reason, resumed-to-Processing removes the On Hold node
+  entirely, banner ETA-copy check, 375px mobile layout with no horizontal
+  overflow). `tests/api-claims.test.mjs` — `holdReason` added to the fake
+  Bridge fixture + one new relay-through assertion for an on-hold claim.
+  Registered in `package.json`'s `test` script.
+- **Validated**: `npm run typecheck` clean, `npm run build` clean, full
+  suite **202/202** (`npm test`, up from 191 — 11 new timeline tests + 1 new
+  claims-proxy test). Two Codex CLI review passes (GGX Corporate
+  `--uncommitted`, HeyQ `--uncommitted`): GGX pass found the `bridgeResult`
+  stale-claim bug above (fixed) plus two findings in an unrelated,
+  pre-existing untracked doc (`docs/integration/heyq-oms-contract.md`, not
+  part of this task — left alone); HeyQ pass found nothing.
+- **Out of scope, left untouched, per the task's own instructions**:
+  Bridge's `claims_log_customer_visible_activity` trigger still never
+  projects `on_hold`/resumed transitions into the customer-visible
+  `ticket_activities` feed ("stays an internal Finance detail" — a Phase 1
+  design decision predating this task). This means "Claim Updates &
+  Messages" today shows no historical hold entries at all; the task only
+  said such history "can remain" there if present, not that it must be
+  added — nothing here needed changing.
+
 ## Most Recent Work — GGX ↔ QuadX Bridge Claims integration (2026-09-03)
 
 Wired GGX's Claims feature to QuadX Bridge's real internal Claims Phase 1

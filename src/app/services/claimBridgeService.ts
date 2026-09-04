@@ -56,6 +56,11 @@ export interface ClaimBridgeState {
   reason: string;
   trackingNumber?: string;
   filedAt: string;
+  /** Finance's free-text hold reason — only ever present while `status ===
+   * 'on_hold'` (Bridge gates this server-side; see `getCustomerClaim` in
+   * the QuadX Bridge repo). Null/absent for every other status, including
+   * right after a hold clears. */
+  holdReason: string | null;
   ticket: { id: string; status: string; customerVisible: boolean };
   timelineEvents: ClaimTimelineEvent[];
   messages: ClaimBridgeMessage[];
@@ -121,6 +126,7 @@ interface RawClaimState {
   reason?: string;
   trackingNumber?: string;
   filedAt?: string;
+  holdReason?: string | null;
   ticket?: { id?: string; status?: string; customerVisible?: boolean };
   timelineEvents?: { type?: string; summary?: string; occurredAt?: string }[];
   messages?: { id?: string; from?: string; authorLabel?: string; body?: string; createdAt?: string }[];
@@ -138,6 +144,10 @@ function toClaimBridgeState(raw: RawClaimState): ClaimBridgeState | null {
     reason: typeof raw.reason === 'string' ? raw.reason : '',
     trackingNumber: typeof raw.trackingNumber === 'string' ? raw.trackingNumber : undefined,
     filedAt: typeof raw.filedAt === 'string' ? raw.filedAt : '',
+    // Re-gated client-side too (never trust the network hop alone): a stale/
+    // tampered response claiming a hold reason for a non-on_hold status must
+    // not surface it.
+    holdReason: status === 'on_hold' && typeof raw.holdReason === 'string' && raw.holdReason.trim() ? raw.holdReason : null,
     ticket: {
       id: raw.ticket.id,
       status: typeof raw.ticket.status === 'string' ? raw.ticket.status : 'open',

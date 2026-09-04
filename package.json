@@ -8,7 +8,7 @@
     "build": "tsc -b && vite build",
     "preview": "vite preview",
     "typecheck": "tsc -b --noEmit",
-    "test": "node --test --test-concurrency=1 tests/heyq-adapter.test.mjs tests/heyq-lifecycle.test.mjs tests/heyq-realtime.test.mjs tests/heyq-attachments.test.mjs tests/heyq-ticket-reference.test.mjs tests/heyq-request-lifecycle.test.mjs tests/heyq-typing.test.mjs tests/journey-mode.test.mjs tests/api-support-categories.test.mjs tests/api-support-typing.test.mjs tests/api-auth-quick-login.test.mjs tests/login-quick-login.test.mjs tests/hierarchical-category-picker.test.mjs tests/heyq-ticket-closure.test.mjs tests/transaction-active-ticket.test.mjs tests/api-claims.test.mjs",
+    "test": "node --test --test-concurrency=1 tests/heyq-adapter.test.mjs tests/heyq-lifecycle.test.mjs tests/heyq-realtime.test.mjs tests/heyq-attachments.test.mjs tests/heyq-ticket-reference.test.mjs tests/heyq-request-lifecycle.test.mjs tests/heyq-typing.test.mjs tests/journey-mode.test.mjs tests/api-support-categories.test.mjs tests/api-support-typing.test.mjs tests/api-auth-quick-login.test.mjs tests/login-quick-login.test.mjs tests/hierarchical-category-picker.test.mjs tests/heyq-ticket-closure.test.mjs tests/transaction-active-ticket.test.mjs tests/api-claims.test.mjs tests/claim-detail-timeline.test.mjs",
     "e2e:prod": "node scripts/prod-e2e-validation.mjs",
     "tokens": "node scripts/build-tokens.mjs",
     "tokens:figma": "node scripts/sync-figma-variables.mjs",
