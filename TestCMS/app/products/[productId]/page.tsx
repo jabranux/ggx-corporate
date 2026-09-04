@@ -15,7 +15,7 @@ export default async function ProductDetailPage({
   const boundCreatePageAction = createPageAction.bind(null, product.id);
 
   return (
-    <main style={{ maxWidth: 640, margin: '40px auto', padding: '0 20px' }}>
+    <main style={{ maxWidth: 720, margin: '40px auto', padding: '0 20px' }}>
       <p>
         <Link href="/products">&larr; All products</Link>
       </p>
@@ -31,6 +31,12 @@ export default async function ProductDetailPage({
         variable.
       </p>
 
+      <h2>Global content</h2>
+      <p style={{ display: 'flex', gap: 16 }}>
+        <Link href={`/products/${product.id}/header`}>Edit Header &rarr;</Link>
+        <Link href={`/products/${product.id}/footer`}>Edit Footer &rarr;</Link>
+      </p>
+
       <h2>Pages</h2>
       <form action={boundCreatePageAction}>
         <input name="title" placeholder="Page title (e.g. About Us)" required />
@@ -40,12 +46,19 @@ export default async function ProductDetailPage({
       {pages.length === 0 && <p>No pages yet.</p>}
       <ul>
         {pages.map((page) => (
-          <li key={page.id}>
-            <strong>{page.title}</strong> &mdash; <code>/{page.slug}</code>{' '}
-            &mdash;{' '}
-            <Link href={`/products/${product.id}/pages/${page.id}/preview`}>
-              Preview
-            </Link>
+          <li
+            key={page.id}
+            style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12 }}
+          >
+            <span>
+              <strong>{page.title}</strong> &mdash; <code>/{page.slug}</code>
+            </span>
+            <span style={{ display: 'flex', gap: 12, fontSize: 13 }}>
+              <Link href={`/products/${product.id}/pages/${page.id}/edit`}>Edit</Link>
+              <Link href={`/products/${product.id}/pages/${page.id}/preview`}>
+                Preview
+              </Link>
+            </span>
           </li>
         ))}
       </ul>

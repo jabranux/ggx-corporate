@@ -1,0 +1,22 @@
+article p {
+  margin: 0 0 12px;
+  line-height: 1.6;
+}
+
+article ul,
+article ol {
+  margin: 0 0 12px;
+  padding-left: 24px;
+}
+
+article a {
+  color: #1a1a1a;
+}
+
+footer a {
+  color: #1a1a1a;
+}
+
+footer p {
+  margin: 0;
+}

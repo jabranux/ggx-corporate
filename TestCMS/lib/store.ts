@@ -2,11 +2,27 @@ import fs from 'fs';
 import path from 'path';
 import crypto from 'crypto';
 
+export type NavItem = {
+  label: string;
+  url: string;
+};
+
+export type Header = {
+  siteName: string;
+  navigation: NavItem[];
+};
+
+export type Footer = {
+  content: string;
+};
+
 export type Product = {
   id: string;
   name: string;
   apiKey: string;
   createdAt: string;
+  header: Header;
+  footer: Footer;
 };
 
 export type Page = {
@@ -14,7 +30,9 @@ export type Page = {
   productId: string;
   title: string;
   slug: string;
+  content: string;
   createdAt: string;
+  updatedAt: string;
 };
 
 type Db = {
@@ -25,11 +43,31 @@ type Db = {
 const DATA_DIR = path.join(process.cwd(), 'data');
 const DB_PATH = path.join(DATA_DIR, 'db.json');
 
+function normalizeProduct(p: Product): Product {
+  return {
+    ...p,
+    header: p.header ?? { siteName: p.name, navigation: [] },
+    footer: p.footer ?? { content: '' },
+  };
+}
+
+function normalizePage(p: Page): Page {
+  return {
+    ...p,
+    content: p.content ?? '',
+    updatedAt: p.updatedAt ?? p.createdAt,
+  };
+}
+
 function readDb(): Db {
   if (!fs.existsSync(DB_PATH)) return { products: [], pages: [] };
   const raw = fs.readFileSync(DB_PATH, 'utf-8');
   if (!raw.trim()) return { products: [], pages: [] };
-  return JSON.parse(raw) as Db;
+  const db = JSON.parse(raw) as Db;
+  return {
+    products: db.products.map(normalizeProduct),
+    pages: db.pages.map(normalizePage),
+  };
 }
 
 function writeDb(db: Db) {
@@ -78,8 +116,28 @@ export function createProduct(name: string): Product {
     name,
     apiKey: `tcms_${crypto.randomBytes(24).toString('hex')}`,
     createdAt: new Date().toISOString(),
+    header: { siteName: name, navigation: [] },
+    footer: { content: '' },
   };
   db.products.push(product);
+  writeDb(db);
+  return product;
+}
+
+export function updateHeader(productId: string, header: Header): Product | undefined {
+  const db = readDb();
+  const product = db.products.find((p) => p.id === productId);
+  if (!product) return undefined;
+  product.header = header;
+  writeDb(db);
+  return product;
+}
+
+export function updateFooter(productId: string, footer: Footer): Product | undefined {
+  const db = readDb();
+  const product = db.products.find((p) => p.id === productId);
+  if (!product) return undefined;
+  product.footer = footer;
   writeDb(db);
   return product;
 }
@@ -102,14 +160,42 @@ export function createPage(productId: string, title: string): Page {
     db.pages.filter((p) => p.productId === productId).map((p) => p.slug)
   );
   const slug = uniqueSlug(slugify(title), taken);
+  const now = new Date().toISOString();
   const page: Page = {
     id: crypto.randomUUID(),
     productId,
     title,
     slug,
-    createdAt: new Date().toISOString(),
+    content: '',
+    createdAt: now,
+    updatedAt: now,
   };
   db.pages.push(page);
+  writeDb(db);
+  return page;
+}
+
+export function updatePage(
+  productId: string,
+  pageId: string,
+  data: { title: string; content: string }
+): Page | undefined {
+  const db = readDb();
+  const page = db.pages.find((p) => p.productId === productId && p.id === pageId);
+  if (!page) return undefined;
+
+  if (data.title !== page.title) {
+    const taken = new Set(
+      db.pages
+        .filter((p) => p.productId === productId && p.id !== pageId)
+        .map((p) => p.slug)
+    );
+    page.slug = uniqueSlug(slugify(data.title), taken);
+  }
+
+  page.title = data.title;
+  page.content = data.content;
+  page.updatedAt = new Date().toISOString();
   writeDb(db);
   return page;
 }

@@ -53,3 +53,59 @@ li {
 a {
   color: #1a1a1a;
 }
+
+.rte-content {
+  min-height: 160px;
+  padding: 12px 14px;
+  outline: none;
+  font-size: 15px;
+  line-height: 1.6;
+}
+
+.rte-content p {
+  margin: 0 0 12px;
+}
+
+.rte-content ul,
+.rte-content ol {
+  margin: 0 0 12px;
+  padding-left: 24px;
+  list-style-position: outside;
+}
+
+.rte-content li {
+  padding: 0;
+  border-bottom: none;
+}
+
+.rte-content h2,
+.rte-content h3 {
+  margin: 16px 0 8px;
+}
+
+.rte-content a {
+  text-decoration: underline;
+}
+
+.cms-rendered p {
+  margin: 0 0 12px;
+}
+
+.cms-rendered ul,
+.cms-rendered ol {
+  margin: 0 0 12px;
+  padding-left: 24px;
+  list-style-position: outside;
+}
+
+.cms-rendered a {
+  text-decoration: underline;
+}
+
+textarea {
+  padding: 8px 10px;
+  border: 1px solid #ccc;
+  border-radius: 6px;
+  font-size: 14px;
+  font-family: inherit;
+}
