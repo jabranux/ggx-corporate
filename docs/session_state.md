@@ -3,6 +3,129 @@
 > Lightweight resume/checkpoint file. Detailed June 2026 history was archived to
 > `docs/archive/session_log_2026-06.md`.
 
+## Most Recent Work — Ops Requests wired to QuadX Bridge's real Ops Request POC (2026-09-05)
+
+Replaced the Operations Requests feature's in-memory mock submission/retrieval
+with a real integration against QuadX Bridge's newly-shipped Ops Request POC
+(HeyQ repo commit `b36e9f2`, `docs/handoffs/phase2-ops-request-poc.md`) — the
+existing 3 categories / 11 request types and category-specific submission
+forms in `OperationsRequests.tsx`/`OpsRequestDetail.tsx` are unchanged; only
+the data layer underneath them was swapped.
+
+- **New BFF proxy routes** (`api/ops-requests/`), same
+  `requireSessionIdentity`/`bridgeFetch` boundary every other proxy route
+  uses: `catalog.ts` (GET, relays Bridge's fixed catalog, currently unused by
+  the UI but exposed for parity), `index.ts` (GET list + POST create, POST
+  requires an `Idempotency-Key` header — GGX has no backend DB of its own, so
+  the browser mints a fresh `crypto.randomUUID()` per submit, same convention
+  ticket/message creation already uses), `[id].ts` (GET one, by Bridge's
+  internal uuid or its human-readable `requestNumber` e.g. `OPR-2026-0001`),
+  `[id]/updates.ts` (GET the client-visible history — Bridge's own
+  projection already excludes internal Ops/Sales coordination, assignment,
+  and internal notes; this route is a pure relay).
+- **`api/_lib/bridge.ts`**: new one-way category/subtype mapping helpers
+  (`mapOpsCategoryToBridge`/`mapOpsCategoryFromBridge`/`mapOpsSubtypeToBridge`),
+  same pattern as the existing `mapClaimReasonToBridge`. GGX's own keys
+  (`supply`, `other_packaging`, `high_volume_dispatch`,
+  `warehouse_coordination`) differ cosmetically from Bridge's canonical
+  catalog keys (`supply_request`, `other_packaging_supplies`,
+  `high_volume_dispatch_coordination`, `warehouse_branch_coordination`) —
+  translated at the write boundary only; GGX's UI/type unions never changed.
+  `pickup_support`'s 5 subtypes were already identical, no mapping needed.
+- **`opsRequestsService.ts`**: rewritten from an in-memory array to a real
+  HTTP client (same `getJson`/`postJson` + `SESSION_EXPIRED_EVENT` pattern as
+  `claimBridgeService.ts`). Bridge's opaque `requestData` JSON carries GGX's
+  own category-specific fields plus `subaccountId`/`subaccountName`/
+  `createdBy` verbatim (Bridge has no subaccount concept — the Main
+  Account/subaccount/manager scoping rule stays entirely client-side,
+  filtering the flat list Bridge returns, same as before). `id` is now
+  Bridge's own `requestNumber` (`OPR-YYYY-NNNN`, replacing the old mock's
+  locally-generated `OPS-YYYY-NNNN`). New `getOpsRequestUpdates()` export
+  backs a new "Updates" card on the detail page.
+- **Status vocabulary is now Bridge's own settled lifecycle, not a separate
+  GGX vocabulary**: `OpsRequestStatus` narrowed from the old 7-value mock
+  enum (`submitted/in_review/coordinating/scheduled/completed/declined/cancelled`)
+  to Bridge's exact 5 (`submitted/in_review/in_progress/completed/rejected`)
+  — `OperationsRequests.tsx`'s status filter/summary counts and
+  `OpsRequestDetail.tsx`'s timeline/terminal-state branch updated to match.
+  Bridge's internal Sales/AM "needs input" intervention flag during In
+  Review is deliberately never surfaced as a separate status — such a
+  request still shows simply "In Review" (task's own instruction).
+- **`createdBy`** now comes from the real signed-in user (`useAuth()`'s
+  `user.name`) instead of a hardcoded `'Max Rodriguez'` string.
+- **Server-side subaccount authorization** (`api/ops-requests/index.ts`/`[id].ts`/`[id]/updates.ts`):
+  Bridge's Ops Request POC has no subaccount entity of its own — every
+  request for `ggx` lives in ONE pinned Bridge account
+  (`OPS_REQUESTS_ACCOUNT_EXTERNAL_ID = 'ggx-corporate'`, `api/_lib/bridge.ts`).
+  Three rounds of Codex CLI review on this session's own diff (`codex review
+  --uncommitted`) found the real consequence of that: using each GGX login's
+  own `externalOrgId` (`main` for the admin, `acme-luzon` for the manager,
+  `api/_lib/demoUsers.ts`) as the Bridge scoping key would have silently
+  split ONE demo corporate account's requests into two disjoint Bridge
+  accounts (breaking "Main Account sees consolidated data"), and relying on
+  the browser's own subaccount filter for anything else — the manager could
+  simply call `/api/ops-requests` directly and read (or, on create, forge
+  attribution for) another subaccount's data. Fixed: every Ops Request
+  Bridge call now pins `externalOrgId` to the one shared constant
+  (consolidation restored), while GGX's own subaccount scoping is enforced
+  **server-side** in the BFF against each row's opaque
+  `requestData.subaccountId` — a manager's list is filtered before it ever
+  reaches the browser, `GET /:id` and `/:id/updates` 404 (never 403, same
+  "don't reveal existence" convention every other proxy route uses) for a
+  request outside their subaccount, and `POST`'s `requestData.subaccountId`/
+  `subaccountName`/`createdBy` are forced from the verified session (never
+  the client-supplied value) unless the caller is the Main Account admin,
+  who already has unrestricted cross-subaccount access in this app's
+  permission model and whose explicit subaccount-selector choice is trusted.
+  New `requireSessionIdentityWithName`/`resolveDisplayName`/
+  `resolveAccountName` (`api/_lib/bridge.ts`/`demoUsers.ts`) resolve the
+  caller's real name/subaccount server-side for this, never trusting a
+  client-supplied `requestedByName`/`accountName`.
+- **Other Codex-found regressions fixed in the same passes**: a failed
+  submission was silently shown as "Request submitted" (`submitOpsRequest`
+  returns `null` on failure, the handler ignored it) — now shows a retryable
+  error banner with the form preserved; a retried failed submission minted a
+  fresh idempotency key each time (risking a real duplicate Ops Request if
+  Bridge's first response was merely lost) — the key is now minted once per
+  submission attempt and reused across retries; direct navigation between
+  two request detail URLs could transiently render the previous request's
+  data under the new id — state resets synchronously on `id` change; a list
+  load failure rendered as "No operations requests" — now a distinct
+  retryable failure card (`OpsRequestsUnavailableError`); switching
+  subaccount view twice quickly could let the earlier (now-stale) fetch
+  overwrite the newer one — a generation-counter guard, same pattern
+  `activeTicketsRequestRef` uses elsewhere in this codebase.
+- **Tests**: `tests/api-ops-requests.test.mjs` (new, 23 cases, esbuild-bundled
+  against a real local fake Bridge HTTP server — auth gate on all 4 routes,
+  category/subtype mapping for all 3 categories including the ones that
+  differ from Bridge's keys, Idempotency-Key requirement, 404 propagation,
+  and the full subaccount-authorization matrix: admin consolidated list,
+  manager scoped list, manager 404 on another subaccount's request/updates,
+  manager's forged `requestData` overridden server-side, admin's explicit
+  subaccount choice trusted). Registered in `package.json`'s `test` script.
+- **Validated**: `npm run typecheck` clean, `npm run build` clean (`dist/`
+  scanned, no Bridge key/header string present), new test file 23/23, full
+  suite **225/225** (up from 217 pre-existing). Four Codex CLI review passes
+  (`codex review --uncommitted`) across this session: first found the
+  silent-success-on-failure bug (fixed); second found the two P1 subaccount-
+  authorization gaps above plus a stale-list race (fixed); third/final pass
+  clean, no findings.
+- **Known limitation, not a bug**: Bridge's own seeded demo Ops Requests
+  (`scripts/supabase-seed-ops-requests.mjs` in the HeyQ repo, account
+  `bp-org-metro-merchant`) live under a different Bridge account-external-id
+  than the `ggx-corporate` constant this integration pins to — an
+  intentionally separate namespace (that account is Bridge's own internal
+  Ops/Sales staff demo data, not tied to any specific GGX Biz+ login). GGX's
+  demo accounts will see an empty list until they submit their own requests
+  (which then round-trip correctly, consolidated/scoped exactly as described
+  above) rather than Bridge's pre-seeded 10-request staff demo set.
+- **Still blocked on live round-trip validation**: no `QUADX_BRIDGE_URL`/
+  `QUADX_BRIDGE_API_KEY` configured in this environment (same recurring
+  constraint as every prior HeyQ-integration session in this project) — the
+  route-level tests above exercise the real handler code against a
+  local fake Bridge, not the actual hosted deployment, which per the Bridge
+  team's status report was not deployed (app deploy) this pass either.
+
 ## Most Recent Work — Claim Details status timeline enhancement (2026-09-04)
 
 UX flow change on top of the Claims ↔ QuadX Bridge integration below: the

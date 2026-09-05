@@ -97,6 +97,30 @@ export function resolveBridgeIdentity(userId: string): BridgeIdentity | null {
 }
 
 /**
+ * Server-verified display name for a VERIFIED session's user id — same
+ * "never trust the client, always re-read the current table" rule as
+ * `resolveBridgeIdentity`. Used where a Bridge write carries a human-
+ * readable "requested by" name (Ops Requests) that must not be spoofable
+ * via the request body (Codex review finding).
+ */
+export function resolveDisplayName(userId: string): string | null {
+  const user = DEMO_USERS.find((u) => u.id === userId);
+  return user ? user.name : null;
+}
+
+/**
+ * Server-verified subaccount/account name for a VERIFIED session's user id —
+ * same rule as `resolveDisplayName`. Paired with `resolveBridgeIdentity`'s
+ * `externalOrgId` (== `accountId`, e.g. `'main'` for the admin, `'acme-luzon'`
+ * for the manager) to authoritatively label which account/subaccount a
+ * server-enforced write belongs to, never a client-supplied label.
+ */
+export function resolveAccountName(userId: string): string | null {
+  const user = DEMO_USERS.find((u) => u.id === userId);
+  return user ? user.accountName : null;
+}
+
+/**
  * Resolve a Quick Login scope (`'main'` | `'subaccount'`) to its demo user,
  * for `POST /api/auth/quick-login`. Only the two fixed scopes above resolve
  * to anything; any other value (including a client-supplied user id) returns

@@ -5,7 +5,6 @@ import {
   IconArrowRight,
   IconCircleCheck,
   IconAlertCircle,
-  IconBan,
   IconInfoCircle,
   IconMessage,
   IconMapPin,
@@ -20,51 +19,38 @@ import { Button } from '../components/ui/Button';
 import { Badge } from '../components/ui/Badge';
 import {
   getOpsRequestById,
+  getOpsRequestUpdates,
   CATEGORY_META,
   STATUS_META,
   SUPPLY_TYPE_LABELS,
   PICKUP_SUPPORT_LABELS,
   ASSISTANCE_TYPE_LABELS,
   type OperationsRequest,
+  type OpsRequestUpdate,
 } from '../services/opsRequestsService';
 
 // ─── Status timeline ──────────────────────────────────────────────────────────
 
 const TIMELINE_STEPS: Array<{ key: string; label: string; description: string }> = [
-  { key: 'submitted',    label: 'Submitted',    description: 'Request received by GGX Operations.' },
-  { key: 'in_review',   label: 'In Review',    description: 'Operations team is reviewing the request.' },
-  { key: 'coordinating', label: 'Coordinating', description: 'Team is coordinating logistics and resources.' },
-  { key: 'scheduled',   label: 'Scheduled',    description: 'Execution is confirmed and scheduled.' },
-  { key: 'completed',   label: 'Completed',    description: 'Request has been fulfilled successfully.' },
+  { key: 'submitted',   label: 'Submitted',   description: 'Request received by GGX Operations.' },
+  { key: 'in_review',   label: 'In Review',   description: 'Operations team is reviewing the request.' },
+  { key: 'in_progress', label: 'In Progress', description: 'Operations is coordinating and fulfilling the request.' },
+  { key: 'completed',   label: 'Completed',   description: 'Request has been fulfilled successfully.' },
 ];
 
-const TIMELINE_ORDER = ['submitted', 'in_review', 'coordinating', 'scheduled', 'completed'];
+const TIMELINE_ORDER = ['submitted', 'in_review', 'in_progress', 'completed'];
 
 function OpsRequestTimeline({ request }: { request: OperationsRequest }) {
   const { status } = request;
 
-  if (status === 'declined') {
+  if (status === 'rejected') {
     return (
       <div className="flex items-start gap-3 rounded-lg bg-red-50 border border-red-200 px-4 py-3">
         <IconAlertCircle className="w-5 h-5 text-red-500 flex-shrink-0 mt-0.5" />
         <div>
-          <p className="text-sm font-semibold text-red-900">Request Declined</p>
+          <p className="text-sm font-semibold text-red-900">Request Rejected</p>
           <p className="text-sm text-red-700 mt-0.5">
             This request was reviewed and could not be fulfilled. Please contact your account manager or submit a new request if the situation changes.
-          </p>
-        </div>
-      </div>
-    );
-  }
-
-  if (status === 'cancelled') {
-    return (
-      <div className="flex items-start gap-3 rounded-lg bg-gray-50 border border-gray-200 px-4 py-3">
-        <IconBan className="w-5 h-5 text-gray-400 flex-shrink-0 mt-0.5" />
-        <div>
-          <p className="text-sm font-semibold text-gray-700">Request Cancelled</p>
-          <p className="text-sm text-gray-500 mt-0.5">
-            This request was cancelled before fulfilment.
           </p>
         </div>
       </div>
@@ -227,13 +213,23 @@ export function OpsRequestDetail() {
   const { id } = useParams<{ id: string }>();
 
   const [request, setRequest] = useState<OperationsRequest | null | undefined>(undefined);
+  const [updates, setUpdates] = useState<OpsRequestUpdate[]>([]);
 
   useEffect(() => {
     let cancelled = false;
+    // Reset synchronously on every id change — direct navigation between two
+    // request URLs (same mounted route component, only :id changes) could
+    // otherwise transiently render the PREVIOUS request's details/history
+    // under the NEW id until the fresh fetches resolve (Codex review finding).
+    setRequest(undefined);
+    setUpdates([]);
     if (!id) { setRequest(null); return; }
     getOpsRequestById(id)
       .then((r) => { if (!cancelled) setRequest(r); })
       .catch(() => { if (!cancelled) setRequest(null); });
+    getOpsRequestUpdates(id)
+      .then((u) => { if (!cancelled) setUpdates(u); })
+      .catch(() => { if (!cancelled) setUpdates([]); });
     return () => { cancelled = true; };
   }, [id]);
 
@@ -370,6 +366,27 @@ export function OpsRequestDetail() {
               <OpsRequestTimeline request={request} />
             </CardContent>
           </Card>
+
+          {updates.length > 0 && (
+            <Card>
+              <CardHeader><CardTitle>Updates</CardTitle></CardHeader>
+              <CardContent>
+                <div className="space-y-4">
+                  {updates.map((u, i) => (
+                    <div key={`${u.occurredAt}-${i}`} className="flex gap-3">
+                      <div className="w-1.5 h-1.5 rounded-full bg-blue-400 flex-shrink-0 mt-1.5" />
+                      <div>
+                        <p className="text-sm text-gray-800">{u.summary}</p>
+                        {u.occurredAt && (
+                          <p className="text-xs text-gray-400 mt-0.5">{new Date(u.occurredAt).toLocaleString()}</p>
+                        )}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </CardContent>
+            </Card>
+          )}
 
           {request.status === 'completed' && (
             <Card className="bg-emerald-50 border-emerald-200">

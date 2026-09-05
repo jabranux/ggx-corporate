@@ -1,7 +1,7 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router';
 import {
-  IconPlus, IconCircleCheck, IconBox, IconTruck, IconAdjustments, IconMapPin,
+  IconPlus, IconCircleCheck, IconBox, IconTruck, IconAdjustments, IconMapPin, IconAlertCircle,
 } from '@tabler/icons-react';
 import { Card, CardContent } from '../components/ui/Card';
 import { Button } from '../components/ui/Button';
@@ -151,6 +151,7 @@ export function OperationsRequests() {
   const showSubaccountSelector = mainView && !isManager && subAccounts.length > 1;
 
   const [requests, setRequests]               = useState<OperationsRequest[]>([]);
+  const [listError, setListError]             = useState(false);
   const [subaccountOptions, setSubaccountOptions] = useState<{ id: string; name: string }[]>([]);
   const [categoryFilter, setCategoryFilter]   = useState<OpsRequestCategory | 'all'>('all');
   const [statusFilter, setStatusFilter]       = useState<string>('all');
@@ -161,15 +162,40 @@ export function OperationsRequests() {
   const [form, setForm]                   = useState<FormState>(emptyForm());
   const [submitting, setSubmitting]       = useState(false);
   const [submitSuccess, setSubmitSuccess] = useState(false);
+  const [submitError, setSubmitError]     = useState(false);
   const [addressPickerOpen, setAddressPickerOpen] = useState(false);
+  // Minted once per logical submission attempt (openForm), reused across
+  // retries of the SAME attempt so a lost-response retry re-fetches the
+  // original Bridge request instead of creating a second real one.
+  const submitIdempotencyKeyRef = useRef<string>(crypto.randomUUID());
+
+  // Guards against an earlier scope's slower fetch resolving AFTER a newer
+  // one (e.g. an admin switching subaccount view twice in quick succession)
+  // and overwriting the current scope's rows with the stale scope's —
+  // same generation-counter pattern `activeTicketsRequestRef` uses elsewhere
+  // in this codebase (Codex review finding).
+  const listRequestGenerationRef = useRef(0);
 
   const refresh = () => {
+    const generation = ++listRequestGenerationRef.current;
     getOpsRequests(scopeId ? { subaccountId: scopeId } : undefined)
-      .then(setRequests)
-      .catch(() => {});
+      .then((data) => {
+        if (generation !== listRequestGenerationRef.current) return; // superseded — discard
+        setRequests(data);
+        setListError(false);
+      })
+      // A genuine load failure (session expired, Bridge unreachable) must
+      // not render as "no requests" — show a distinct, retryable state.
+      .catch(() => {
+        if (generation !== listRequestGenerationRef.current) return;
+        setListError(true);
+      });
   };
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  useEffect(refresh, [scopeId]);
+  useEffect(() => {
+    setRequests([]); // never show the PREVIOUS scope's rows while the new scope loads
+    refresh();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [scopeId]);
 
   useEffect(() => {
     getSubaccountOptions().then(setSubaccountOptions).catch(() => {});
@@ -190,7 +216,7 @@ export function OperationsRequests() {
   });
 
   // ── Summary counts ──────────────────────────────────────────────────────────
-  const openCount   = requests.filter((r) => ['submitted', 'in_review', 'coordinating', 'scheduled'].includes(r.status)).length;
+  const openCount   = requests.filter((r) => ['submitted', 'in_review', 'in_progress'].includes(r.status)).length;
   const supplyCount = requests.filter((r) => r.category === 'supply').length;
   const pickupCount = requests.filter((r) => r.category === 'pickup_support').length;
 
@@ -230,6 +256,7 @@ export function OperationsRequests() {
   const handleSubmit = async () => {
     if (!formValid() || submitting) return;
     setSubmitting(true);
+    setSubmitError(false);
     try {
       // Determine scope:
       //   A/B (main view, admin): use the form's explicit subaccountId selection.
@@ -251,11 +278,11 @@ export function OperationsRequests() {
 
       const addrStr = form.selectedAddress ? formatAddress(form.selectedAddress) : undefined;
 
-      await submitOpsRequest({
+      const created = await submitOpsRequest({
         category:     form.category as OpsRequestCategory,
         subaccountId: subId,
         subaccountName: subName,
-        createdBy:    'Max Rodriguez',
+        createdBy:    user?.name ?? 'GGX Biz+ User',
         notes:        form.notes || undefined,
         supplyType:   form.supplyType as SupplyType || undefined,
         quantity:     form.quantity ? parseInt(form.quantity, 10) : undefined,
@@ -268,7 +295,14 @@ export function OperationsRequests() {
         estimatedWeight: form.estimatedWeight || undefined,
         preferredPickupWindow: form.category === 'pickup_support' ? (form.preferredPickupWindow || undefined) : undefined,
         assistanceType: form.assistanceType as OperationalAssistanceType || undefined,
-      });
+      }, submitIdempotencyKeyRef.current);
+      // `submitOpsRequest` resolves to `null` (never throws) on a failed/
+      // unreachable Bridge call — never assume success (Codex review
+      // finding: silently losing an operational request is a P1).
+      if (!created) {
+        setSubmitError(true);
+        return;
+      }
       setSubmitSuccess(true);
       refresh();
       setTimeout(() => {
@@ -314,6 +348,8 @@ export function OperationsRequests() {
 
     setForm(init);
     setSubmitSuccess(false);
+    setSubmitError(false);
+    submitIdempotencyKeyRef.current = crypto.randomUUID();
     setFormOpen(true);
   };
 
@@ -424,17 +460,26 @@ export function OperationsRequests() {
             <option value="all">All statuses</option>
             <option value="submitted">Submitted</option>
             <option value="in_review">In Review</option>
-            <option value="coordinating">Coordinating</option>
-            <option value="scheduled">Scheduled</option>
+            <option value="in_progress">In Progress</option>
             <option value="completed">Completed</option>
-            <option value="declined">Declined</option>
-            <option value="cancelled">Cancelled</option>
+            <option value="rejected">Rejected</option>
           </Select>
         </div>
       </div>
 
       {/* Request list */}
-      {visible.length === 0 ? (
+      {listError ? (
+        <Card>
+          <CardContent className="py-12 text-center">
+            <IconAlertCircle className="w-10 h-10 text-red-300 mx-auto mb-3" />
+            <p className="text-sm font-semibold text-gray-700">Couldn't load operations requests</p>
+            <p className="text-xs text-gray-400 mt-1 mb-4">
+              Something went wrong reaching Operations. Please try again.
+            </p>
+            <Button variant="outline" size="sm" onClick={refresh}>Retry</Button>
+          </CardContent>
+        </Card>
+      ) : visible.length === 0 ? (
         <Card>
           <CardContent className="py-12 text-center">
             <IconAdjustments className="w-10 h-10 text-gray-300 mx-auto mb-3" />
@@ -456,7 +501,7 @@ export function OperationsRequests() {
             return (
               <Card
                 key={r.id}
-                className={`cursor-pointer hover:shadow-md transition-shadow ${r.status === 'completed' || r.status === 'cancelled' || r.status === 'declined' ? 'opacity-70' : ''}`}
+                className={`cursor-pointer hover:shadow-md transition-shadow ${r.status === 'completed' || r.status === 'rejected' ? 'opacity-70' : ''}`}
                 onClick={() => navigate(`/dashboard/operations-requests/${r.id}`)}
               >
                 <CardContent className="p-5">
@@ -508,6 +553,18 @@ export function OperationsRequests() {
           </div>
         ) : (
           <div className="space-y-4">
+
+            {submitError && (
+              <div className="flex items-start gap-3 rounded-lg bg-red-50 border border-red-200 px-4 py-3">
+                <IconAlertCircle className="w-5 h-5 text-red-500 flex-shrink-0 mt-0.5" />
+                <div>
+                  <p className="text-sm font-semibold text-red-900">Request could not be submitted</p>
+                  <p className="text-sm text-red-700 mt-0.5">
+                    Something went wrong reaching Operations. Your entries below are unchanged — please try again.
+                  </p>
+                </div>
+              </div>
+            )}
 
             {/* Category picker */}
             <div>

@@ -30,7 +30,7 @@
  * `session.ts` and `demoUsers.ts`'s docblocks for the exact boundary.
  */
 import { readVerifiedSession, SessionConfigError } from './session.js';
-import { resolveBridgeIdentity, type BridgeIdentity } from './demoUsers.js';
+import { resolveBridgeIdentity, resolveDisplayName, resolveAccountName, type BridgeIdentity } from './demoUsers.js';
 
 export { SessionConfigError } from './session.js';
 
@@ -125,6 +125,47 @@ export function requireSessionIdentity(req: ProxyRequest, res: ProxyResponse): B
     return null;
   }
   return identity;
+}
+
+/**
+ * Same as `requireSessionIdentity`, plus the caller's server-verified
+ * display name and account/subaccount name
+ * (`demoUsers.ts#resolveDisplayName`/`resolveAccountName`) — for Ops
+ * Requests, which carries human-readable "requested by"/"subaccount" labels
+ * into Bridge's opaque `requestData`: a client-supplied value for either
+ * must never be trusted (Codex review finding — a manager could otherwise
+ * attribute a request to someone else, or to a subaccount they don't own).
+ */
+export function requireSessionIdentityWithName(
+  req: ProxyRequest,
+  res: ProxyResponse,
+): { identity: BridgeIdentity; displayName: string; accountName: string } | null {
+  const session = readVerifiedSession(req);
+  if (!session) {
+    res.status(401).json({ error: 'Not signed in. Sign in and try again.' });
+    return null;
+  }
+  const identity = resolveBridgeIdentity(session.sub);
+  const displayName = resolveDisplayName(session.sub);
+  const accountName = resolveAccountName(session.sub);
+  if (!identity || !displayName || !accountName) {
+    res.status(401).json({ error: 'Session account is no longer valid. Sign in again.' });
+    return null;
+  }
+  return { identity, displayName, accountName };
+}
+
+/**
+ * `true` when `accountId` (== a verified `BridgeIdentity.externalOrgId`) is
+ * the "sees everything" sentinel already established by this codebase's own
+ * pre-existing client-side scoping convention (`opsRequestsService.ts`'s
+ * previous mock-era filter, `subaccountId !== 'all' && subaccountId !== 'main'`)
+ * — the Main Account admin, never a specific subaccount. A subaccount
+ * manager's `accountId` is their own subaccount id (e.g. `'acme-luzon'`) and
+ * is never this sentinel.
+ */
+export function isConsolidatedAccountId(accountId: string): boolean {
+  return accountId === 'main';
 }
 
 /**
@@ -230,6 +271,27 @@ export async function relay(res: ProxyResponse, bridgeRes: Response): Promise<vo
   res.send(text);
 }
 
+/**
+ * Like `relay`, but for routes that must inspect/filter Bridge's JSON body
+ * server-side (e.g. subaccount ownership) before it ever reaches the
+ * browser — never usable for a route that just forwards bytes unchanged.
+ * Returns `null` on a non-2xx response (already relayed to `res` unchanged,
+ * same status/body Bridge sent) so the caller can bail out immediately.
+ */
+export async function relayJson(res: ProxyResponse, bridgeRes: Response): Promise<unknown | null> {
+  if (!bridgeRes.ok) {
+    await relay(res, bridgeRes);
+    return null;
+  }
+  const text = await bridgeRes.text();
+  try {
+    return text ? JSON.parse(text) : null;
+  } catch {
+    res.status(502).json({ error: 'QuadX Bridge returned an unexpected response.' });
+    return null;
+  }
+}
+
 /** Missing/invalid server config → 500 with a clear, actionable message. Never
  * exposes the key; only whether it/the base URL is configured. */
 export function failConfig(res: ProxyResponse, err: unknown): void {
@@ -264,6 +326,75 @@ const CLAIM_REASON_TO_BRIDGE: Record<string, string> = {
 export function mapClaimReasonToBridge(reason: string): string {
   return CLAIM_REASON_TO_BRIDGE[reason] ?? 'other';
 }
+
+// GGX's existing Ops Request category/subtype keys (src/app/data/operationsRequests.ts,
+// preserved unchanged per the task's own instruction) vs. Bridge's
+// `OPS_REQUEST_CATALOG` keys (supabase/functions/quadx-bridge/index.ts in the
+// HeyQ repo) — a handful differ cosmetically. One-way, display-key ->
+// canonical-Bridge-key, same pattern as CLAIM_REASON_TO_BRIDGE above. GGX's
+// own type unions/labels never change; only this boundary translates.
+const OPS_CATEGORY_TO_BRIDGE: Record<string, string> = {
+  supply: 'supply_request',
+  pickup_support: 'pickup_support',
+  operational_assistance: 'operational_assistance',
+};
+
+const OPS_CATEGORY_FROM_BRIDGE: Record<string, string> = {
+  supply_request: 'supply',
+  pickup_support: 'pickup_support',
+  operational_assistance: 'operational_assistance',
+};
+
+const OPS_SUBTYPE_TO_BRIDGE: Record<string, string> = {
+  // supply
+  pouches: 'pouches',
+  boxes: 'boxes',
+  other_packaging: 'other_packaging_supplies',
+  // pickup support (all identical to Bridge already)
+  immediate_pickup: 'immediate_pickup',
+  bulk_pickup_assistance: 'bulk_pickup_assistance',
+  four_wheel_pickup: 'four_wheel_pickup',
+  reschedule_pickup: 'reschedule_pickup',
+  escalate_missed_pickup: 'escalate_missed_pickup',
+  // operational assistance
+  special_handling: 'special_handling',
+  high_volume_dispatch: 'high_volume_dispatch_coordination',
+  warehouse_coordination: 'warehouse_branch_coordination',
+};
+
+export function mapOpsCategoryToBridge(category: string): string {
+  return OPS_CATEGORY_TO_BRIDGE[category] ?? category;
+}
+
+export function mapOpsCategoryFromBridge(category: string): string {
+  return OPS_CATEGORY_FROM_BRIDGE[category] ?? category;
+}
+
+export function mapOpsSubtypeToBridge(subtype: string): string {
+  return OPS_SUBTYPE_TO_BRIDGE[subtype] ?? subtype;
+}
+
+/**
+ * Bridge's Ops Request POC has no subaccount entity — `externalOrgId` IS the
+ * account key throughout (one demo corporate account per product; see the
+ * HeyQ repo's `docs/handoffs/phase2-ops-request-poc.md`). GGX Corporate's own
+ * demo identities carry TWO different `externalOrgId` values instead
+ * ('main' for the admin, 'acme-luzon' for the manager —
+ * `api/_lib/demoUsers.ts`), because that field doubles as the ticket/claims
+ * requester-org key for those older, unrelated features.
+ *
+ * Using `identity.externalOrgId` unchanged for Ops Requests would silently
+ * split the ONE demo corporate account's requests into two disjoint Bridge
+ * accounts — breaking the product rule that Main Account sees consolidated
+ * data across every subaccount (Codex review finding, fixed here). Every
+ * Ops Request Bridge call therefore pins `externalOrgId` to this single
+ * constant regardless of which GGX identity is calling; `externalUserId`
+ * still reflects the real signed-in person unchanged. GGX's own
+ * subaccount/manager scoping (which subaccount a request belongs to) is
+ * carried inside Bridge's opaque `requestData` JSON and applied entirely
+ * client-side, same as before this integration.
+ */
+export const OPS_REQUESTS_ACCOUNT_EXTERNAL_ID = 'ggx-corporate';
 
 /**
  * Re-verify a category id against Bridge's LIVE `GET /customer/categories`
