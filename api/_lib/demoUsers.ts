@@ -36,6 +36,24 @@ export interface DemoUser {
   name: string;
   accountId: string;
   accountName: string;
+  /**
+   * The account's real GGX Merchant ID (`G-######`) — the authoritative
+   * identifier for this Business+ account, assigned by GGX (not by QuadX
+   * Bridge). Resolved ONLY via `resolveMerchantId` below, used ONLY by
+   * ticket creation (`api/support/tickets/index.ts`) so Bridge's Customer
+   * Profile can key its canonical id off the real Merchant ID instead of
+   * generating its own placeholder for these two live demo accounts
+   * (Customer 360 enhancement, "authoritative identifier from the source
+   * system" — see the HeyQ repo's
+   * `server/supabaseBridge.ts#createCustomerTicketInSupabase`).
+   *
+   * Deliberately NOT part of `BridgeIdentity`: that type is spread
+   * wholesale (`...identity`) into several different Bridge call bodies
+   * (claims messages/sync, ticket messages, typing) whose contracts are
+   * fixed and tested — adding a field there would leak into all of them,
+   * not just ticket creation.
+   */
+  merchantId: string;
 }
 
 export interface BridgeIdentity {
@@ -44,8 +62,8 @@ export interface BridgeIdentity {
 }
 
 const DEMO_USERS: readonly DemoUser[] = [
-  { id: 'user-admin-001', email: 'max@email.com', password: '!1234qwer', role: 'admin', name: 'Max Rodriguez', accountId: 'main', accountName: 'Main Account' },
-  { id: 'user-mgr-001', email: 'manager@email.com', password: '!1234qwer', role: 'manager', name: 'Rina Lopez', accountId: 'acme-luzon', accountName: 'Acme Luzon' },
+  { id: 'user-admin-001', email: 'max@email.com', password: '!1234qwer', role: 'admin', name: 'Max Rodriguez', accountId: 'main', accountName: 'Main Account', merchantId: 'G-448219' },
+  { id: 'user-mgr-001', email: 'manager@email.com', password: '!1234qwer', role: 'manager', name: 'Rina Lopez', accountId: 'acme-luzon', accountName: 'Acme Luzon', merchantId: 'G-556042' },
 ];
 
 export type QuickLoginScope = 'main' | 'subaccount';
@@ -94,6 +112,18 @@ export function resolveBridgeIdentity(userId: string): BridgeIdentity | null {
   const user = DEMO_USERS.find((u) => u.id === userId);
   if (!user) return null;
   return { externalUserId: user.email, externalOrgId: user.accountId };
+}
+
+/**
+ * Server-verified Merchant ID for a VERIFIED session's user id — same
+ * "never trust the client, always re-read the current table" rule as
+ * `resolveDisplayName`/`resolveAccountName`. Used ONLY by ticket creation
+ * (`api/support/tickets/index.ts`), never merged into `BridgeIdentity` —
+ * see `DemoUser.merchantId`'s docblock for why.
+ */
+export function resolveMerchantId(userId: string): string | null {
+  const user = DEMO_USERS.find((u) => u.id === userId);
+  return user ? user.merchantId : null;
 }
 
 /**

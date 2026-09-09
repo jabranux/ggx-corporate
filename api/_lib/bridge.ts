@@ -30,7 +30,7 @@
  * `session.ts` and `demoUsers.ts`'s docblocks for the exact boundary.
  */
 import { readVerifiedSession, SessionConfigError } from './session.js';
-import { resolveBridgeIdentity, resolveDisplayName, resolveAccountName, type BridgeIdentity } from './demoUsers.js';
+import { resolveBridgeIdentity, resolveDisplayName, resolveAccountName, resolveMerchantId, type BridgeIdentity } from './demoUsers.js';
 
 export { SessionConfigError } from './session.js';
 
@@ -153,6 +153,34 @@ export function requireSessionIdentityWithName(
     return null;
   }
   return { identity, displayName, accountName };
+}
+
+/**
+ * Same as `requireSessionIdentity`, plus the caller's server-verified
+ * Merchant ID (`demoUsers.ts#resolveMerchantId`) — used ONLY by ticket
+ * creation (`api/support/tickets/index.ts`), which is the one Bridge call
+ * that stores this as the account's authoritative Customer Profile
+ * canonical id (Customer 360 enhancement). `merchantId` is returned
+ * separately from `identity`, never merged into it, so it can never
+ * accidentally leak into the other routes that spread `...identity`
+ * wholesale into a Bridge call body (claims, ticket messages, typing —
+ * each has its own fixed, tested contract).
+ */
+export function requireSessionIdentityWithMerchantId(
+  req: ProxyRequest,
+  res: ProxyResponse,
+): { identity: BridgeIdentity; merchantId: string | null } | null {
+  const session = readVerifiedSession(req);
+  if (!session) {
+    res.status(401).json({ error: 'Not signed in. Sign in and try again.' });
+    return null;
+  }
+  const identity = resolveBridgeIdentity(session.sub);
+  if (!identity) {
+    res.status(401).json({ error: 'Session account is no longer valid. Sign in again.' });
+    return null;
+  }
+  return { identity, merchantId: resolveMerchantId(session.sub) };
 }
 
 /**

@@ -11,7 +11,7 @@
  * sends is discarded, never forwarded to Bridge.
  */
 import {
-  bridgeFetch, requireSessionIdentity, hasAttachmentPayload, relay, failConfig, failUpstream,
+  bridgeFetch, requireSessionIdentity, requireSessionIdentityWithMerchantId, hasAttachmentPayload, relay, failConfig, failUpstream,
   getHeader, getRequestBody, verifyLiveCategoryId,
   BridgeConfigError, SessionConfigError, type ProxyRequest, type ProxyResponse,
 } from '../../_lib/bridge.js';
@@ -30,9 +30,10 @@ export default async function handler(req: ProxyRequest, res: ProxyResponse): Pr
 
     if (req.method === 'POST') {
       const body = await getRequestBody(req);
-      const { demoAccountId: _ignoredDemoAccountId, externalUserId: _ignoredUserId, externalOrgId: _ignoredOrgId, ...rest } = body;
-      const identity = requireSessionIdentity(req, res);
-      if (!identity) return; // 401 already written
+      const { demoAccountId: _ignoredDemoAccountId, externalUserId: _ignoredUserId, externalOrgId: _ignoredOrgId, merchantId: _ignoredMerchantId, ...rest } = body;
+      const resolved = requireSessionIdentityWithMerchantId(req, res);
+      if (!resolved) return; // 401 already written
+      const { identity, merchantId } = resolved;
 
       // Text-only Bridge: refuse attachment payloads here rather than round-
       // tripping to Bridge — no upload/storage handling is built in this proxy.
@@ -63,7 +64,10 @@ export default async function handler(req: ProxyRequest, res: ProxyResponse): Pr
       const idempotencyKey = getHeader(req, 'idempotency-key');
       const bridgeRes = await bridgeFetch('/customer/tickets', {
         method: 'POST',
-        body: { ...rest, categoryId, ...identity }, // server-resolved identity always wins
+        // server-resolved identity always wins; merchantId (Customer 360
+        // enhancement) only when this account actually has one — never a
+        // client-supplied value (destructured out of `rest` above).
+        body: { ...rest, categoryId, ...identity, ...(merchantId ? { merchantId } : {}) },
         headers: idempotencyKey ? { 'Idempotency-Key': idempotencyKey } : undefined,
       });
       await relay(res, bridgeRes);
