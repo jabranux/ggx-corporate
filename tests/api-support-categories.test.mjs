@@ -51,7 +51,10 @@ before(async () => {
   process.env.QUADX_BRIDGE_URL = `http://127.0.0.1:${bridgePort}`;
 
   const [categoriesOut, sessionOut] = await Promise.all([
-    esbuild.build({ entryPoints: [`${ROOT}/api/support/categories.ts`], bundle: true, platform: 'node', format: 'cjs', write: false }),
+    // categories/tickets/typing are consolidated into one Serverless Function
+    // (api/support/[...path].ts) to stay under Vercel's function-count limit —
+    // dispatch on `req.query.path` (see the `query` in each request below).
+    esbuild.build({ entryPoints: [`${ROOT}/api/support/[...path].ts`], bundle: true, platform: 'node', format: 'cjs', write: false }),
     esbuild.build({ entryPoints: [`${ROOT}/api/_lib/session.ts`], bundle: true, platform: 'node', format: 'cjs', write: false }),
   ]);
   const categoriesFile = path.join(TMP_DIR, 'categoriesHandler.cjs');
@@ -84,14 +87,14 @@ describe('GET /api/support/categories — Cache-Control: no-store', () => {
   it('sets Cache-Control: no-store on a successful (200) response', async () => {
     const token = createSessionToken({ sub: 'user-admin-001', email: 'max@email.com', role: 'admin', accountId: 'main', accountName: 'Main Account' });
     const res = makeRes();
-    await categoriesHandler({ method: 'GET', headers: { cookie: `ggx_session=${token}` } }, res);
+    await categoriesHandler({ method: 'GET', query: { path: ['categories'] }, headers: { cookie: `ggx_session=${token}` } }, res);
     assert.equal(res._status, 200);
     assert.equal(res._headers['Cache-Control'], 'no-store', 'a successful categories response must never be cacheable');
   });
 
   it('sets Cache-Control: no-store even on a 401 (unauthenticated) response', async () => {
     const res = makeRes();
-    await categoriesHandler({ method: 'GET', headers: {} }, res);
+    await categoriesHandler({ method: 'GET', query: { path: ['categories'] }, headers: {} }, res);
     assert.equal(res._status, 401);
     assert.equal(res._headers['Cache-Control'], 'no-store', 'the header is set unconditionally, before any early return');
   });

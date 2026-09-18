@@ -3,6 +3,64 @@
 > Lightweight resume/checkpoint file. Detailed June 2026 history was archived to
 > `docs/archive/session_log_2026-06.md`.
 
+## Most Recent Work — fixed production deploys: Vercel Hobby's 12-function limit (2026-09-18)
+
+Production had been failing to deploy for the last 3 pushes (`77ad915`
+ops-requests, `24a7e86` Merchant ID, `e7c63fa` bulk-upload lifecycle — all
+`ERROR` in Vercel) with no visible symptom locally, since `npm run build`
+succeeds fine and the failure only happens at Vercel's post-build deploy
+step. Diagnosed via the Vercel MCP plugin
+(`get_deployment`/`get_deployment_build_logs`), not from the build log's own
+chunk-size warning the user initially flagged (that warning is benign and
+present in every build, including all the successful ones before this).
+
+- **Root cause**: `errorCode: "exceeded_serverless_functions_per_deployment"`
+  — Vercel's Hobby plan caps a deployment at 12 Serverless Functions; each
+  file under `api/*.ts` becomes its own function. This repo had grown to 16
+  route files (crossed the limit exactly at the `ops-requests` commit, which
+  added 4 new routes), so every deploy since has failed at Vercel's
+  `patchBuild` step.
+- **Fix (user chose "consolidate routes in code" over upgrading to Pro or a
+  one-off redeploy)**: merged sibling route files into fewer handlers using
+  Vercel's dynamic catch-all convention, each new file dispatching internally
+  on the `action`/`path` route segment(s) — **public URLs are unchanged**, no
+  frontend changes needed. Went from 16 functions to 5:
+  - `api/auth/[action].ts` — merges `login.ts`/`logout.ts`/`quick-login.ts`.
+  - `api/claims/[claimId]/[action].ts` — merges `sync.ts`/`state.ts`/`messages.ts`
+    (`claimId` stays its own route segment, unchanged; only `action` is new).
+  - `api/ops-requests/[...path].ts` — merges `catalog.ts`/`[id].ts`/`[id]/updates.ts`.
+    `index.ts` (list/create) stays its own file — a required catch-all can't
+    match zero path segments, so the bare `/api/ops-requests` route needs its
+    own exact-path file.
+  - `api/support/[...path].ts` — merges `categories.ts` + all 5
+    `tickets/**` route files (list/create/detail/messages/typing/typing-subscribe).
+  - Every merged handler's internal logic (auth checks, Bridge relaying,
+    subaccount authorization, error handling) is copied verbatim — this is a
+    routing-shell change only, not a rewrite of any business logic.
+- **Tests updated** (not new — the existing esbuild-bundled route tests
+  reference handler files by path, since there's no live Vercel Functions
+  runtime in this dev environment): `tests/api-auth-quick-login.test.mjs`,
+  `tests/api-claims.test.mjs`, `tests/api-ops-requests.test.mjs`,
+  `tests/api-support-categories.test.mjs`, `tests/api-support-typing.test.mjs`
+  now point their esbuild entry points at the consolidated files and pass the
+  right `req.query.action`/`req.query.path` to reach the intended branch.
+  Every other test file only references `/api/...` URL strings (fetch stubs),
+  which are unaffected by the file move.
+- **Validated**: `npm run typecheck` clean, `npm run build` clean, full suite
+  **230/230** (`npm test`, unchanged count — no tests added/removed, just
+  retargeted). Function count confirmed via `find api -name "*.ts" ! -path
+  "*/_lib/*"`: 5 (well under the 12 limit, with headroom for future routes).
+- **Known, not fixed this pass**: a handful of source-file doc comments
+  elsewhere (`AuthContext.tsx`, `Login.tsx`, `heyqCustomerApi.ts`,
+  `heyqTypingRealtime.ts`, the `api/_lib/*` files, several `docs/migration/*`
+  entries) still name the old per-route file paths (e.g.
+  `api/support/tickets/[id]/typing.ts`) in prose — harmless (not functional),
+  left as-is rather than scope-creeping a doc sweep into this fix; update
+  opportunistically if touching those files again.
+- Committed and pushed to both remotes (`origin`/jabranux,
+  `james`/jamesabran) at the user's request, since the whole point was
+  restoring production deploys.
+
 ## Most Recent Work — Bulk Upload review & batch-details lifecycle correctness (2026-09-18)
 
 Fixed the "Ready to book" ↔ Transaction lifecycle boundary in Bulk Upload and

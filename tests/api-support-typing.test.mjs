@@ -92,23 +92,24 @@ before(async () => {
   bridgePort = bridgeServer.address().port;
   process.env.QUADX_BRIDGE_URL = `http://127.0.0.1:${bridgePort}`;
 
-  const [typingOut, subscribeOut, sessionOut] = await Promise.all([
-    esbuild.build({ entryPoints: [`${ROOT}/api/support/tickets/[id]/typing.ts`], bundle: true, platform: 'node', format: 'cjs', write: false }),
-    esbuild.build({ entryPoints: [`${ROOT}/api/support/tickets/[id]/typing/subscribe.ts`], bundle: true, platform: 'node', format: 'cjs', write: false }),
+  // typing (send) and typing/subscribe (receive credential) are consolidated,
+  // along with every other /api/support/* route, into one Serverless
+  // Function (api/support/[...path].ts) to stay under Vercel's function-count
+  // limit — both handlers below are the SAME module, dispatched by
+  // `req.query.path` (see typingQuery/subscribeQuery below).
+  const [supportOut, sessionOut] = await Promise.all([
+    esbuild.build({ entryPoints: [`${ROOT}/api/support/[...path].ts`], bundle: true, platform: 'node', format: 'cjs', write: false }),
     esbuild.build({ entryPoints: [`${ROOT}/api/_lib/session.ts`], bundle: true, platform: 'node', format: 'cjs', write: false }),
   ]);
-  const typingFile = path.join(TMP_DIR, 'typingHandler.cjs');
-  const subscribeFile = path.join(TMP_DIR, 'subscribeHandler.cjs');
+  const supportFile = path.join(TMP_DIR, 'supportHandler.cjs');
   const sessionFile = path.join(TMP_DIR, 'sessionLib.cjs');
-  fs.writeFileSync(typingFile, typingOut.outputFiles[0].text);
-  fs.writeFileSync(subscribeFile, subscribeOut.outputFiles[0].text);
+  fs.writeFileSync(supportFile, supportOut.outputFiles[0].text);
   fs.writeFileSync(sessionFile, sessionOut.outputFiles[0].text);
 
-  const typingMod = await import(`file://${typingFile.replace(/\\/g, '/')}`);
-  const subscribeMod = await import(`file://${subscribeFile.replace(/\\/g, '/')}`);
+  const supportMod = await import(`file://${supportFile.replace(/\\/g, '/')}`);
   const sessionMod = await import(`file://${sessionFile.replace(/\\/g, '/')}`);
-  typingHandler = typingMod.default.default ?? typingMod.default;
-  subscribeHandler = subscribeMod.default.default ?? subscribeMod.default;
+  typingHandler = supportMod.default.default ?? supportMod.default;
+  subscribeHandler = typingHandler;
   createSessionToken = sessionMod.createSessionToken ?? sessionMod.default.createSessionToken;
 });
 
@@ -127,6 +128,13 @@ function makeRes() {
   };
 }
 
+function typingQuery(id, extra = {}) {
+  return { path: ['tickets', id, 'typing'], ...extra };
+}
+function subscribeQuery(id, extra = {}) {
+  return { path: ['tickets', id, 'typing', 'subscribe'], ...extra };
+}
+
 function sessionCookie() {
   const token = createSessionToken({ sub: 'user-admin-001', email: 'max@email.com', role: 'admin', accountId: 'main', accountName: 'Main Account' });
   return `ggx_session=${token}`;
@@ -137,7 +145,7 @@ describe('POST /api/support/tickets/:id/typing — deployed QuadX Bridge contrac
     bridgeRequests.length = 0;
     const res = makeRes();
     await typingHandler(
-      { method: 'POST', query: { id: TICKET_UUID }, body: { state: 'start' }, headers: { cookie: sessionCookie() } },
+      { method: 'POST', query: typingQuery(TICKET_UUID), body: { state: 'start' }, headers: { cookie: sessionCookie() } },
       res,
     );
     assert.equal(res._status, 200);
@@ -157,7 +165,7 @@ describe('POST /api/support/tickets/:id/typing — deployed QuadX Bridge contrac
     await typingHandler(
       {
         method: 'POST',
-        query: { id: TICKET_UUID, externalUserId: 'attacker@evil.com', externalOrgId: 'other-org' },
+        query: typingQuery(TICKET_UUID, { externalUserId: 'attacker@evil.com', externalOrgId: 'other-org' }),
         body: { state: 'start', externalUserId: 'attacker@evil.com', externalOrgId: 'other-org' },
         headers: { cookie: sessionCookie() },
       },
@@ -171,14 +179,14 @@ describe('POST /api/support/tickets/:id/typing — deployed QuadX Bridge contrac
   it('the ticket id is forwarded to Bridge verbatim (the UUID, never rewritten)', async () => {
     bridgeRequests.length = 0;
     const res = makeRes();
-    await typingHandler({ method: 'POST', query: { id: TICKET_UUID }, body: { state: 'start' }, headers: { cookie: sessionCookie() } }, res);
+    await typingHandler({ method: 'POST', query: typingQuery(TICKET_UUID), body: { state: 'start' }, headers: { cookie: sessionCookie() } }, res);
     assert.equal(bridgeRequests[0].path, `/customer/tickets/${TICKET_UUID}/typing`);
   });
 
   it('401s before ever calling Bridge when there is no session cookie', async () => {
     bridgeRequests.length = 0;
     const res = makeRes();
-    await typingHandler({ method: 'POST', query: { id: TICKET_UUID }, body: { state: 'start' }, headers: {} }, res);
+    await typingHandler({ method: 'POST', query: typingQuery(TICKET_UUID), body: { state: 'start' }, headers: {} }, res);
     assert.equal(res._status, 401);
     assert.equal(bridgeRequests.length, 0, 'an unauthenticated caller must never reach Bridge');
   });
@@ -187,7 +195,7 @@ describe('POST /api/support/tickets/:id/typing — deployed QuadX Bridge contrac
     bridgeRequests.length = 0;
     const res = makeRes();
     await typingHandler(
-      { method: 'POST', query: { id: TICKET_UUID }, body: { state: 'sideways' }, headers: { cookie: sessionCookie() } },
+      { method: 'POST', query: typingQuery(TICKET_UUID), body: { state: 'sideways' }, headers: { cookie: sessionCookie() } },
       res,
     );
     assert.equal(res._status, 400);
@@ -196,11 +204,11 @@ describe('POST /api/support/tickets/:id/typing — deployed QuadX Bridge contrac
 
   it('405s any method other than POST — GET included, now that the poll it served is retired', async () => {
     const getRes = makeRes();
-    await typingHandler({ method: 'GET', query: { id: TICKET_UUID }, headers: { cookie: sessionCookie() } }, getRes);
+    await typingHandler({ method: 'GET', query: typingQuery(TICKET_UUID), headers: { cookie: sessionCookie() } }, getRes);
     assert.equal(getRes._status, 405);
 
     const deleteRes = makeRes();
-    await typingHandler({ method: 'DELETE', query: { id: TICKET_UUID }, headers: { cookie: sessionCookie() } }, deleteRes);
+    await typingHandler({ method: 'DELETE', query: typingQuery(TICKET_UUID), headers: { cookie: sessionCookie() } }, deleteRes);
     assert.equal(deleteRes._status, 405);
   });
 });
@@ -210,7 +218,7 @@ describe('POST /api/support/tickets/:id/typing/subscribe — deployed QuadX Brid
     bridgeRequests.length = 0;
     const res = makeRes();
     await subscribeHandler(
-      { method: 'POST', query: { id: TICKET_UUID }, body: {}, headers: { cookie: sessionCookie() } },
+      { method: 'POST', query: subscribeQuery(TICKET_UUID), body: {}, headers: { cookie: sessionCookie() } },
       res,
     );
     assert.equal(res._status, 200);
@@ -227,7 +235,7 @@ describe('POST /api/support/tickets/:id/typing/subscribe — deployed QuadX Brid
   it('never forwards a service-role secret or anything beyond the verified identity', async () => {
     bridgeRequests.length = 0;
     const res = makeRes();
-    await subscribeHandler({ method: 'POST', query: { id: TICKET_UUID }, body: {}, headers: { cookie: sessionCookie() } }, res);
+    await subscribeHandler({ method: 'POST', query: subscribeQuery(TICKET_UUID), body: {}, headers: { cookie: sessionCookie() } }, res);
     const sentKeys = Object.keys(bridgeRequests[0].body).sort();
     assert.deepEqual(sentKeys, ['externalOrgId', 'externalUserId']);
     assert.ok(!JSON.stringify(bridgeRequests[0].body).toLowerCase().includes('service_role'));
@@ -239,7 +247,7 @@ describe('POST /api/support/tickets/:id/typing/subscribe — deployed QuadX Brid
     await subscribeHandler(
       {
         method: 'POST',
-        query: { id: TICKET_UUID, externalUserId: 'attacker@evil.com', externalOrgId: 'other-org' },
+        query: subscribeQuery(TICKET_UUID, { externalUserId: 'attacker@evil.com', externalOrgId: 'other-org' }),
         body: { externalUserId: 'attacker@evil.com', externalOrgId: 'other-org' },
         headers: { cookie: sessionCookie() },
       },
@@ -253,14 +261,14 @@ describe('POST /api/support/tickets/:id/typing/subscribe — deployed QuadX Brid
   it('the ticket id is forwarded to Bridge verbatim (the UUID, never rewritten)', async () => {
     bridgeRequests.length = 0;
     const res = makeRes();
-    await subscribeHandler({ method: 'POST', query: { id: TICKET_UUID }, body: {}, headers: { cookie: sessionCookie() } }, res);
+    await subscribeHandler({ method: 'POST', query: subscribeQuery(TICKET_UUID), body: {}, headers: { cookie: sessionCookie() } }, res);
     assert.equal(bridgeRequests[0].path, `/customer/tickets/${TICKET_UUID}/typing/subscribe`);
   });
 
   it('401s before ever calling Bridge when there is no session cookie', async () => {
     bridgeRequests.length = 0;
     const res = makeRes();
-    await subscribeHandler({ method: 'POST', query: { id: TICKET_UUID }, body: {}, headers: {} }, res);
+    await subscribeHandler({ method: 'POST', query: subscribeQuery(TICKET_UUID), body: {}, headers: {} }, res);
     assert.equal(res._status, 401);
     assert.equal(bridgeRequests.length, 0, 'an unauthenticated caller must never reach Bridge');
   });
@@ -269,7 +277,7 @@ describe('POST /api/support/tickets/:id/typing/subscribe — deployed QuadX Brid
     bridgeRequests.length = 0;
     const res = makeRes();
     await subscribeHandler(
-      { method: 'POST', query: { id: '00000000-0000-0000-0000-000000000000' }, body: {}, headers: { cookie: sessionCookie() } },
+      { method: 'POST', query: subscribeQuery('00000000-0000-0000-0000-000000000000'), body: {}, headers: { cookie: sessionCookie() } },
       res,
     );
     assert.equal(res._status, 404);
@@ -277,7 +285,7 @@ describe('POST /api/support/tickets/:id/typing/subscribe — deployed QuadX Brid
 
   it('405s any method other than POST', async () => {
     const res = makeRes();
-    await subscribeHandler({ method: 'GET', query: { id: TICKET_UUID }, headers: { cookie: sessionCookie() } }, res);
+    await subscribeHandler({ method: 'GET', query: subscribeQuery(TICKET_UUID), headers: { cookie: sessionCookie() } }, res);
     assert.equal(res._status, 405);
   });
 });

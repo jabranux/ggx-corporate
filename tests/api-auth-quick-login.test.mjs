@@ -28,7 +28,10 @@ before(async () => {
   process.env.SESSION_SECRET = 'test-secret-for-quick-login-test';
 
   const [handlerOut, sessionOut] = await Promise.all([
-    esbuild.build({ entryPoints: [`${ROOT}/api/auth/quick-login.ts`], bundle: true, platform: 'node', format: 'cjs', write: false }),
+    // login/logout/quick-login are consolidated into one Serverless Function
+    // (api/auth/[action].ts) to stay under Vercel's function-count limit —
+    // dispatch on `req.query.action` (see makeReq below).
+    esbuild.build({ entryPoints: [`${ROOT}/api/auth/[action].ts`], bundle: true, platform: 'node', format: 'cjs', write: false }),
     esbuild.build({ entryPoints: [`${ROOT}/api/_lib/session.ts`], bundle: true, platform: 'node', format: 'cjs', write: false }),
   ]);
   const handlerFile = path.join(TMP_DIR, 'quickLoginHandler.cjs');
@@ -47,7 +50,7 @@ after(() => {
 });
 
 function makeReq(method, body) {
-  return { method, body, headers: { 'content-type': 'application/json' } };
+  return { method, body, query: { action: 'quick-login' }, headers: { 'content-type': 'application/json' } };
 }
 
 function makeRes() {

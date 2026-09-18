@@ -118,24 +118,28 @@ before(async () => {
   const bridgePort = bridgeServer.address().port;
   process.env.QUADX_BRIDGE_URL = `http://127.0.0.1:${bridgePort}`;
 
+  // catalog/:id/:id/updates are consolidated into one Serverless Function
+  // (api/ops-requests/[...path].ts) to stay under Vercel's function-count
+  // limit — dispatch on `req.query.path` (see opsPathQuery below). The bare
+  // list/create route (index.ts) can't be matched by a required catch-all
+  // (zero path segments), so it stays its own file, unchanged.
   const builds = await Promise.all([
-    esbuild.build({ entryPoints: [`${ROOT}/api/ops-requests/catalog.ts`], bundle: true, platform: 'node', format: 'cjs', write: false }),
+    esbuild.build({ entryPoints: [`${ROOT}/api/ops-requests/[...path].ts`], bundle: true, platform: 'node', format: 'cjs', write: false }),
     esbuild.build({ entryPoints: [`${ROOT}/api/ops-requests/index.ts`], bundle: true, platform: 'node', format: 'cjs', write: false }),
-    esbuild.build({ entryPoints: [`${ROOT}/api/ops-requests/[id].ts`], bundle: true, platform: 'node', format: 'cjs', write: false }),
-    esbuild.build({ entryPoints: [`${ROOT}/api/ops-requests/[id]/updates.ts`], bundle: true, platform: 'node', format: 'cjs', write: false }),
     esbuild.build({ entryPoints: [`${ROOT}/api/_lib/session.ts`], bundle: true, platform: 'node', format: 'cjs', write: false }),
   ]);
-  const names = ['catalog', 'index', 'byId', 'updates', 'session'];
+  const names = ['path', 'index', 'session'];
   const mods = {};
   for (let i = 0; i < builds.length; i++) {
     const file = path.join(TMP_DIR, `${names[i]}.cjs`);
     fs.writeFileSync(file, builds[i].outputFiles[0].text);
     mods[names[i]] = await import(`file://${file.replace(/\\/g, '/')}`);
   }
-  catalogHandler = mods.catalog.default.default ?? mods.catalog.default;
+  const pathHandler = mods.path.default.default ?? mods.path.default;
+  catalogHandler = pathHandler;
+  byIdHandler = pathHandler;
+  updatesHandler = pathHandler;
   indexHandler = mods.index.default.default ?? mods.index.default;
-  byIdHandler = mods.byId.default.default ?? mods.byId.default;
-  updatesHandler = mods.updates.default.default ?? mods.updates.default;
   createSessionToken = mods.session.createSessionToken ?? mods.session.default.createSessionToken;
 });
 
@@ -154,6 +158,16 @@ function makeRes() {
   };
 }
 
+function catalogQuery() {
+  return { path: ['catalog'] };
+}
+function byIdQuery(id) {
+  return { path: [id] };
+}
+function updatesQuery(id) {
+  return { path: [id, 'updates'] };
+}
+
 function sessionCookie() {
   const token = createSessionToken({ sub: 'user-admin-001', email: 'max@email.com', role: 'admin', accountId: 'main', accountName: 'Main Account' });
   return { cookie: `ggx_session=${token}` };
@@ -168,7 +182,7 @@ describe('GET /api/ops-requests/catalog', () => {
   it('401s with no session, never reaching Bridge', async () => {
     bridgeRequests = [];
     const res = makeRes();
-    await catalogHandler({ method: 'GET', headers: {} }, res);
+    await catalogHandler({ method: 'GET', query: catalogQuery(), headers: {} }, res);
     assert.equal(res._status, 401);
     assert.equal(bridgeRequests.length, 0);
   });
@@ -176,7 +190,7 @@ describe('GET /api/ops-requests/catalog', () => {
   it('relays the live catalog with a valid session', async () => {
     bridgeRequests = [];
     const res = makeRes();
-    await catalogHandler({ method: 'GET', headers: sessionCookie() }, res);
+    await catalogHandler({ method: 'GET', query: catalogQuery(), headers: sessionCookie() }, res);
     assert.equal(res._status, 200);
     assert.ok(res._body.supply_request);
   });
@@ -346,14 +360,14 @@ describe('POST /api/ops-requests', () => {
 describe('GET /api/ops-requests/:id', () => {
   it('401s with no session', async () => {
     const res = makeRes();
-    await byIdHandler({ method: 'GET', query: { id: 'OPR-2026-0001' }, headers: {} }, res);
+    await byIdHandler({ method: 'GET', query: byIdQuery('OPR-2026-0001'), headers: {} }, res);
     assert.equal(res._status, 401);
   });
 
   it('relays one Ops Request by request number, scoped by identity', async () => {
     bridgeRequests = [];
     const res = makeRes();
-    await byIdHandler({ method: 'GET', query: { id: 'OPR-2026-0001' }, headers: sessionCookie() }, res);
+    await byIdHandler({ method: 'GET', query: byIdQuery('OPR-2026-0001'), headers: sessionCookie() }, res);
     assert.equal(res._status, 200);
     assert.equal(res._body.requestNumber, 'OPR-2026-0001');
     const req = bridgeRequests.find((r) => r.method === 'GET' && r.url.startsWith('/customer/ops-requests/OPR-2026-0001?'));
@@ -362,26 +376,26 @@ describe('GET /api/ops-requests/:id', () => {
 
   it('404s for an unknown request', async () => {
     const res = makeRes();
-    await byIdHandler({ method: 'GET', query: { id: 'OPR-MISSING' }, headers: sessionCookie() }, res);
+    await byIdHandler({ method: 'GET', query: byIdQuery('OPR-MISSING'), headers: sessionCookie() }, res);
     assert.equal(res._status, 404);
   });
 
   it('a subaccount manager 404s reading a request that belongs to a DIFFERENT subaccount (fail-closed, never 403)', async () => {
     const res = makeRes();
-    await byIdHandler({ method: 'GET', query: { id: 'OPR-2026-0001' }, headers: managerSessionCookie() }, res);
+    await byIdHandler({ method: 'GET', query: byIdQuery('OPR-2026-0001'), headers: managerSessionCookie() }, res);
     assert.equal(res._status, 404, 'OPR-2026-0001 belongs to "main", not the manager\'s "acme-luzon" subaccount');
   });
 
   it('a subaccount manager CAN read their own subaccount\'s request', async () => {
     const res = makeRes();
-    await byIdHandler({ method: 'GET', query: { id: 'OPR-2026-0002' }, headers: managerSessionCookie() }, res);
+    await byIdHandler({ method: 'GET', query: byIdQuery('OPR-2026-0002'), headers: managerSessionCookie() }, res);
     assert.equal(res._status, 200);
     assert.equal(res._body.requestNumber, 'OPR-2026-0002');
   });
 
   it('the Main Account admin can read ANY subaccount\'s request', async () => {
     const res = makeRes();
-    await byIdHandler({ method: 'GET', query: { id: 'OPR-2026-0002' }, headers: sessionCookie() }, res);
+    await byIdHandler({ method: 'GET', query: byIdQuery('OPR-2026-0002'), headers: sessionCookie() }, res);
     assert.equal(res._status, 200);
     assert.equal(res._body.requestNumber, 'OPR-2026-0002');
   });
@@ -390,13 +404,13 @@ describe('GET /api/ops-requests/:id', () => {
 describe('GET /api/ops-requests/:id/updates', () => {
   it('401s with no session', async () => {
     const res = makeRes();
-    await updatesHandler({ method: 'GET', query: { id: 'OPR-2026-0001' }, headers: {} }, res);
+    await updatesHandler({ method: 'GET', query: updatesQuery('OPR-2026-0001'), headers: {} }, res);
     assert.equal(res._status, 401);
   });
 
   it('relays the client-visible update history', async () => {
     const res = makeRes();
-    await updatesHandler({ method: 'GET', query: { id: 'OPR-2026-0001' }, headers: sessionCookie() }, res);
+    await updatesHandler({ method: 'GET', query: updatesQuery('OPR-2026-0001'), headers: sessionCookie() }, res);
     assert.equal(res._status, 200);
     assert.equal(res._body.length, 1);
     assert.equal(res._body[0].type, 'status_changed');
@@ -404,7 +418,7 @@ describe('GET /api/ops-requests/:id/updates', () => {
 
   it('a subaccount manager 404s reading another subaccount\'s update history (ownership checked before the updates fetch)', async () => {
     const res = makeRes();
-    await updatesHandler({ method: 'GET', query: { id: 'OPR-2026-0001' }, headers: managerSessionCookie() }, res);
+    await updatesHandler({ method: 'GET', query: updatesQuery('OPR-2026-0001'), headers: managerSessionCookie() }, res);
     assert.equal(res._status, 404);
   });
 });

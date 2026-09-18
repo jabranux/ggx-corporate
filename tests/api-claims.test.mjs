@@ -95,22 +95,25 @@ before(async () => {
   const bridgePort = bridgeServer.address().port;
   process.env.QUADX_BRIDGE_URL = `http://127.0.0.1:${bridgePort}`;
 
+  // sync/state/messages are consolidated into one Serverless Function
+  // (api/claims/[claimId]/[action].ts) to stay under Vercel's function-count
+  // limit — dispatch on `req.query.action` (see claimQuery below); `claimId`
+  // is still its own route segment (`req.query.claimId`), unchanged.
   const builds = await Promise.all([
-    esbuild.build({ entryPoints: [`${ROOT}/api/claims/[claimId]/sync.ts`], bundle: true, platform: 'node', format: 'cjs', write: false }),
-    esbuild.build({ entryPoints: [`${ROOT}/api/claims/[claimId]/state.ts`], bundle: true, platform: 'node', format: 'cjs', write: false }),
-    esbuild.build({ entryPoints: [`${ROOT}/api/claims/[claimId]/messages.ts`], bundle: true, platform: 'node', format: 'cjs', write: false }),
+    esbuild.build({ entryPoints: [`${ROOT}/api/claims/[claimId]/[action].ts`], bundle: true, platform: 'node', format: 'cjs', write: false }),
     esbuild.build({ entryPoints: [`${ROOT}/api/_lib/session.ts`], bundle: true, platform: 'node', format: 'cjs', write: false }),
   ]);
-  const names = ['sync', 'state', 'messages', 'session'];
+  const names = ['claims', 'session'];
   const mods = {};
   for (let i = 0; i < builds.length; i++) {
     const file = path.join(TMP_DIR, `${names[i]}.cjs`);
     fs.writeFileSync(file, builds[i].outputFiles[0].text);
     mods[names[i]] = await import(`file://${file.replace(/\\/g, '/')}`);
   }
-  syncHandler = mods.sync.default.default ?? mods.sync.default;
-  stateHandler = mods.state.default.default ?? mods.state.default;
-  messagesHandler = mods.messages.default.default ?? mods.messages.default;
+  const claimsHandler = mods.claims.default.default ?? mods.claims.default;
+  syncHandler = claimsHandler;
+  stateHandler = claimsHandler;
+  messagesHandler = claimsHandler;
   createSessionToken = mods.session.createSessionToken ?? mods.session.default.createSessionToken;
 });
 
@@ -134,11 +137,15 @@ function sessionCookie() {
   return { cookie: `ggx_session=${token}` };
 }
 
+function claimQuery(claimId, action) {
+  return { claimId, action };
+}
+
 describe('POST /api/claims/:claimId/sync', () => {
   it('401s with no session, never reaching Bridge', async () => {
     bridgeRequests = [];
     const res = makeRes();
-    await syncHandler({ method: 'POST', query: { claimId: 'CLM-1008' }, headers: {}, body: {} }, res);
+    await syncHandler({ method: 'POST', query: claimQuery('CLM-1008', 'sync'), headers: {}, body: {} }, res);
     assert.equal(res._status, 401);
     assert.equal(bridgeRequests.length, 0);
   });
@@ -147,7 +154,7 @@ describe('POST /api/claims/:claimId/sync', () => {
     bridgeRequests = [];
     const res = makeRes();
     await syncHandler(
-      { method: 'POST', query: { claimId: 'CLM-1008' }, headers: sessionCookie(), body: { reason: 'Lost in transit', externalReference: 'SPOOFED', trackingNumber: 'GGX-2026-90006' } },
+      { method: 'POST', query: claimQuery('CLM-1008', 'sync'), headers: sessionCookie(), body: { reason: 'Lost in transit', externalReference: 'SPOOFED', trackingNumber: 'GGX-2026-90006' } },
       res,
     );
     assert.equal(res._status, 200);
@@ -163,7 +170,7 @@ describe('POST /api/claims/:claimId/sync', () => {
     bridgeRequests = [];
     const res = makeRes();
     await syncHandler(
-      { method: 'POST', query: { claimId: 'CLM-1008' }, headers: sessionCookie(), body: { reason: 'Other', externalUserId: 'attacker@evil.com', externalOrgId: 'other-org', demoAccountId: 'user-mgr-001' } },
+      { method: 'POST', query: claimQuery('CLM-1008', 'sync'), headers: sessionCookie(), body: { reason: 'Other', externalUserId: 'attacker@evil.com', externalOrgId: 'other-org', demoAccountId: 'user-mgr-001' } },
       res,
     );
     assert.equal(bridgeRequests[0].body.externalUserId, 'max@email.com');
@@ -172,7 +179,7 @@ describe('POST /api/claims/:claimId/sync', () => {
 
   it('405s on a non-POST method', async () => {
     const res = makeRes();
-    await syncHandler({ method: 'GET', query: { claimId: 'CLM-1008' }, headers: {}, body: {} }, res);
+    await syncHandler({ method: 'GET', query: claimQuery('CLM-1008', 'sync'), headers: {}, body: {} }, res);
     assert.equal(res._status, 405);
   });
 });
@@ -180,14 +187,14 @@ describe('POST /api/claims/:claimId/sync', () => {
 describe('GET /api/claims/:claimId/state', () => {
   it('401s with no session', async () => {
     const res = makeRes();
-    await stateHandler({ method: 'GET', query: { claimId: 'CLM-1008' }, headers: {} }, res);
+    await stateHandler({ method: 'GET', query: claimQuery('CLM-1008', 'state'), headers: {} }, res);
     assert.equal(res._status, 401);
   });
 
   it('relays a linked claim\'s live state, scoped by the session-derived identity', async () => {
     bridgeRequests = [];
     const res = makeRes();
-    await stateHandler({ method: 'GET', query: { claimId: 'CLM-1008' }, headers: sessionCookie() }, res);
+    await stateHandler({ method: 'GET', query: claimQuery('CLM-1008', 'state'), headers: sessionCookie() }, res);
     assert.equal(res._status, 200);
     assert.equal(res._body.externalReference, 'CLM-1008');
     assert.equal(res._body.ticket.id, TICKET_ID);
@@ -198,13 +205,13 @@ describe('GET /api/claims/:claimId/state', () => {
 
   it('404s for an unlinked/unknown claim', async () => {
     const res = makeRes();
-    await stateHandler({ method: 'GET', query: { claimId: 'CLM-MISSING' }, headers: sessionCookie() }, res);
+    await stateHandler({ method: 'GET', query: claimQuery('CLM-MISSING', 'state'), headers: sessionCookie() }, res);
     assert.equal(res._status, 404);
   });
 
   it('relays holdReason through unchanged for an on-hold claim (a pure relay proxy — the timeline reads this straight from Bridge)', async () => {
     const res = makeRes();
-    await stateHandler({ method: 'GET', query: { claimId: 'CLM-ONHOLD' }, headers: sessionCookie() }, res);
+    await stateHandler({ method: 'GET', query: claimQuery('CLM-ONHOLD', 'state'), headers: sessionCookie() }, res);
     assert.equal(res._status, 200);
     assert.equal(res._body.status, 'on_hold');
     assert.equal(res._body.holdReason, 'outstanding balance');
@@ -214,7 +221,7 @@ describe('GET /api/claims/:claimId/state', () => {
 describe('POST /api/claims/:claimId/messages', () => {
   it('401s with no session', async () => {
     const res = makeRes();
-    await messagesHandler({ method: 'POST', query: { claimId: 'CLM-1008' }, headers: {}, body: {} }, res);
+    await messagesHandler({ method: 'POST', query: claimQuery('CLM-1008', 'messages'), headers: {}, body: {} }, res);
     assert.equal(res._status, 401);
   });
 
@@ -222,7 +229,7 @@ describe('POST /api/claims/:claimId/messages', () => {
     bridgeRequests = [];
     const res = makeRes();
     await messagesHandler(
-      { method: 'POST', query: { claimId: 'CLM-1008' }, headers: sessionCookie(), body: { body: 'hi', attachments: [{ name: 'x.png' }] } },
+      { method: 'POST', query: claimQuery('CLM-1008', 'messages'), headers: sessionCookie(), body: { body: 'hi', attachments: [{ name: 'x.png' }] } },
       res,
     );
     assert.equal(res._status, 400);
@@ -233,7 +240,7 @@ describe('POST /api/claims/:claimId/messages', () => {
     bridgeRequests = [];
     const res = makeRes();
     await messagesHandler(
-      { method: 'POST', query: { claimId: 'CLM-1008' }, headers: { ...sessionCookie(), 'x-bridge-message-id': 'msg-123' }, body: { body: 'Any update?', ticketId: 'SPOOFED-TICKET-ID' } },
+      { method: 'POST', query: claimQuery('CLM-1008', 'messages'), headers: { ...sessionCookie(), 'x-bridge-message-id': 'msg-123' }, body: { body: 'Any update?', ticketId: 'SPOOFED-TICKET-ID' } },
       res,
     );
     assert.equal(res._status, 200);
@@ -247,7 +254,7 @@ describe('POST /api/claims/:claimId/messages', () => {
 
   it('404s when the claim has no linked ticket yet', async () => {
     const res = makeRes();
-    await messagesHandler({ method: 'POST', query: { claimId: 'CLM-MISSING' }, headers: sessionCookie(), body: { body: 'hi' } }, res);
+    await messagesHandler({ method: 'POST', query: claimQuery('CLM-MISSING', 'messages'), headers: sessionCookie(), body: { body: 'hi' } }, res);
     assert.equal(res._status, 404);
   });
 });
