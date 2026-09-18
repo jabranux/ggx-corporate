@@ -77,11 +77,13 @@ const grp = (name: string, children: NavChild[]): NavItem => ({ type: 'group', n
 
 const standardAccountNavigation: NavItem[] = [
   { name: 'Dashboard', href: '/dashboard', icon: IconLayoutDashboard },
-  grp('Operations', [
+  grp('Shipments', [
     { name: 'Transactions',  href: '/dashboard/transactions',  icon: IconPackage },
     { name: 'Bulk Upload',   href: '/dashboard/bulk-uploader', icon: IconUpload },
-    { name: 'Claims',        href: '/dashboard/claims',        icon: IconReceiptRefund },
     { name: 'SLA Alerts',           href: '/dashboard/sla-alerts',          icon: IconActivityHeartbeat },
+  ]),
+  grp('Support & Requests', [
+    { name: 'Claims',               href: '/dashboard/claims',              icon: IconReceiptRefund },
     { name: 'Operations Requests',  href: '/dashboard/operations-requests', icon: IconClipboardList },
     { name: 'Support Tickets',      href: '/dashboard/support-tickets',     icon: IconMessage },
   ]),
@@ -110,11 +112,13 @@ const standardAccountNavigation: NavItem[] = [
 
 const mainAccountNavigation: NavItem[] = [
   { name: 'Dashboard', href: '/dashboard', icon: IconLayoutDashboard },
-  grp('Operations', [
+  grp('Shipments', [
     { name: 'Transactions',    href: '/dashboard/transactions',   icon: IconPackage },
     { name: 'Bulk Upload',     href: '/dashboard/bulk-uploader',  icon: IconUpload },
-    { name: 'Claims',               href: '/dashboard/claims',               icon: IconReceiptRefund },
     { name: 'SLA Alerts',           href: '/dashboard/sla-alerts',           icon: IconActivityHeartbeat },
+  ]),
+  grp('Support & Requests', [
+    { name: 'Claims',               href: '/dashboard/claims',               icon: IconReceiptRefund },
     { name: 'Operations Requests',  href: '/dashboard/operations-requests',  icon: IconClipboardList },
     { name: 'Support Tickets',      href: '/dashboard/support-tickets',      icon: IconMessage },
   ]),
@@ -144,11 +148,13 @@ const mainAccountNavigation: NavItem[] = [
 
 const subaccountNavigation: NavItem[] = [
   { name: 'Dashboard', href: '/dashboard', icon: IconLayoutDashboard },
-  grp('Operations', [
+  grp('Shipments', [
     { name: 'Transactions',    href: '/dashboard/transactions',   icon: IconPackage },
     { name: 'Bulk Upload',     href: '/dashboard/bulk-uploader',  icon: IconUpload },
-    { name: 'Claims',              href: '/dashboard/claims',              icon: IconReceiptRefund },
     { name: 'SLA Alerts',          href: '/dashboard/sla-alerts',          icon: IconActivityHeartbeat },
+  ]),
+  grp('Support & Requests', [
+    { name: 'Claims',              href: '/dashboard/claims',              icon: IconReceiptRefund },
     { name: 'Operations Requests', href: '/dashboard/operations-requests', icon: IconClipboardList },
     { name: 'Support Tickets',     href: '/dashboard/support-tickets',     icon: IconMessage },
   ]),
@@ -169,14 +175,16 @@ const subaccountNavigation: NavItem[] = [
   ]),
 ];
 
-// Managers: Operations + scoped Analytics & Reports + System only.
+// Managers: Shipments + Support & Requests + scoped Analytics & Reports + System only.
 const managerNavigation: NavItem[] = [
   { name: 'Dashboard', href: '/dashboard', icon: IconLayoutDashboard },
-  grp('Operations', [
+  grp('Shipments', [
     { name: 'Transactions',    href: '/dashboard/transactions',   icon: IconPackage },
     { name: 'Bulk Upload',     href: '/dashboard/bulk-uploader',  icon: IconUpload },
-    { name: 'Claims',              href: '/dashboard/claims',              icon: IconReceiptRefund },
     { name: 'SLA Alerts',          href: '/dashboard/sla-alerts',          icon: IconActivityHeartbeat },
+  ]),
+  grp('Support & Requests', [
+    { name: 'Claims',              href: '/dashboard/claims',              icon: IconReceiptRefund },
     { name: 'Operations Requests', href: '/dashboard/operations-requests', icon: IconClipboardList },
     { name: 'Support Tickets',     href: '/dashboard/support-tickets',     icon: IconMessage },
   ]),
@@ -211,7 +219,7 @@ export function RootLayout() {
   const { user, logout } = useAuth();
   const isManager = user?.role === 'manager';
 
-  // Managers see only Operations, Analytics & Reports, and System.
+  // Managers see only Shipments, Support & Requests, Analytics & Reports, and System.
   const navigation = isManager
     ? managerNavigation
     : !subAccountsEnabled
@@ -248,7 +256,7 @@ export function RootLayout() {
     } else {
       finalNavigation.push(item);
     }
-    if (item.type === 'group' && item.name === 'Operations' && commerceChildren.length > 0) {
+    if (item.type === 'group' && item.name === 'Support & Requests' && commerceChildren.length > 0) {
       finalNavigation.push(grp('Commerce', commerceChildren));
     }
   }
