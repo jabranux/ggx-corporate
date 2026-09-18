@@ -20,13 +20,19 @@ import {
   createUploadRecord,
   setSpreadsheetBatchRows,
   getSpreadsheetBatchRows,
+  setBatchRowsState,
+  getBatchRowsState,
+  buildBatchRowFiller,
+  spreadsheetRowToBatchRowSnapshot,
   type UploadRecord,
   type UploadStatus,
   type UploadAccount,
   type SpreadsheetBatchRow,
+  type BatchRowSnapshot,
+  type BatchRowsState,
 } from '../data/bulkUploads';
 
-export type { UploadRecord, UploadStatus, UploadAccount, SpreadsheetBatchRow };
+export type { UploadRecord, UploadStatus, UploadAccount, SpreadsheetBatchRow, BatchRowSnapshot, BatchRowsState };
 
 export interface BulkUploadFilters {
   subaccountId?: string;
@@ -48,12 +54,20 @@ export interface BulkUploadSummary {
   uploadedAt: string;
 }
 
-/** Seed uploads shown in BulkUploader's Recent Uploads (matches SEED_UPLOADS in BulkUploader.tsx). */
+/**
+ * Seed uploads shown in BulkUploader's Recent Uploads (matches SEED_UPLOADS in
+ * BulkUploader.tsx). The three already-processed batches below (awaiting-payment
+ * / completed) have real linked Transaction records in `data/transactions.ts`'s
+ * seed (via `batch.reportedCounts` on the matching `omsOrders` entries) — their
+ * totalRows/validRows here are kept aligned to that linked batch's reported
+ * total so this record's own stats never contradict what the Completed Batch
+ * Details / Transactions "By Batch" pages show for the same batch id.
+ */
 const SEED_RECORDS: UploadRecord[] = [
-  { id: 'UPLOAD-2026-05-19-001', fileName: 'bulk_shipments_may19.xlsx', uploadedAt: '2026-05-19 10:30 AM', totalRows: 5,  validRows: 3,  errorRows: 2, status: 'needs-review', uploadMode: 'standard',  firstMile: 'pickup',  accountId: 'acme-corporation', accountName: 'Acme Corporation', accountType: 'subaccount' },
-  { id: 'UPLOAD-2026-05-18-003', fileName: 'daily_orders_batch3.xlsx',  uploadedAt: '2026-05-18 04:15 PM', totalRows: 25, validRows: 25, errorRows: 0, status: 'awaiting-payment', uploadMode: 'standard',  firstMile: 'pickup',  accountId: 'acme-corporation', accountName: 'Acme Corporation', accountType: 'subaccount' },
-  { id: 'UPLOAD-2026-05-18-002', fileName: 'weekend_deliveries.xlsx',   uploadedAt: '2026-05-18 02:45 PM', totalRows: 12, validRows: 12, errorRows: 0, status: 'completed',     uploadMode: 'same-day', firstMile: 'dropoff', accountId: 'acme-luzon',       accountName: 'Acme Luzon',       accountType: 'subaccount' },
-  { id: 'UPLOAD-2026-05-18-001', fileName: 'morning_batch.xlsx',        uploadedAt: '2026-05-18 09:20 AM', totalRows: 8,  validRows: 8,  errorRows: 0, status: 'completed',     uploadMode: 'standard',  firstMile: 'pickup',  accountId: 'acme-luzon',       accountName: 'Acme Luzon',       accountType: 'subaccount' },
+  { id: 'UPLOAD-2026-05-19-001', fileName: 'bulk_shipments_may19.xlsx', uploadedAt: '2026-05-19 10:30 AM', totalRows: 5,   validRows: 3,   errorRows: 2, status: 'needs-review', uploadMode: 'standard',  firstMile: 'pickup',  accountId: 'acme-corporation', accountName: 'Acme Corporation', accountType: 'subaccount' },
+  { id: 'UPLOAD-2026-05-18-003', fileName: 'daily_orders_batch3.xlsx',  uploadedAt: '2026-05-18 04:15 PM', totalRows: 198, validRows: 198, errorRows: 0, status: 'awaiting-payment', uploadMode: 'standard',  firstMile: 'pickup',  accountId: 'acme-corporation', accountName: 'Acme Corporation', accountType: 'subaccount' },
+  { id: 'UPLOAD-2026-05-18-002', fileName: 'weekend_deliveries.xlsx',   uploadedAt: '2026-05-18 02:45 PM', totalRows: 156, validRows: 156, errorRows: 0, status: 'completed',     uploadMode: 'same-day', firstMile: 'dropoff', accountId: 'acme-luzon',       accountName: 'Acme Luzon',       accountType: 'subaccount' },
+  { id: 'UPLOAD-2026-05-18-001', fileName: 'morning_batch.xlsx',        uploadedAt: '2026-05-18 09:20 AM', totalRows: 134, validRows: 134, errorRows: 0, status: 'completed',     uploadMode: 'standard',  firstMile: 'pickup',  accountId: 'acme-luzon',       accountName: 'Acme Luzon',       accountType: 'subaccount' },
 ];
 
 function mergeWithSeed(session: readonly UploadRecord[]): UploadRecord[] {
@@ -86,6 +100,23 @@ export async function getBulkUploadById(
 ): Promise<UploadRecord | null> {
   const all = mergeWithSeed(getSessionUploads());
   return all.find((r) => r.id === batchId) ?? null;
+}
+
+/**
+ * Whether a signed-in user may view a batch's detail data (Review Before
+ * Booking, Ready Rows, Completed Batch Details) — the same account/subaccount
+ * scope rule every other surface follows: Main Account (admin) sees
+ * consolidated data; a manager only sees their own subaccount's batches.
+ * Callers should treat `false` exactly like "not found" — never reveal that a
+ * batch exists under another subaccount (same convention the support/claims
+ * proxy routes use server-side: 404, not 403).
+ */
+export function canViewBulkUploadBatch(
+  record: Pick<UploadRecord, 'accountId'>,
+  user: { role: 'admin' | 'manager'; accountId: string } | null | undefined,
+): boolean {
+  if (!user) return false;
+  return user.role !== 'manager' || record.accountId === user.accountId;
 }
 
 /**
@@ -125,4 +156,5 @@ export async function getBulkUploadsBySubaccountId(
 export {
   addUpload, updateUploadStatus, generateUploadId, createUploadRecord,
   setSpreadsheetBatchRows, getSpreadsheetBatchRows,
+  setBatchRowsState, getBatchRowsState, buildBatchRowFiller, spreadsheetRowToBatchRowSnapshot,
 };

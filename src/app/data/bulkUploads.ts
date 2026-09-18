@@ -84,17 +84,114 @@ export interface SpreadsheetBatchRow {
   cod: string;
 }
 
-// Session-only map of batchId → captured spreadsheet rows (not persisted).
-const SPREADSHEET_BATCH_ROWS: Record<string, SpreadsheetBatchRow[]> = {};
+// Map of batchId → captured spreadsheet rows. Persisted (not just in-memory) —
+// a booked spreadsheet batch's real row data must survive a reload, since
+// synthesized Transaction records (transactionService.ts) and the Ready Rows
+// page both read it as their concrete per-row source; losing it on reload
+// would silently replace real recipient/item data with sample filler.
+const SPREADSHEET_BATCH_ROWS: Record<string, SpreadsheetBatchRow[]> = loadState('spreadsheetBatchRows', {});
+function persistSpreadsheetBatchRows(): void { saveState('spreadsheetBatchRows', SPREADSHEET_BATCH_ROWS); }
 
 /** Store the booked spreadsheet rows for a batch (in-session handoff to summary). */
 export function setSpreadsheetBatchRows(batchId: string, rows: SpreadsheetBatchRow[]): void {
   SPREADSHEET_BATCH_ROWS[batchId] = rows;
+  persistSpreadsheetBatchRows();
 }
 
-/** Return the captured spreadsheet rows for a batch (empty if none / after reload). */
+/** Return the captured spreadsheet rows for a batch (empty if none captured). */
 export function getSpreadsheetBatchRows(batchId: string): SpreadsheetBatchRow[] {
   return SPREADSHEET_BATCH_ROWS[batchId] ?? [];
+}
+
+/**
+ * Live per-batch row classification, mirrored from the Review Before Booking
+ * page's own in-progress editing state (`BulkUploadSummary.tsx`). This is the
+ * SAME data the review grid computes — not a separate/copied dataset — so the
+ * dedicated Ready-to-book Rows page (and, once a batch is booked, synthesized
+ * Transaction records — see `transactionService.ts`) always read the current
+ * classification instead of a stale snapshot.
+ *
+ * Only rows that started in "Rows needing fixes" or "Needs review" and carry
+ * real edited field data are tracked here. The larger base "no issues from the
+ * start" count has no per-row mock detail (mirrors `UploadRecord.validRows`)
+ * and is rendered as sample/placeholder rows by consumers, the same way
+ * `BulkUploadCompleted.tsx` already represents a batch's full row count from a
+ * small sample list.
+ */
+export interface BatchRowSnapshot {
+  key: string;
+  recipientName: string;
+  mobileNumber: string;
+  itemName: string;
+  /** "City/Municipality, Province" — matches the Transactions list's Destination format. */
+  location: string;
+  declaredValue: string;
+  pouchSize: string;
+  referenceId: string;
+  cod: string;
+}
+
+export interface BatchRowsState {
+  /** Currently classified "Ready to book" — real data, originated from Fixes/Needs review. */
+  readyRows: BatchRowSnapshot[];
+  /** Currently classified "Needs review" — non-blocking, still bookable alongside Ready rows. */
+  reviewRows: BatchRowSnapshot[];
+}
+
+const EMPTY_BATCH_ROWS_STATE: BatchRowsState = { readyRows: [], reviewRows: [] };
+
+// Persisted (not just session-in-memory) so the dedicated Ready Rows page reads
+// the latest classification even after a full reload of this demo app.
+const BATCH_ROWS_STATE: Record<string, BatchRowsState> = loadState('batchRowsState', {});
+function persistBatchRowsState(): void { saveState('batchRowsState', BATCH_ROWS_STATE); }
+
+/** Replace the live row-classification snapshot for a batch. */
+export function setBatchRowsState(batchId: string, state: BatchRowsState): void {
+  BATCH_ROWS_STATE[batchId] = state;
+  persistBatchRowsState();
+}
+
+/** Return the live row-classification snapshot for a batch (empty if none yet). */
+export function getBatchRowsState(batchId: string): BatchRowsState {
+  return BATCH_ROWS_STATE[batchId] ?? EMPTY_BATCH_ROWS_STATE;
+}
+
+/**
+ * Shared sample filler for a batch's base "validated with no issues from the
+ * start" rows, which — like `BulkUploadCompleted.tsx`'s completed-batch list —
+ * have no per-row mock detail beyond the batch's own valid-row count. Used by
+ * both the Ready Rows page and synthesized Transaction records (see
+ * `transactionService.ts`) so the two stay visually consistent.
+ */
+export const BATCH_ROW_SAMPLE_FILLER: readonly Omit<BatchRowSnapshot, 'key'>[] = [
+  { recipientName: 'Lia Santos',   mobileNumber: '+639171234501', itemName: 'UNO FLIP! Double Sided Card', location: 'Mandaluyong City, Metro Manila', declaredValue: '600', pouchSize: 'SMALL', referenceId: '', cod: 'No' },
+  { recipientName: 'Marco Alonzo', mobileNumber: '+639171234502', itemName: 'UNO FLIP! Double Sided Card', location: 'Makati City, Metro Manila',      declaredValue: '600', pouchSize: 'SMALL', referenceId: '', cod: 'No' },
+  { recipientName: 'Tessa Cruz',   mobileNumber: '+639171234503', itemName: 'UNO FLIP! Double Sided Card', location: 'Pasig City, Metro Manila',       declaredValue: '600', pouchSize: 'SMALL', referenceId: '', cod: 'No' },
+  { recipientName: 'Rico Mendoza', mobileNumber: '+639171234504', itemName: 'UNO FLIP! Double Sided Card', location: 'Quezon City, Metro Manila',      declaredValue: '600', pouchSize: 'SMALL', referenceId: '', cod: 'No' },
+  { recipientName: 'Nina Reyes',   mobileNumber: '+639171234505', itemName: 'UNO FLIP! Double Sided Card', location: 'Taguig City, Metro Manila',      declaredValue: '600', pouchSize: 'SMALL', referenceId: '', cod: 'No' },
+];
+
+/** Build `count` filler row snapshots by cycling the shared sample list, keyed uniquely so React lists render safely. */
+export function buildBatchRowFiller(count: number, keyPrefix = 'base'): BatchRowSnapshot[] {
+  return Array.from({ length: Math.max(0, count) }, (_, i) => ({
+    key: `${keyPrefix}-${i}`,
+    ...BATCH_ROW_SAMPLE_FILLER[i % BATCH_ROW_SAMPLE_FILLER.length],
+  }));
+}
+
+/** Adapt a captured in-app-spreadsheet row into the shared `BatchRowSnapshot` shape. */
+export function spreadsheetRowToBatchRowSnapshot(row: SpreadsheetBatchRow, index: number): BatchRowSnapshot {
+  return {
+    key: `sheet-${index}`,
+    recipientName: row.recipientName || 'Recipient',
+    mobileNumber: row.recipientMobile,
+    itemName: row.product,
+    location: row.location,
+    declaredValue: row.declaredValue,
+    pouchSize: row.parcelSize,
+    referenceId: '',
+    cod: row.cod,
+  };
 }
 
 // Recent uploads persist across reloads (lightweight continuity). The derived

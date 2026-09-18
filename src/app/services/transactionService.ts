@@ -76,6 +76,7 @@ import {
   type SourceType,
   type BookingMethod,
   type OrderAttribution,
+  type Party,
 } from '../data/transactions';
 import { getAccountIdByName } from '../data/accounts';
 import { getSettlement } from '../data/earnings';
@@ -92,6 +93,15 @@ import {
   buildTransactionFromOrder,
   getOrderByTracking,
 } from '../data/storefrontOrders';
+import {
+  getSessionUploads,
+  getBatchRowsState,
+  getSpreadsheetBatchRows,
+  buildBatchRowFiller,
+  spreadsheetRowToBatchRowSnapshot,
+  type UploadRecord,
+  type BatchRowSnapshot,
+} from '../data/bulkUploads';
 
 export type { Transaction, TransactionSummary, TransactionStatus, TransactionSource, TransactionBatch, DeliveryServiceType, SourceType, BookingMethod, OrderAttribution, OnDemandProgress, OnDemandDeliveryStage };
 
@@ -128,6 +138,110 @@ function synthesizedTransactions(): Transaction[] {
     .filter((t): t is Transaction => !!t);
 }
 
+// ── Synthesized Bulk Upload batch transactions ─────────────────────────────
+// A batch's "Ready to book" / "Needs review" rows are validated upload rows,
+// NOT transactions — see docs/context/bulk-booking.md. A real Transaction is
+// only created once a batch is actually processed/booked (Bulk Upload's
+// Complete Booking / Continue to payment step marks the upload record
+// `awaiting-payment` or `completed`). Rather than maintain a second,
+// hand-synced transaction list, booked batches are synthesized on demand from
+// the upload record + the SAME live row classification the Review page itself
+// produces (`getBatchRowsState`/`getSpreadsheetBatchRows`) — mirroring the
+// existing `synthesizedTransactions()` pattern for accepted storefront orders.
+
+const BULK_TX_SENDER: Party = {
+  name: 'GGX Corporate Warehouse',
+  contactNumber: '+63 917 000 1234',
+  address: 'GGX Fulfillment Hub, Bonifacio Global City, Taguig',
+};
+
+const SERVICE_TYPE_BY_UPLOAD_MODE: Record<UploadRecord['uploadMode'], DeliveryServiceType> = {
+  standard: 'standard',
+  'same-day': 'same_day',
+  'on-demand': 'on_demand',
+};
+
+/**
+ * The full set of concrete rows for a batch: real edited rows first (from the
+ * SAME live state the Review page produced — see `data/bulkUploads.ts`), then
+ * shared sample filler for the base valid-row count that has no per-row detail.
+ *
+ * File uploads: `validRows` is the base "no issues from the start" count —
+ * rows promoted from Fixes/Needs review are ADDITIONAL on top of it (mirrors
+ * `BulkUploadSummary.tsx`'s `totalValidCount = validBaseCount + readyFromFlagged
+ * + reviewList.length`), so the filler count is `validRows` unconditionally.
+ * In-app spreadsheet batches have no separate fix/review pool — `validRows` IS
+ * the total, so captured rows fill INTO it rather than adding to it.
+ */
+function bulkBatchRowSnapshots(record: UploadRecord): BatchRowSnapshot[] {
+  if (record.source === 'spreadsheet') {
+    const captured = getSpreadsheetBatchRows(record.id).map(spreadsheetRowToBatchRowSnapshot);
+    return [...captured, ...buildBatchRowFiller(record.validRows - captured.length)];
+  }
+  const { readyRows, reviewRows } = getBatchRowsState(record.id);
+  return [...buildBatchRowFiller(record.validRows), ...readyRows, ...reviewRows];
+}
+
+/** Build the delivery Transactions a booked (awaiting-payment/completed) Bulk Upload batch reveals. */
+function buildTransactionsFromBulkBatch(record: UploadRecord): Transaction[] {
+  const serviceType = SERVICE_TYPE_BY_UPLOAD_MODE[record.uploadMode];
+  const batch: TransactionBatch = {
+    batchId: record.id,
+    fileName: record.fileName,
+    uploadedVia: 'bulk_upload',
+    accountId: record.accountId,
+    accountName: record.accountName,
+  };
+  const attribution: OrderAttribution = {
+    accountScope: record.accountType,
+    sourceType: 'bulk_upload',
+    bookingMethod: record.source === 'spreadsheet' ? 'bulk_in_app_spreadsheet' : 'bulk_template_upload',
+  };
+  // Anchored to the same mock "today" the rest of the app uses (see
+  // storefrontOrders.ts's nowStamp) so freshly-booked rows sort as most recent.
+  const date = '2026-05-31';
+  const datePart = record.id.replace(/^UPLOAD-/, '');
+
+  return bulkBatchRowSnapshots(record).map((row, i) => {
+    const declared = Number(row.declaredValue) || 0;
+    const isCod = row.cod === 'Yes';
+    return {
+      trackingNumber: `GGX-${datePart}-${String(i + 1).padStart(4, '0')}`,
+      destination: row.location || '—',
+      type: serviceType === 'standard' ? 'Standard' : 'Express',
+      serviceType,
+      status: 'pending',
+      date,
+      subaccount: record.accountName,
+      source: 'bulk_upload',
+      attribution,
+      createdAt: date,
+      pickupDate: date,
+      deliveryDate: '—',
+      sender: BULK_TX_SENDER,
+      recipient: { name: row.recipientName || 'Recipient', contactNumber: row.mobileNumber || '—', address: row.location || '—' },
+      items: [{ name: row.itemName || 'Item', quantity: 1, description: 'Bulk Upload item', price: declared }],
+      packaging: { size: row.pouchSize || 'SMALL', dimensions: '30cm x 20cm x 15cm', weight: '1 kg' },
+      store: { name: record.fileName, url: '—' },
+      fees: { serviceFee: 0, shippingFee: 120, protectionFee: 0, discount: 0, processingFee: 0 },
+      payment: {
+        method: isCod ? 'Cash on Delivery (COD)' : 'Prepaid',
+        paidBy: isCod ? 'Recipient' : 'Sender',
+        codAmount: isCod ? declared : 0,
+      },
+      timeline: [],
+      batch,
+    };
+  });
+}
+
+/** Booked (awaiting-payment/completed) Bulk Upload batches, synthesized into real Transactions. */
+function synthesizedBulkBatchTransactions(): Transaction[] {
+  return getSessionUploads()
+    .filter((r) => r.status === 'awaiting-payment' || r.status === 'completed')
+    .flatMap(buildTransactionsFromBulkBatch);
+}
+
 function toSummary(t: Transaction): TransactionSummary {
   return {
     tracking: t.trackingNumber,
@@ -144,12 +258,12 @@ function toSummary(t: Transaction): TransactionSummary {
   };
 }
 
-/** Seed transactions + synthesized accepted-order deliveries (synthesized first). */
+/** Seed transactions + synthesized accepted-order deliveries + booked bulk batches (synthesized first). */
 function allTransactions(): Transaction[] {
-  return [...synthesizedTransactions(), ...transactions];
+  return [...synthesizedTransactions(), ...synthesizedBulkBatchTransactions(), ...transactions];
 }
 function allSummaries(): TransactionSummary[] {
-  return [...synthesizedTransactions().map(toSummary), ...deliveries];
+  return [...synthesizedTransactions().map(toSummary), ...synthesizedBulkBatchTransactions().map(toSummary), ...deliveries];
 }
 
 /** Attribution display helpers + label maps (re-exported for UI consumers). */
@@ -249,7 +363,11 @@ export async function getTransactionById(
   // Fall back to a synthesized delivery from an accepted storefront order.
   const order = getOrderByTracking(trackingNumber);
   if (order) return buildTransactionFromOrder(order) ?? null;
-  return null;
+  // Fall back to a synthesized Transaction from a booked Bulk Upload batch —
+  // otherwise a freshly-booked batch's rows would be visible (and clickable)
+  // in the Transactions list but 404 on their own detail page.
+  const bulk = synthesizedBulkBatchTransactions().find((t) => t.trackingNumber === trackingNumber);
+  return bulk ?? null;
 }
 
 /**
@@ -491,7 +609,7 @@ export async function getTransactionBatches(
 ): Promise<TransactionBatchGroup[]> {
   const map = new Map<string, { batch: TransactionBatch; items: Transaction[] }>();
 
-  for (const tx of transactions) {
+  for (const tx of allTransactions()) {
     if (!tx.batch) continue;
     if (subaccountId && subaccountId !== 'main' && tx.batch.accountId !== subaccountId) continue;
     const key = tx.batch.batchId;
@@ -499,9 +617,10 @@ export async function getTransactionBatches(
     map.get(key)!.items.push(tx);
   }
 
+  const summaryIndex = allSummaries();
   const groups: TransactionBatchGroup[] = Array.from(map.values()).map(({ batch, items }) => {
     const summaries = items
-      .map((t) => deliveries.find((d) => d.tracking === t.trackingNumber))
+      .map((t) => summaryIndex.find((d) => d.tracking === t.trackingNumber))
       .filter((d): d is TransactionSummary => !!d);
     // Use backend-reported counts when present (realistic upload sizes);
     // fall back to counts derived from visible mock items.
@@ -525,6 +644,16 @@ export async function getTransactionBatches(
   });
 
   return groups.sort((a, b) => b.batch.batchId.localeCompare(a.batch.batchId));
+}
+
+/**
+ * Return the single batch group for one batch id (used by the Completed Batch
+ * Details page so it renders the SAME transaction records the main
+ * Transactions "By Batch" view does — not a separate/copied dataset).
+ */
+export async function getTransactionBatchById(batchId: string): Promise<TransactionBatchGroup | null> {
+  const groups = await getTransactionBatches();
+  return groups.find((g) => g.batch.batchId === batchId) ?? null;
 }
 
 // ─── Detail totals ───────────────────────────────────────────────────────────

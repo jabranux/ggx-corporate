@@ -35,6 +35,7 @@ import { TransactionDetails } from './pages/TransactionDetails';
 import { BulkUploader } from './pages/BulkUploader';
 import { BulkSpreadsheet } from './pages/BulkSpreadsheet';
 import { BulkUploadSummary } from './pages/BulkUploadSummary';
+import { BulkUploadReadyRows } from './pages/BulkUploadReadyRows';
 import { BulkUploadCompleted } from './pages/BulkUploadCompleted';
 // Code-split the recharts-heavy analytics page into its own chunk (keeps the
 // main bundle smaller; resolves the long-standing bundle-size warning).
@@ -193,6 +194,8 @@ export const router = createBrowserRouter([
       // In-app spreadsheet entry — a focused step within Bulk Booking (no sidebar item).
       { path: 'bulk-uploader/spreadsheet', Component: BulkSpreadsheet },
       { path: 'bulk-uploader/summary/:id', Component: BulkUploadSummary },
+      // Dedicated full-page view of a batch's current Ready-to-book rows.
+      { path: 'bulk-uploader/ready/:id', Component: BulkUploadReadyRows },
       // Completed batches open a read-only detail page (no editable review grid).
       { path: 'bulk-uploader/completed/:id', Component: BulkUploadCompleted },
       { path: 'bulk-upload-summary', Component: BulkUploadSummary },

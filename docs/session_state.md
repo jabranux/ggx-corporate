@@ -3,6 +3,102 @@
 > Lightweight resume/checkpoint file. Detailed June 2026 history was archived to
 > `docs/archive/session_log_2026-06.md`.
 
+## Most Recent Work — Bulk Upload review & batch-details lifecycle correctness (2026-09-18)
+
+Fixed the "Ready to book" ↔ Transaction lifecycle boundary in Bulk Upload and
+aligned Completed Batch Details with the main Transactions page. Upload row →
+validated/Ready to book → batch processed/booked → real Transaction created
+is now enforced end to end instead of being implied by copy alone.
+
+- **`BulkUploadSummary.tsx` (Review Before Booking)**: "Ready to book" no
+  longer claims rows were "created as Awaiting payment" — copy now reads "X
+  orders passed validation and are ready to book." The "View all in
+  Transactions" / "View all X in transactions page" links are replaced with
+  **View all ready rows**, linking to a new dedicated page, for every state
+  except an already-processed (`awaiting-payment`) batch, where the deep link
+  into Transactions is accurate (those rows are real Transactions already).
+  **Completing booking now transitions the upload record's status**
+  (`needs-review` → `awaiting-payment` if the chosen payment method settles
+  later, or straight to `completed` for prepaid card/e-wallet/online banking)
+  — previously `handleCompleteBooking` never updated the record at all, so a
+  booked batch stayed "Needs Review" in Recent Uploads forever.
+- **New page**: `BulkUploadReadyRows.tsx` (`/dashboard/bulk-uploader/ready/:id`)
+  — a dedicated, paginated view of a batch's current Ready-to-book rows. It
+  does **not** copy row data: it reads the same live per-batch classification
+  the Review page produces (`data/bulkUploads.ts`'s new `BatchRowsState`,
+  keyed by batch id, persisted via `loadState`/`saveState`), so fixing rows on
+  the Review page and coming back here always reflects the current count.
+- **`BulkUploadCompleted.tsx` (Completed Batch Details)**: the "Created
+  transactions" table now reads real records via a new
+  `transactionService.getTransactionBatchById()` (same underlying data the
+  Transactions "By Batch" view uses) instead of a hand-fabricated row list.
+  Columns aligned to the main Transactions table's terminology: **Tracking
+  Number | Recipient | Destination | Service Type | Status | Date** — no
+  `Name`/`Item Name`/`Amount`, no `Source` (page context already implies Bulk
+  Upload), no `Actions` (rows are clickable straight into
+  `/dashboard/transactions/:tracking`, reusing the existing "By Batch"
+  pattern). New shared `ServiceTypeBadge` component (was a page-local
+  `ServiceTypeCell` in `Transactions.tsx`) keeps the badge identical on both
+  pages.
+- **`transactionService.ts`**: booked (`awaiting-payment`/`completed`) session
+  Bulk Upload batches are now synthesized into real `Transaction` records on
+  demand (`synthesizedBulkBatchTransactions`/`buildTransactionsFromBulkBatch`),
+  mirroring the existing storefront-order synthesis pattern — never a second
+  hand-synced list. Pre-booking (`needs-review`) batches stay fully invisible
+  to `getTransactions()`/`getTransactionBatches()`, so pre-processing rows
+  never leak into the main Transactions page. `getTransactionById` now also
+  resolves these synthesized rows (a booked bulk transaction is clickable from
+  Transactions but wasn't resolvable on its own detail page before this fix).
+- **`data/bulkUploads.ts`**: new `BatchRowsState` (`readyRows`/`reviewRows`
+  snapshots, persisted) is the single source of truth `BulkUploadSummary`
+  writes and `BulkUploadReadyRows`/`transactionService` read — count formula:
+  `totalValidCount = record.validRows (base, no-issue-from-the-start) +
+  readyRows.length (promoted from Fixes/Needs review) + reviewRows.length
+  (still-flagged but bookable)`. `SPREADSHEET_BATCH_ROWS` is now persisted too
+  (was session-only — a reload used to silently replace a booked spreadsheet
+  batch's real recipient/item data with sample filler).
+- **New**: `canViewBulkUploadBatch()` — the same account/subaccount scope rule
+  every other surface follows (Main Account sees consolidated data; a manager
+  only sees their own subaccount's batches), wired into all three bulk-upload
+  detail pages (Summary, Ready Rows, Completed). Missing before this pass —
+  found by the Codex audit below.
+- **Codex CLI audit** (`codex review --uncommitted`, one pass): 5 findings, all
+  fixed — (P1) a manager could view another subaccount's batch (recipient
+  names/mobile numbers) via a direct Ready Rows URL; (P1) `getTransactionById`
+  didn't resolve synthesized bulk transactions (404 on detail nav); (P1)
+  `SPREADSHEET_BATCH_ROWS` not persisted (reload replaced real data with
+  filler); (P1) reopening an `awaiting-payment` batch for payment undercounted
+  — `validBaseCount` didn't include rows promoted from Fixes/Needs review at
+  booking time; (P2) the two pre-existing seed "completed" batches
+  (`UPLOAD-2026-05-18-002`/`-001`) showed contradictory totals against their
+  linked transaction batch's `reportedCounts` — reconciled. Fixing the P1
+  undercount also surfaced a genuine race condition in this session's own new
+  code (not from Codex directly, found via the regression test written for
+  the fix): the row-classification push effect could fire once before the
+  batch record's real status was known, using the generic canned mock
+  scenario and clobbering a real `awaiting-payment` batch's stored
+  classification — fixed with a `recordLoaded` gate.
+- **Known, pre-existing, NOT fixed this pass** (out of scope — the same gap
+  exists in `TransactionDetails.tsx` and other detail-by-id pages this session
+  never touched, so a full authorization pass belongs to a separate task, not
+  this one): no page-level check prevents a signed-in user from guessing
+  another account's URL for pages this session didn't touch. The Bulk Upload
+  detail pages specifically ARE now guarded (see `canViewBulkUploadBatch`
+  above).
+- **Tests**: new `tests/bulk-upload-lifecycle.test.mjs` (5 cases — Review page
+  copy/CTA correctness, a needs-review batch never leaks into Transactions,
+  booking synthesizes the correct total from real promoted-row data and
+  resolves on its own detail page, and the payment-mode reopen undercount
+  regression). Registered in `package.json`'s `test` script.
+- **Validated**: `npm run typecheck` clean, `npm run build` clean, full suite
+  **230/230** (`npm test`, up from 225 — the 5 new tests). Not pushed (project
+  rule: push only on explicit instruction).
+- **No database migration**: this feature is entirely GGX Corporate frontend
+  mock/session state (`localStorage` via `lib/storage.ts`, same pattern as
+  the rest of Bulk Upload) — no backend/DB involved, so none was needed or
+  introduced. **No QuadX Bridge (HeyQ) changes** — Bulk Upload/Transactions
+  are unrelated to that integration; none were made.
+
 ## Most Recent Work — Ops Requests wired to QuadX Bridge's real Ops Request POC (2026-09-05)
 
 Replaced the Operations Requests feature's in-memory mock submission/retrieval

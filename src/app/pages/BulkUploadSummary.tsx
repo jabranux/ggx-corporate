@@ -16,7 +16,11 @@ import { PayoutSetupRequiredDialog } from '../components/PayoutSetupRequiredDial
 import { PayoutSetupDrawer } from '../components/journeys/PayoutSetupDrawer';
 import { DROPOFF_LOCATIONS } from '../data/dropoffLocations';
 import { isBillingAccount } from '../services/paymentService';
-import { getBulkUploadById, getSpreadsheetBatchRows, updateUploadStatus, type SpreadsheetBatchRow } from '../services/bulkUploadService';
+import {
+  getBulkUploadById, getSpreadsheetBatchRows, updateUploadStatus, setBatchRowsState, getBatchRowsState,
+  canViewBulkUploadBatch,
+  type SpreadsheetBatchRow, type BatchRowSnapshot,
+} from '../services/bulkUploadService';
 import { hasEligiblePayoutBank } from '../services/payoutBankService';
 import { RECEPTACLE_SIZES, BULK_FIELD_LABELS as L } from '../data/bulkTemplate';
 import {
@@ -274,6 +278,21 @@ function rowToEdits(row: ReviewRowData): RowEdits {
     insureFull:        row.insureFull,
     recipientPaysFees: row.recipientPaysFees,
     referenceId:       row.referenceId,
+  };
+}
+
+/** Build the shared live-row snapshot (see `data/bulkUploads.ts`'s `BatchRowSnapshot`) from a row's current edits. */
+function toBatchRowSnapshot(row: ReviewRowData, edits: RowEdits): BatchRowSnapshot {
+  return {
+    key: String(row.row),
+    recipientName: edits.recipientName,
+    mobileNumber: edits.mobileNumber,
+    itemName: edits.itemName,
+    location: [edits.cityMunicipality, edits.province].filter(Boolean).join(', '),
+    declaredValue: edits.declaredValue,
+    pouchSize: edits.pouchSize,
+    referenceId: edits.referenceId,
+    cod: edits.cod,
   };
 }
 
@@ -663,26 +682,45 @@ export function BulkUploadSummary() {
   // scope while this page is open or deep-links directly into a batch. Payout
   // eligibility must follow the batch owner, not whatever's active right now.
   const [batchAccountId, setBatchAccountId] = useState<string | null>(null);
+  // True once the batch record's real status/source is known. Guards the
+  // live row-classification push effect below: on first mount (before this
+  // resolves) `isSpreadsheet`/`paymentMode` are still their unloaded defaults
+  // (false/false) with `rows` seeded from the generic canned scenario — pushing
+  // during that transient window would clobber a real awaiting-payment batch's
+  // already-stored classification with the wrong (unrelated) canned data.
+  const [recordLoaded, setRecordLoaded] = useState(false);
   useEffect(() => {
     let active = true;
+    setRecordLoaded(false);
     getBulkUploadById(id ?? '')
       .then((record) => {
-        if (!active || !record) return;
+        if (!active) return;
+        // Same account/subaccount scope rule as every other surface — a
+        // manager viewing another subaccount's batch id falls back to the
+        // generic pre-booking scenario, never that subaccount's real rows.
+        if (!record || !canViewBulkUploadBatch(record, user)) { setRecordLoaded(true); return; }
         setBatchDate(record.uploadedAt);
         setBatchAccountId(record.accountId);
         if (record.status === 'awaiting-payment') {
           setPaymentMode(true);
-          setValidBaseCount(record.validRows);
+          // The base valid-row count alone undercounts a batch that had rows
+          // promoted from Fixes/Needs review at booking time — those rows are
+          // now real Transactions too (see transactionService.ts's bulk-batch
+          // synthesis, which reads this SAME stored state), so reopening this
+          // page for payment must show the full booked total, not just the base.
+          const stored = getBatchRowsState(record.id);
+          setValidBaseCount(record.validRows + stored.readyRows.length + stored.reviewRows.length);
         }
         if (record.source === 'spreadsheet') {
           setIsSpreadsheet(true);
           setValidBaseCount(record.validRows);
           setSpreadsheetRows(getSpreadsheetBatchRows(record.id));
         }
+        setRecordLoaded(true);
       })
-      .catch(() => { /* keep fallback date */ });
+      .catch(() => { if (active) setRecordLoaded(true); /* keep fallback date */ });
     return () => { active = false; };
-  }, [id]);
+  }, [id, user]);
   // Falls back to the active scope only until the batch record has loaded.
   // The P1 journey always presents as the Main Account owner with Main
   // Account admin capability — an in-memory presentation override, never a
@@ -789,12 +827,31 @@ export function BulkUploadSummary() {
   };
   const fixList = rows.filter((r) => sectionAssignment[r.row] === 'fix').map(rowInfo);
   const reviewList = rows.filter((r) => sectionAssignment[r.row] === 'review').map(rowInfo);
-  const readyFromFlagged = rows.filter((r) => sectionAssignment[r.row] === 'ready').length;
+  const readyFromFlaggedRows = rows.filter((r) => sectionAssignment[r.row] === 'ready').map(rowInfo);
+  const readyFromFlagged = readyFromFlaggedRows.length;
 
   // ── Derived totals (from the snapshot — recalculated on Revalidate/delete) ──
   const readyCount = validBaseCount + readyFromFlagged;
   // Everything bookable (ready + needs-review): the full batch you continue with.
   const totalValidCount = readyCount + reviewList.length;
+
+  // Mirror the current row classification into the shared per-batch store (see
+  // `data/bulkUploads.ts`'s `BatchRowsState`) so the dedicated Ready Rows page —
+  // and, once the batch is booked, synthesized Transaction records — read the
+  // SAME live data the Review page computed, never a separate/copied dataset.
+  useEffect(() => {
+    // Wait for the real record before pushing — see `recordLoaded`'s docblock:
+    // pushing during the pre-load window would clobber a real batch's already-
+    // stored classification with the unrelated generic canned scenario.
+    if (!id || !recordLoaded || isSpreadsheet || paymentMode) return;
+    setBatchRowsState(id, {
+      readyRows: readyFromFlaggedRows.map((c) => toBatchRowSnapshot(c.data, c.edits)),
+      reviewRows: reviewList.map((c) => toBatchRowSnapshot(c.data, c.edits)),
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [id, recordLoaded, isSpreadsheet, paymentMode, sectionAssignment, edits]);
+
+  const readyRowsUrl = `/dashboard/bulk-uploader/ready/${encodeURIComponent(id ?? '')}`;
   const shippingFee = 1200; // mock flat
   const totalItemProtectionFee = parseFloat(
     [...fixList, ...reviewList].filter((c) => c.blocking.length === 0)
@@ -874,6 +931,10 @@ export function BulkUploadSummary() {
     ? spreadsheetRows.some((r) => r.cod === 'Yes')
     : rows.some((r) => (edits[r.row]?.cod ?? r.cod) === 'Yes');
 
+  // Prepaid methods (card / e-wallet / online banking) settle at booking time;
+  // cash-on-pickup and billing settle later — the batch still needs payment.
+  const isPrepaid = selectedPayment?.type === 'card' || selectedPayment?.type === 'ewallet' || selectedPayment?.type === 'banking';
+
   /**
    * Final-submission CTA for a fresh batch. COD content requires an eligible
    * payout bank account before booking can complete — gated here, the latest
@@ -892,6 +953,13 @@ export function BulkUploadSummary() {
       setShowPayoutSetup(true);
       return;
     }
+    // Booking now creates the batch's rows as real Transactions (see
+    // transactionService.ts's synthesized bulk-batch transactions) — the
+    // upload record transitions out of Needs Review here, the correct
+    // lifecycle point (see docs/context/bulk-booking.md). Prepaid methods
+    // (card / e-wallet / online banking) settle immediately; cash-on-pickup
+    // and billing settle later, so the batch still needs payment.
+    if (id) updateUploadStatus(id, isPrepaid ? 'completed' : 'awaiting-payment');
     setShowSuccess(true);
   };
 
@@ -1001,20 +1069,34 @@ export function BulkUploadSummary() {
                   {paymentMode ? (
                     <>{totalValidCount} {totalValidCount === 1 ? 'booking' : 'bookings'} ready for payment.</>
                   ) : (
-                    <>{readyCount} {readyCount === 1 ? 'order' : 'orders'} with no issues · created as <span className="font-medium text-gray-700">Awaiting payment</span>.</>
+                    <>{readyCount} {readyCount === 1 ? 'order' : 'orders'} passed validation and {readyCount === 1 ? 'is' : 'are'} ready to book.</>
                   )}
                 </p>
               </div>
             </div>
-            <a
-              href={txnUrl}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="inline-flex items-center gap-1 text-sm font-medium text-blue-600 hover:text-blue-700"
-            >
-              View all in Transactions
-              <IconExternalLink className="w-3.5 h-3.5" />
-            </a>
+            {paymentMode ? (
+              // Already booked (payment outstanding) — these rows are real
+              // Transactions, so the deep link into Transactions is accurate.
+              <a
+                href={txnUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="inline-flex items-center gap-1 text-sm font-medium text-blue-600 hover:text-blue-700"
+              >
+                View all in Transactions
+                <IconExternalLink className="w-3.5 h-3.5" />
+              </a>
+            ) : (
+              // Not booked yet — these are validated upload rows, not
+              // Transactions. Link to the dedicated Ready Rows page instead.
+              <Link
+                to={readyRowsUrl}
+                className="inline-flex items-center gap-1 text-sm font-medium text-blue-600 hover:text-blue-700"
+              >
+                View all ready rows
+                <IconArrowRight className="w-3.5 h-3.5" />
+              </Link>
+            )}
           </div>
 
           {!isSpreadsheet ? (
@@ -1045,8 +1127,14 @@ export function BulkUploadSummary() {
               </div>
 
               {readyCount > VALID_ORDERS.length && (
-                <p className="text-center text-sm text-blue-600 mt-3 font-medium">
-                  View all {readyCount} in transactions page
+                <p className="text-center text-sm mt-3 font-medium">
+                  {paymentMode ? (
+                    <span className="text-blue-600">View all {readyCount} in transactions page</span>
+                  ) : (
+                    <Link to={readyRowsUrl} className="text-blue-600 hover:text-blue-700">
+                      View all {readyCount} ready rows
+                    </Link>
+                  )}
                 </p>
               )}
             </>
@@ -1362,8 +1450,11 @@ export function BulkUploadSummary() {
               {paymentMode ? (
                 <>Payment for this batch — {paymentCopy(selectedPayment, billingAvailable)}:&nbsp;
                   <span className="font-semibold text-gray-900">{peso(totalFees)}</span></>
+              ) : isPrepaid ? (
+                <>Booked and <span className="font-medium text-gray-900">paid</span> — {paymentCopy(selectedPayment, billingAvailable)}:&nbsp;
+                  <span className="font-semibold text-gray-900">{peso(totalFees)}</span></>
               ) : (
-                <>Created as <span className="font-medium text-gray-900">Awaiting payment</span> — {paymentCopy(selectedPayment, billingAvailable)}:&nbsp;
+                <>Booked — <span className="font-medium text-gray-900">Awaiting payment</span>, {paymentCopy(selectedPayment, billingAvailable).toLowerCase()}:&nbsp;
                   <span className="font-semibold text-gray-900">{peso(totalFees)}</span></>
               )}
             </p>

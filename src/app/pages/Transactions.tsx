@@ -18,6 +18,7 @@ import { useScopedAccountId } from '../hooks/useAccountScope';
 import { getFeatureStateSync } from '../services/featureEnablementService';
 import { useModuleAccessContext } from '../hooks/useModuleAccess';
 import { StoreOrdersPanel } from '../components/StoreOrdersPanel';
+import { ServiceTypeBadge } from '../components/ServiceTypeBadge';
 // Data access goes through the transactionService facade (not the data module
 // directly). The service shapes data the UI needs; in production it is fronted
 // by the GGX Corporate BFF over OMS/fulfillment/FTX. See transactionService.ts.
@@ -32,7 +33,6 @@ import {
   SOURCE_TYPE_LABEL,
   type TransactionSummary,
   type TransactionBatchGroup,
-  type DeliveryServiceType,
   type SourceType,
 } from '../services/transactionService';
 
@@ -40,21 +40,6 @@ import {
 const SOURCE_FILTER_OPTIONS: SourceType[] = [
   'ggx_dashboard', 'bulk_upload', 'api', 'shopify', 'gobenta', 'product_checkout',
 ];
-
-// Each booking has exactly ONE service type. Badge colors align with the Bulk
-// Upload service types — Standard = blue, Same-Day = orange, On-Demand = purple —
-// using subtle -100/-800 tones consistent with the other transaction badges.
-const SERVICE_TYPE_BADGE: Record<DeliveryServiceType, { className: string; label: string }> = {
-  standard:  { className: 'bg-blue-100 text-blue-800',     label: SERVICE_TYPE_SHORT_LABEL.standard },
-  same_day:  { className: 'bg-orange-100 text-orange-800', label: SERVICE_TYPE_SHORT_LABEL.same_day },
-  on_demand: { className: 'bg-violet-100 text-violet-800', label: SERVICE_TYPE_SHORT_LABEL.on_demand },
-};
-
-/** Service-type cell: a single badge — exactly one service type per row. */
-function ServiceTypeCell({ serviceType }: { serviceType: DeliveryServiceType }) {
-  const badge = SERVICE_TYPE_BADGE[serviceType];
-  return <Badge className={badge.className}>{badge.label}</Badge>;
-}
 
 // ─── component ──────────────────────────────────────────────────────────────
 
@@ -315,7 +300,7 @@ export function Transactions() {
                       <span className="text-sm text-gray-600">{sourceTypeLabel(delivery)}</span>
                     </TableCell>
                     <TableCell>
-                      <ServiceTypeCell serviceType={delivery.serviceType} />
+                      <ServiceTypeBadge serviceType={delivery.serviceType} />
                     </TableCell>
                     <TableCell>
                       <Badge variant={statusConfig[delivery.status].variant}>
@@ -482,7 +467,7 @@ export function Transactions() {
                             <TableCell>{tx.recipient}</TableCell>
                             <TableCell>{tx.destination}</TableCell>
                             <TableCell>
-                              <ServiceTypeCell serviceType={tx.serviceType} />
+                              <ServiceTypeBadge serviceType={tx.serviceType} />
                             </TableCell>
                             <TableCell>
                               <Badge variant={statusConfig[tx.status].variant}>

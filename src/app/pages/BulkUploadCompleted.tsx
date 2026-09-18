@@ -7,16 +7,20 @@ import {
 import { Card, CardContent } from '../components/ui/Card';
 import { Badge } from '../components/ui/Badge';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '../components/ui/Table';
-import { getBulkUploadById, type UploadRecord } from '../services/bulkUploadService';
-import { BULK_FIELD_LABELS as L } from '../data/bulkTemplate';
+import { ServiceTypeBadge } from '../components/ServiceTypeBadge';
+import { getBulkUploadById, canViewBulkUploadBatch, type UploadRecord } from '../services/bulkUploadService';
+import { getTransactionBatchById, statusConfig, type TransactionBatchGroup } from '../services/transactionService';
+import { useAuth } from '../contexts/AuthContext';
 
 /**
- * Read-only detail page for a COMPLETED bulk upload. Reached from Recent Uploads
- * when a batch has status `completed`. It deliberately contains NO editable grid,
- * review/error sections, or "Revalidate changes" — those belong to the pre-booking
- * review page. A batch only reaches `completed` once it has no remaining review,
- * error, booking, or payment action — so its transactions are shown as booked &
- * paid (never "Awaiting payment", which routes to the Review and pay state).
+ * Read-only detail page for a COMPLETED (or awaiting-payment) bulk upload.
+ * Reached from Recent Uploads once a batch has been processed/booked. It
+ * deliberately contains NO editable grid, review/error sections, or
+ * "Revalidate changes" — those belong to the pre-booking review page. A batch
+ * only reaches this state once it has been booked — so its rows are shown as
+ * real Transactions, sourced from the SAME batch data the main Transactions
+ * "By Batch" view reads (`getTransactionBatchById`) — never a separate,
+ * hand-maintained copy.
  */
 
 const SOURCE_LABEL: Record<'file' | 'spreadsheet', string> = {
@@ -29,30 +33,6 @@ const MODE_LABEL: Record<UploadRecord['uploadMode'], string> = {
   'same-day': 'Same-Day Delivery',
   'on-demand': 'On-Demand Delivery',
 };
-
-// Sample recipients used to render a representative read-only transaction list.
-const SAMPLE_RECIPIENTS = [
-  'Lia Santos', 'Marco Alonzo', 'Tessa Cruz', 'Rico Mendoza', 'Nina Reyes',
-  'Paolo Cruz', 'Mara Lim', 'Diego Santos', 'Ana Villanueva', 'Carlo Reyes',
-];
-
-interface CompletedTxnRow {
-  tracking: string;
-  recipient: string;
-  itemName: string;
-  amount: number;
-}
-
-function buildTransactionRows(record: UploadRecord): CompletedTxnRow[] {
-  const datePart = record.id.replace(/^UPLOAD-/, '').replace(/-\d+$/, '');
-  const count = Math.min(record.validRows, SAMPLE_RECIPIENTS.length);
-  return Array.from({ length: count }, (_, i) => ({
-    tracking: `GGX-${datePart}-${String(i + 1).padStart(4, '0')}`,
-    recipient: SAMPLE_RECIPIENTS[i],
-    itemName: 'UNO FLIP! Double Sided Card',
-    amount: 600,
-  }));
-}
 
 function StatCard({ icon, label, value }: { icon: React.ReactNode; label: string; value: string | number }) {
   return (
@@ -73,23 +53,36 @@ function StatCard({ icon, label, value }: { icon: React.ReactNode; label: string
 export function BulkUploadCompleted() {
   const navigate = useNavigate();
   const { id } = useParams();
+  const { user } = useAuth();
 
   const [record, setRecord] = useState<UploadRecord | null>(null);
+  const [batchGroup, setBatchGroup] = useState<TransactionBatchGroup | null>(null);
   const [loaded, setLoaded] = useState(false);
 
   useEffect(() => {
     let active = true;
-    getBulkUploadById(id ?? '')
-      .then((r) => { if (active) { setRecord(r); setLoaded(true); } })
+    Promise.all([getBulkUploadById(id ?? ''), getTransactionBatchById(id ?? '')])
+      .then(([r, group]) => {
+        if (!active) return;
+        // Same account/subaccount scope rule as every other surface — a
+        // manager viewing another subaccount's batch id sees "not found",
+        // never that subaccount's recipient/transaction data.
+        const visible = r && canViewBulkUploadBatch(r, user);
+        setRecord(visible ? r : null);
+        setBatchGroup(visible ? group : null);
+        setLoaded(true);
+      })
       .catch(() => { if (active) setLoaded(true); });
     return () => { active = false; };
-  }, [id]);
+  }, [id, user]);
 
   const txnUrl = `/dashboard/transactions?view=batches&batch=${encodeURIComponent(id ?? '')}`;
-  const peso = (n: number) => `₱${n.toLocaleString('en-PH', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 
-  const txnRows = record ? buildTransactionRows(record) : [];
-  const createdCount = record?.validRows ?? 0;
+  const txnRows = batchGroup?.transactions ?? [];
+  // Backend-reported authoritative total (falls back to the visible row count
+  // when no reported total is present, e.g. a batch booked this session).
+  const createdCount = batchGroup?.counts.total ?? txnRows.length;
+  const isPaid = record?.status === 'completed';
 
   return (
     <div className="p-6 space-y-6">
@@ -131,9 +124,9 @@ export function BulkUploadCompleted() {
                 </p>
               </div>
             </div>
-            <Badge variant="success" className="self-start flex items-center gap-1.5 px-3 py-1">
+            <Badge variant={isPaid ? 'success' : 'pending'} className="self-start flex items-center gap-1.5 px-3 py-1">
               <IconCircleCheck className="w-4 h-4" />
-              Completed
+              {isPaid ? 'Completed' : 'Awaiting payment'}
             </Badge>
           </div>
 
@@ -141,17 +134,19 @@ export function BulkUploadCompleted() {
           <div className="grid sm:grid-cols-3 gap-4">
             <StatCard icon={<IconPackages className="w-5 h-5" />} label="Total rows processed" value={record.totalRows} />
             <StatCard icon={<IconReceipt2 className="w-5 h-5" />} label="Created transactions" value={createdCount} />
-            <StatCard icon={<IconCircleCheck className="w-5 h-5" />} label="Booked & paid" value={createdCount} />
+            <StatCard icon={<IconCircleCheck className="w-5 h-5" />} label="Booked & paid" value={isPaid ? createdCount : 0} />
           </div>
 
-          {/* Read-only transaction list */}
+          {/* Transaction list — same records the main Transactions page shows */}
           <Card>
             <CardContent className="p-6">
               <div className="flex items-center justify-between gap-4 mb-4">
                 <div>
                   <p className="text-base font-semibold text-gray-900">Created transactions</p>
                   <p className="text-sm text-gray-500">
-                    These orders were created from this upload and have been paid — no further action is needed.
+                    {isPaid
+                      ? 'These orders were created from this upload and have been paid — no further action is needed.'
+                      : 'These orders were created from this upload and are awaiting payment.'}
                   </p>
                 </div>
                 <a
@@ -165,35 +160,51 @@ export function BulkUploadCompleted() {
                 </a>
               </div>
 
-              <div className="overflow-x-auto rounded-lg border border-gray-200">
-                <Table>
-                  <TableHeader>
-                    <TableRow>
-                      <TableHead>Tracking #</TableHead>
-                      <TableHead>{L.name}</TableHead>
-                      <TableHead>{L.itemName}</TableHead>
-                      <TableHead className="text-right">Amount</TableHead>
-                      <TableHead>Status</TableHead>
-                    </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    {txnRows.map((row) => (
-                      <TableRow key={row.tracking}>
-                        <TableCell className="font-medium text-blue-600">{row.tracking}</TableCell>
-                        <TableCell className="text-gray-900">{row.recipient}</TableCell>
-                        <TableCell className="text-gray-600">{row.itemName}</TableCell>
-                        <TableCell className="text-right text-gray-900">{peso(row.amount)}</TableCell>
-                        <TableCell><Badge variant="success">Booked</Badge></TableCell>
-                      </TableRow>
-                    ))}
-                  </TableBody>
-                </Table>
-              </div>
-
-              {createdCount > txnRows.length && (
-                <p className="text-center text-sm text-blue-600 mt-3 font-medium">
-                  Showing {txnRows.length} of {createdCount}. View all in the transactions page.
+              {txnRows.length === 0 ? (
+                <p className="text-sm text-gray-500 text-center py-6">
+                  No linked transaction records found for this batch yet.
                 </p>
+              ) : (
+                <>
+                  <div className="overflow-x-auto rounded-lg border border-gray-200">
+                    <Table>
+                      <TableHeader>
+                        <TableRow>
+                          <TableHead>Tracking Number</TableHead>
+                          <TableHead>Recipient</TableHead>
+                          <TableHead>Destination</TableHead>
+                          <TableHead>Service Type</TableHead>
+                          <TableHead>Status</TableHead>
+                          <TableHead>Date</TableHead>
+                        </TableRow>
+                      </TableHeader>
+                      <TableBody>
+                        {txnRows.map((row) => (
+                          <TableRow
+                            key={row.tracking}
+                            className="cursor-pointer hover:bg-gray-50 transition-colors"
+                            onClick={() => navigate(`/dashboard/transactions/${row.tracking}`)}
+                          >
+                            <TableCell className="font-medium text-blue-600">{row.tracking}</TableCell>
+                            <TableCell className="text-gray-900">{row.recipient}</TableCell>
+                            <TableCell className="text-gray-600">{row.destination}</TableCell>
+                            <TableCell><ServiceTypeBadge serviceType={row.serviceType} /></TableCell>
+                            <TableCell>
+                              <Badge variant={statusConfig[row.status].variant}>{statusConfig[row.status].label}</Badge>
+                            </TableCell>
+                            <TableCell className="text-gray-600">{row.date}</TableCell>
+                          </TableRow>
+                        ))}
+                      </TableBody>
+                    </Table>
+                  </div>
+
+                  {createdCount > txnRows.length && (
+                    <p className="text-center text-sm text-gray-400 mt-3">
+                      Showing {txnRows.length} of {createdCount.toLocaleString()}. View all in the transactions page.
+                    </p>
+                  )}
+                </>
               )}
             </CardContent>
           </Card>

@@ -48,6 +48,31 @@ Bulk Upload, not a standalone module and not a sidebar item.
 - Do not replace the estimate with partial backend math; the authoritative fee,
   validation, and service contract must ship together.
 
+## Lifecycle Boundary
+
+Upload row → validated / Ready to book → batch processed/booked → real
+Transaction created.
+
+- "Ready to book" rows on the Review Before Booking page are validated upload
+  rows, NOT transactions. Never imply they were "created" or are "Awaiting
+  payment" before the batch is actually booked. Do not deep-link them into the
+  Transactions page — use the dedicated Ready Rows page
+  (`/dashboard/bulk-uploader/ready/:id`, `BulkUploadReadyRows.tsx`) instead.
+- A batch's rows become real Transactions only once its upload record status
+  transitions to `awaiting-payment` (booked, payment still outstanding — cash
+  on pick-up / billing) or `completed` (booked and paid — card / e-wallet /
+  online banking). `transactionService.ts` synthesizes them on demand from the
+  SAME live per-batch row state the Review page writes
+  (`data/bulkUploads.ts`'s `BatchRowsState`/`getSpreadsheetBatchRows`) —
+  never hand-duplicate this data into a second list.
+- Completed Batch Details (`BulkUploadCompleted.tsx`) must read its
+  transaction table from `transactionService.getTransactionBatchById()` (the
+  same source the Transactions "By Batch" view uses), not a separate/
+  fabricated row list.
+- Bulk-upload detail pages (Review, Ready Rows, Completed) must call
+  `bulkUploadService.canViewBulkUploadBatch()` before rendering a batch's
+  data — a manager may only view their own subaccount's batches.
+
 ## Upload File Preservation
 
 - Preserve existing Upload File behavior when changing spreadsheet booking.
