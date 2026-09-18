@@ -56,8 +56,9 @@ Transaction created.
 - "Ready to book" rows on the Review Before Booking page are validated upload
   rows, NOT transactions. Never imply they were "created" or are "Awaiting
   payment" before the batch is actually booked. Do not deep-link them into the
-  Transactions page — use the dedicated Ready Rows page
-  (`/dashboard/bulk-uploader/ready/:id`, `BulkUploadReadyRows.tsx`) instead.
+  Transactions page — the "View all {count} ready rows" CTA opens the in-page
+  `ReadyRowsDrawer` (`src/app/components/ReadyRowsDrawer.tsx`) instead of
+  navigating away; there is no separate Ready Rows page/route.
 - A batch's rows become real Transactions only once its upload record status
   transitions to `awaiting-payment` (booked, payment still outstanding — cash
   on pick-up / billing) or `completed` (booked and paid — card / e-wallet /
@@ -69,9 +70,11 @@ Transaction created.
   transaction table from `transactionService.getTransactionBatchById()` (the
   same source the Transactions "By Batch" view uses), not a separate/
   fabricated row list.
-- Bulk-upload detail pages (Review, Ready Rows, Completed) must call
+- Bulk-upload detail pages (Review, Completed) must call
   `bulkUploadService.canViewBulkUploadBatch()` before rendering a batch's
-  data — a manager may only view their own subaccount's batches.
+  data — a manager may only view their own subaccount's batches. The Ready
+  Rows drawer inherits this scope for free (it only ever renders rows the
+  already-scoped Review page passes into it).
 
 ## Upload File Preservation
 

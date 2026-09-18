@@ -107,9 +107,9 @@ export function getSpreadsheetBatchRows(batchId: string): SpreadsheetBatchRow[] 
  * Live per-batch row classification, mirrored from the Review Before Booking
  * page's own in-progress editing state (`BulkUploadSummary.tsx`). This is the
  * SAME data the review grid computes — not a separate/copied dataset — so the
- * dedicated Ready-to-book Rows page (and, once a batch is booked, synthesized
- * Transaction records — see `transactionService.ts`) always read the current
- * classification instead of a stale snapshot.
+ * in-page Ready to book drawer (`ReadyRowsDrawer.tsx`) and, once a batch is
+ * booked, synthesized Transaction records (see `transactionService.ts`) always
+ * read the current classification instead of a stale snapshot.
  *
  * Only rows that started in "Rows needing fixes" or "Needs review" and carry
  * real edited field data are tracked here. The larger base "no issues from the
@@ -140,7 +140,7 @@ export interface BatchRowsState {
 
 const EMPTY_BATCH_ROWS_STATE: BatchRowsState = { readyRows: [], reviewRows: [] };
 
-// Persisted (not just session-in-memory) so the dedicated Ready Rows page reads
+// Persisted (not just session-in-memory) so the Ready to book drawer reads
 // the latest classification even after a full reload of this demo app.
 const BATCH_ROWS_STATE: Record<string, BatchRowsState> = loadState('batchRowsState', {});
 function persistBatchRowsState(): void { saveState('batchRowsState', BATCH_ROWS_STATE); }
@@ -160,7 +160,7 @@ export function getBatchRowsState(batchId: string): BatchRowsState {
  * Shared sample filler for a batch's base "validated with no issues from the
  * start" rows, which — like `BulkUploadCompleted.tsx`'s completed-batch list —
  * have no per-row mock detail beyond the batch's own valid-row count. Used by
- * both the Ready Rows page and synthesized Transaction records (see
+ * both the Ready to book drawer and synthesized Transaction records (see
  * `transactionService.ts`) so the two stay visually consistent.
  */
 export const BATCH_ROW_SAMPLE_FILLER: readonly Omit<BatchRowSnapshot, 'key'>[] = [

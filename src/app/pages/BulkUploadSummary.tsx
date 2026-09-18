@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate, useParams, Link } from 'react-router';
 import {
   IconArrowLeft, IconCircleCheck, IconCircleX, IconAlertCircle, IconAlertTriangle,
@@ -14,11 +14,12 @@ import { Dialog, ConfirmDialog } from '../components/ui/Dialog';
 import { PaymentMethodTabs, type SelectedPaymentMethod } from '../components/PaymentMethodTabs';
 import { PayoutSetupRequiredDialog } from '../components/PayoutSetupRequiredDialog';
 import { PayoutSetupDrawer } from '../components/journeys/PayoutSetupDrawer';
+import { ReadyRowsDrawer } from '../components/ReadyRowsDrawer';
 import { DROPOFF_LOCATIONS } from '../data/dropoffLocations';
 import { isBillingAccount } from '../services/paymentService';
 import {
   getBulkUploadById, getSpreadsheetBatchRows, updateUploadStatus, setBatchRowsState, getBatchRowsState,
-  canViewBulkUploadBatch,
+  canViewBulkUploadBatch, buildBatchRowFiller, spreadsheetRowToBatchRowSnapshot,
   type SpreadsheetBatchRow, type BatchRowSnapshot,
 } from '../services/bulkUploadService';
 import { hasEligiblePayoutBank } from '../services/payoutBankService';
@@ -836,7 +837,7 @@ export function BulkUploadSummary() {
   const totalValidCount = readyCount + reviewList.length;
 
   // Mirror the current row classification into the shared per-batch store (see
-  // `data/bulkUploads.ts`'s `BatchRowsState`) so the dedicated Ready Rows page —
+  // `data/bulkUploads.ts`'s `BatchRowsState`) so the Ready to book drawer —
   // and, once the batch is booked, synthesized Transaction records — read the
   // SAME live data the Review page computed, never a separate/copied dataset.
   useEffect(() => {
@@ -851,7 +852,19 @@ export function BulkUploadSummary() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [id, recordLoaded, isSpreadsheet, paymentMode, sectionAssignment, edits]);
 
-  const readyRowsUrl = `/dashboard/bulk-uploader/ready/${encodeURIComponent(id ?? '')}`;
+  // In-page "Ready to book" drawer (replaces the old dedicated Ready Rows page
+  // navigation) — never a separate fetch/dataset: built from the SAME live state
+  // (`readyFromFlaggedRows`/`spreadsheetRows`/`validBaseCount`) this page already
+  // computed above, so it always reflects the current batch as-is.
+  const [showReadyRowsDrawer, setShowReadyRowsDrawer] = useState(false);
+  const readyRowsForDrawer = useMemo<BatchRowSnapshot[]>(() => {
+    if (isSpreadsheet) {
+      const captured = spreadsheetRows.map((r, i) => spreadsheetRowToBatchRowSnapshot(r, i));
+      return [...captured, ...buildBatchRowFiller(Math.max(0, validBaseCount - captured.length))];
+    }
+    return [...buildBatchRowFiller(validBaseCount), ...readyFromFlaggedRows.map((c) => toBatchRowSnapshot(c.data, c.edits))];
+  }, [isSpreadsheet, spreadsheetRows, validBaseCount, readyFromFlaggedRows]);
+
   const shippingFee = 1200; // mock flat
   const totalItemProtectionFee = parseFloat(
     [...fixList, ...reviewList].filter((c) => c.blocking.length === 0)
@@ -1088,14 +1101,16 @@ export function BulkUploadSummary() {
               </a>
             ) : (
               // Not booked yet — these are validated upload rows, not
-              // Transactions. Link to the dedicated Ready Rows page instead.
-              <Link
-                to={readyRowsUrl}
+              // Transactions. Opens the in-page Ready to book drawer instead
+              // of navigating away (see ReadyRowsDrawer.tsx).
+              <button
+                type="button"
+                onClick={() => setShowReadyRowsDrawer(true)}
                 className="inline-flex items-center gap-1 text-sm font-medium text-blue-600 hover:text-blue-700"
               >
-                View all ready rows
+                View all {readyCount} ready {readyCount === 1 ? 'row' : 'rows'}
                 <IconArrowRight className="w-3.5 h-3.5" />
-              </Link>
+              </button>
             )}
           </div>
 
@@ -1125,18 +1140,6 @@ export function BulkUploadSummary() {
                   </TableBody>
                 </Table>
               </div>
-
-              {readyCount > VALID_ORDERS.length && (
-                <p className="text-center text-sm mt-3 font-medium">
-                  {paymentMode ? (
-                    <span className="text-blue-600">View all {readyCount} in transactions page</span>
-                  ) : (
-                    <Link to={readyRowsUrl} className="text-blue-600 hover:text-blue-700">
-                      View all {readyCount} ready rows
-                    </Link>
-                  )}
-                </p>
-              )}
             </>
           ) : spreadsheetRows.length > 0 ? (
             <>
@@ -1531,6 +1534,13 @@ export function BulkUploadSummary() {
           willBeDefault={journey.payoutAccounts.length === 0}
         />
       )}
+
+      {/* ── Ready to book drawer — in-page, never navigates away from Review ── */}
+      <ReadyRowsDrawer
+        open={showReadyRowsDrawer}
+        onClose={() => setShowReadyRowsDrawer(false)}
+        rows={readyRowsForDrawer}
+      />
 
       {/* ── Exit protection — in-app navigation away from this review page ── */}
       {exitGuard.state === 'blocked' && (

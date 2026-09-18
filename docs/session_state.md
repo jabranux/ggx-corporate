@@ -3,6 +3,59 @@
 > Lightweight resume/checkpoint file. Detailed June 2026 history was archived to
 > `docs/archive/session_log_2026-06.md`.
 
+## Most Recent Work — Bulk Upload Review: "View all ready rows" now opens an in-page drawer (2026-09-18)
+
+Replaced the "View all ready rows" **page navigation** on the Review Before
+Booking screen with an **in-page right-side drawer**, so reviewing the full
+Ready-to-book set no longer leaves the Review page (or its in-progress edits,
+scroll position, and upload-exit protection) behind.
+
+- **New**: `src/app/components/ReadyRowsDrawer.tsx` — a right-side drawer
+  (desktop: ~65vw capped at 980px; mobile: full width) showing the batch's
+  full current "Ready to book" row set, with search (recipient, mobile, item,
+  location, reference ID) and Previous/Next pagination (50 rows/page, reusing
+  the shared `Pagination` component). It takes the row list as a prop — no
+  fetch of its own, no duplicate dataset — always the SAME live data
+  `BulkUploadSummary.tsx` already computed (`readyFromFlaggedRows` /
+  `spreadsheetRows` / `validBaseCount`, memoized as `readyRowsForDrawer`).
+  Accessibility: Escape closes it, Tab is trapped inside it while open, and
+  focus moves to/from the triggering CTA on open/close (all found missing by
+  the Codex audit below, then added).
+- **`BulkUploadSummary.tsx`**: the header "Ready to book" CTA now reads
+  **"View all {count} ready rows →"** and opens the drawer (`<button>`, not a
+  `<Link>` — no route change). The duplicate bottom CTA (shown when
+  `readyCount > VALID_ORDERS.length`) is removed — one CTA only, per the
+  task's own instruction. The already-booked/paymentMode path is unchanged
+  (still a real "View all in Transactions" deep link — those rows are real
+  Transactions already).
+- **Removed**: the dedicated `BulkUploadReadyRows.tsx` page and its
+  `bulk-uploader/ready/:id` route (`routes.tsx`) — fully superseded by the
+  drawer, so kept out rather than left as dead/orphaned reachable-by-URL code.
+  `docs/context/bulk-booking.md` and inline comments in
+  `data/bulkUploads.ts`/`BulkUploadSummary.tsx` referencing the old page were
+  updated to point at the drawer instead.
+- Because opening/closing the drawer is pure client state (no route change),
+  `useUploadExitGuard`'s `useBlocker` (which only fires when
+  `currentLocation.pathname !== nextLocation.pathname`) never fires for it —
+  the existing "Leave bulk upload?" confirmation still fires correctly for
+  genuine navigation away from the uploader. No changes were needed to the
+  guard itself.
+- **Tests**: `tests/bulk-upload-lifecycle.test.mjs`'s first case rewritten —
+  asserts exactly one CTA button (not a link) with "View all N ready rows"
+  copy, that clicking it does not change the URL, that the drawer's empty-
+  search state renders, and that closing it does not trigger "Leave bulk
+  upload?" and leaves the URL unchanged.
+- **Validated**: `npm run typecheck` clean, `npm run build` clean,
+  `tests/bulk-upload-lifecycle.test.mjs` 5/5. One Codex CLI audit pass
+  (`codex exec -s read-only`, scoped to the staged diff only) found 3 issues,
+  all fixed: the drawer had no Escape/focus-trap/focus-restore (added); two
+  stale doc/comment references to the deleted dedicated Ready Rows page
+  (`data/bulkUploads.ts`, `BulkUploadSummary.tsx`) — updated to name the
+  drawer instead. No functional/state-wiring issues found.
+- **No database migration** — this is a frontend presentation/state change
+  only (same `localStorage`-backed mock state Bulk Upload already used); none
+  was needed. No QuadX Bridge (HeyQ) changes — unrelated to this feature.
+
 ## Most Recent Work — fixed production deploys: Vercel Hobby's 12-function limit (2026-09-18)
 
 Production had been failing to deploy for the last 3 pushes (`77ad915`

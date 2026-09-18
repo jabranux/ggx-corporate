@@ -6,8 +6,9 @@
  *
  * - The Review Before Booking page must never claim its "Ready to book" rows
  *   were "created as Awaiting payment" — they are validated upload rows, not
- *   transactions yet — and must offer a "View all ready rows" CTA instead of
- *   a premature deep link into Transactions.
+ *   transactions yet — and must offer a "View all N ready rows" CTA that opens
+ *   an in-page drawer instead of a premature deep link into Transactions or a
+ *   navigation away from the review page.
  * - Booking a batch (upload record transitions to `awaiting-payment` /
  *   `completed`) is the ONLY point real Transaction records appear for that
  *   batch — before that, the batch must be invisible to the Transactions
@@ -36,19 +37,41 @@ before(async () => {
 after(async () => { await browser?.close(); stopDevServer(server); });
 
 describe('Review Before Booking — "Ready to book" semantics', () => {
-  it('never claims rows were created as Awaiting payment, and links to the Ready Rows page', async () => {
-    await page.goto(`${server.base}/dashboard/bulk-uploader/summary/UPLOAD-2026-05-19-001`, { waitUntil: 'networkidle' });
+  it('never claims rows were created as Awaiting payment, and opens an in-page drawer (no navigation, no duplicate CTA)', async () => {
+    const summaryUrl = `${server.base}/dashboard/bulk-uploader/summary/UPLOAD-2026-05-19-001`;
+    await page.goto(summaryUrl, { waitUntil: 'networkidle' });
     const bodyText = await page.evaluate(() => document.body.innerText);
 
     assert.ok(bodyText.includes('ready to book'), 'expects "ready to book" copy on the Ready to book card');
     assert.ok(!bodyText.includes('created as'), 'must not claim rows were "created as" any transaction state before booking');
     assert.ok(!bodyText.includes('View all in Transactions'), 'must not deep-link pre-booking rows into Transactions');
 
-    const readyLinkHref = await page.evaluate(() => {
-      const a = [...document.querySelectorAll('a')].find((el) => el.textContent?.includes('View all ready rows'));
-      return a?.getAttribute('href') ?? null;
-    });
-    assert.ok(readyLinkHref?.includes('/dashboard/bulk-uploader/ready/UPLOAD-2026-05-19-001'), `expected a Ready Rows link, got ${readyLinkHref}`);
+    // Exactly one "View all N ready rows" CTA (the old duplicate bottom link is gone),
+    // and it must be a button, not a link — it does not navigate anywhere.
+    const ctaCount = await page.evaluate(() =>
+      [...document.querySelectorAll('button')].filter((el) => /View all \d+ ready rows?/.test(el.textContent ?? '')).length
+    );
+    assert.equal(ctaCount, 1, 'expected exactly one "View all N ready rows" CTA button');
+
+    await page.click('button:has-text("ready rows")');
+    // Still the same URL — this must be a client-side drawer, not a route change.
+    assert.equal(page.url(), summaryUrl, 'opening the Ready to book drawer must not navigate away from Review');
+
+    const drawer = page.locator('[role="dialog"][aria-label="Ready to book rows"]');
+    await drawer.waitFor({ state: 'visible', timeout: 5_000 });
+    assert.ok(await drawer.locator('text=Ready to book').first().isVisible(), 'drawer header should read "Ready to book"');
+    await drawer.locator('input[placeholder*="Search by recipient"]').fill('zzz-no-such-row-zzz');
+    assert.ok(
+      await drawer.locator('text=No ready rows match').isVisible(),
+      'searching for a non-matching query should show the empty-search state',
+    );
+
+    // Closing the drawer must not trigger the unsaved-work "Leave bulk upload?" guard.
+    await drawer.locator('button[aria-label="Close"]').click();
+    await drawer.waitFor({ state: 'hidden', timeout: 5_000 });
+    const leaveDialogVisible = await page.locator('text=Leave bulk upload?').isVisible().catch(() => false);
+    assert.equal(leaveDialogVisible, false, 'closing the drawer must not trigger the "Leave bulk upload?" exit guard');
+    assert.equal(page.url(), summaryUrl, 'the Review page URL must be unchanged after closing the drawer');
   });
 });
 
