@@ -2,6 +2,7 @@
   "rewrites": [
     { "source": "/api/support/:path+", "destination": "/api/support/router?path=:path*" },
     { "source": "/api/ops-requests/:path+", "destination": "/api/ops-requests/router?path=:path*" },
+    { "source": "/api/commerce/:path+", "destination": "/api/commerce/router?path=:path*" },
     { "source": "/((?!api/).*)", "destination": "/index.html" }
   ]
 }

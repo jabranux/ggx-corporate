@@ -3,6 +3,114 @@
 > Lightweight resume/checkpoint file. Detailed June 2026 history was archived to
 > `docs/archive/session_log_2026-06.md`.
 
+## In Progress — Commerce Enhancement: real backend built; frontend not started (2026-09-19)
+
+Implementing the full Commerce enhancement spec (Inventory variants/SKU,
+Storefront branding/collections/homepage/banners, Cart redesign, Promotions).
+**Backend foundation is complete and verified; frontend work has not started
+yet** — this entry is a mid-task checkpoint, not a finished feature.
+
+- **Architecture decision (explicit user direction, overriding this repo's
+  general mock-first Commerce stance for this task only):** Commerce now has
+  a REAL backend — a dedicated Supabase Postgres project
+  (`ssdxpybnhbrkolbicgfg`), separate from QuadX Bridge/HeyQ's own project.
+  Commerce is a GGX product-domain capability, not a Bridge/CS one — Bridge
+  was NOT touched and gets no new tables. Media (product photos, storefront
+  logos, hero banners) lives in Cloudflare R2 (bucket
+  `ggx-corporate-commerce-assets`), not Supabase Storage or Vercel Blob.
+- **New env vars** (`.env.example`): `GGX_COMMERCE_DATABASE_URL` (Postgres
+  connection — currently the pooled Transaction-mode string; the project's
+  direct :5432 connection is IPv6-only and unreachable from IPv4-only
+  networks, discovered while wiring this up), `GGX_COMMERCE_SUPABASE_URL`/
+  `_SECRET_KEY` (provisioned, currently unused — the BFF talks to Postgres
+  directly for real transactions/row-locking, not the Data API),
+  `GGX_COMMERCE_R2_*` (account id, access key, secret key, bucket, public
+  URL — verified with a real put/get/delete round trip against the live
+  bucket).
+- **Schema** (`supabase/migrations/*.sql`, 4 files, applied to the real
+  project): `commerce_products`, `commerce_product_images`,
+  `commerce_product_options`/`_option_values`, `commerce_product_variants`/
+  `_variant_option_values`, `commerce_sku_settings`/`_sku_registry`,
+  `commerce_storefronts`, `commerce_storefront_products`,
+  `commerce_collections`/`_collection_products`, `commerce_homepage_sections`,
+  `commerce_hero_banners`, `commerce_promotions`/`_promotion_products`/
+  `_promotion_collections`/`_promotion_redemptions`. RLS enabled on every
+  table with no grants to `anon`/`authenticated` (GGX has no Supabase Auth
+  users — the BFF connects with a role that bypasses RLS and enforces
+  tenant isolation in application code, same trust model as the existing
+  Bridge proxies); DB triggers additionally reject cross-account attachment
+  (storefront/collection/promotion → another account's product) as
+  defense-in-depth. SKU allocation is concurrency-safe (row-locked
+  per-account counter); changing a SKU prefix never renames existing SKUs.
+  `scripts/apply-commerce-migrations.mjs` (`npm run commerce:migrate`)
+  applies un-applied migration files idempotently — used because the
+  Supabase CLI isn't installed in this environment.
+- **BFF** (`api/commerce/router.ts` + `api/_lib/commerce{Db,Auth,Errors,
+  Products,Storefront,Promotions,Storage}.ts`), same consolidated-router/
+  Hobby-function-limit convention as `api/support/router.ts`: full CRUD for
+  products/variants/images/SKU settings, storefront profile/branding/logo/
+  publish/product-selection, collections, homepage sections, hero banners,
+  and promotions (`validate`/`redeem` are public routes scoped by
+  `storeSlug`, since checkout runs as the buyer, not an authenticated
+  merchant — discount math is always server-computed, never trusts a
+  client-supplied amount). Public storefront reads
+  (`/api/commerce/public/store/:slug[/products|/product/:slug]`) never
+  require a session and only ever resolve a `published` store / `active`
+  products. Account/subaccount scoping mirrors the existing Ops Requests
+  pattern: a manager's `accountId` is always forced from their verified
+  session; the Main Account admin may pass an explicit `accountId` (single
+  account) or none (`consolidated`, every account) — never trusted from a
+  non-admin caller.
+- **Scope boundary, decided not asked** (documented here so it isn't
+  mistaken for an oversight): real order/checkout placement stays exactly
+  where `docs/roadmap.md` already has it — an explicitly deferred,
+  demo/mock, frontend-only flow (`placeOrder()` in
+  `data/storefrontOrders.ts`) — building a full backend-authoritative order
+  system is a separate, much larger initiative this task doesn't ask for
+  and the roadmap explicitly gates behind "start it only when a BFF/backend
+  exists" as its own future stage. The ONE exception is promotions: promo
+  code validation/redemption is real and backend-authoritative
+  (`commerce_promotion_redemptions`, idempotency-keyed, row-locked usage
+  limits) because the task spec requires it explicitly ("never trust a
+  discount calculated only by the browser") — it's wired to fire at the
+  same point the existing demo checkout completes, without the surrounding
+  order record itself becoming durable server-side yet.
+- **Tests**: 2 new files, both against a REAL disposable local Postgres
+  (Docker) migrated with the actual SQL files — not a mock DB —
+  `tests/api-commerce-products.test.mjs` (11 cases: SKU manual/duplicate/
+  auto-generate/prefix-change-doesn't-rename, tenant isolation, admin
+  cross-account access, stock floor, variant generation + combination
+  uniqueness + idempotent re-run) and
+  `tests/api-commerce-storefront-promotions.test.mjs` (11 cases: public/
+  private storefront separation, collection/banner cross-tenant rejection,
+  full promotion validate/redeem lifecycle, tampered-discount resistance,
+  concurrent usage-limit race — exactly 1 of 5 simultaneous redemptions
+  against `usage_limit=1` succeeds — expired/unknown code rejection).
+  22/22 passing. A real bug was caught and fixed this pass: variant SKU
+  registry rows were being inserted before the variant row they reference
+  existed (FK ordering), only surfaced by testing against a real DB, not by
+  type-checking or code review.
+- **Validated**: `npm run typecheck` clean, `npm run build` clean, full
+  existing suite re-run for regressions: **239/241** (2 failures are a
+  pre-existing, unrelated hang in `tests/heyq-request-lifecycle.test.mjs`'s
+  dev-server lifecycle — confirmed via process CPU time not advancing,
+  fixed by killing the stuck process tree so the runner moved on; not
+  caused by this session's changes, and not touched by it).
+- **Not started yet**: all frontend work (variant editor UI, SKU settings
+  UI, image gallery management wired to R2 presigned uploads, storefront
+  grid search/filter/sort, product detail page/route, collections/homepage
+  merchandising UI, hero banner management, promotions UI, cart redesign),
+  swapping `inventoryService.ts`/`storefrontService.ts`/
+  `storefrontOrdersService.ts` from localStorage mock to the new BFF, the
+  Codex CLI audit pass, and demo-data seeding into the new DB (the existing
+  `acme-luzon` mock seed data has no equivalent rows in the real backend
+  yet — the frontend still reads its old localStorage mock until the
+  service layer is swapped).
+- **Nothing pushed yet** — commit only, per this repo's standing rule (push
+  only on explicit instruction). HeyQ/Bridge repo: inspected, confirmed no
+  changes needed or made (Commerce is intentionally isolated from it — see
+  the architecture decision above).
+
 ## Most Recent Work — fixed production 404s on /api/support/* and /api/ops-requests/* (2026-09-18)
 
 The Hobby-function-limit consolidation two entries below (`9625557`) merged
