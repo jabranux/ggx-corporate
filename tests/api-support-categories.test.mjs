@@ -52,9 +52,9 @@ before(async () => {
 
   const [categoriesOut, sessionOut] = await Promise.all([
     // categories/tickets/typing are consolidated into one Serverless Function
-    // (api/support/[...path].ts) to stay under Vercel's function-count limit —
+    // (api/support/router.ts) to stay under Vercel's function-count limit —
     // dispatch on `req.query.path` (see the `query` in each request below).
-    esbuild.build({ entryPoints: [`${ROOT}/api/support/[...path].ts`], bundle: true, platform: 'node', format: 'cjs', write: false }),
+    esbuild.build({ entryPoints: [`${ROOT}/api/support/router.ts`], bundle: true, platform: 'node', format: 'cjs', write: false }),
     esbuild.build({ entryPoints: [`${ROOT}/api/_lib/session.ts`], bundle: true, platform: 'node', format: 'cjs', write: false }),
   ]);
   const categoriesFile = path.join(TMP_DIR, 'categoriesHandler.cjs');

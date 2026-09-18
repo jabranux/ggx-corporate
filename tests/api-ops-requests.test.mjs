@@ -119,12 +119,12 @@ before(async () => {
   process.env.QUADX_BRIDGE_URL = `http://127.0.0.1:${bridgePort}`;
 
   // catalog/:id/:id/updates are consolidated into one Serverless Function
-  // (api/ops-requests/[...path].ts) to stay under Vercel's function-count
+  // (api/ops-requests/router.ts) to stay under Vercel's function-count
   // limit — dispatch on `req.query.path` (see opsPathQuery below). The bare
   // list/create route (index.ts) can't be matched by a required catch-all
   // (zero path segments), so it stays its own file, unchanged.
   const builds = await Promise.all([
-    esbuild.build({ entryPoints: [`${ROOT}/api/ops-requests/[...path].ts`], bundle: true, platform: 'node', format: 'cjs', write: false }),
+    esbuild.build({ entryPoints: [`${ROOT}/api/ops-requests/router.ts`], bundle: true, platform: 'node', format: 'cjs', write: false }),
     esbuild.build({ entryPoints: [`${ROOT}/api/ops-requests/index.ts`], bundle: true, platform: 'node', format: 'cjs', write: false }),
     esbuild.build({ entryPoints: [`${ROOT}/api/_lib/session.ts`], bundle: true, platform: 'node', format: 'cjs', write: false }),
   ]);

@@ -3,6 +3,49 @@
 > Lightweight resume/checkpoint file. Detailed June 2026 history was archived to
 > `docs/archive/session_log_2026-06.md`.
 
+## Most Recent Work — fixed production 404s on /api/support/* and /api/ops-requests/* (2026-09-18)
+
+The Hobby-function-limit consolidation two entries below (`9625557`) merged
+several routes into two catch-all files using Vercel's filesystem
+`[...path].ts` convention. That convention turned out broken on this
+project's deployment (framework "vite", not Next.js): live production was
+returning `404` for every real route under `/api/support/*` and
+`/api/ops-requests/*` (`GET /api/support/tickets` → 404, `GET
+/api/support/categories` → 404, reported by the user from
+`ggx-corporate.vercel.app`'s browser console). Confirmed via the Vercel MCP
+plugin against the live deployment (`get_runtime_errors` showed no invocation
+at all; direct `curl` showed a single-segment path like `/api/support/categories`
+reaching the function with an empty `req.query.path` — falling through to the
+handler's own `{"error":"Not found"}` — while a two-segment path like
+`/api/support/tickets/:id` never reached the function at all, a platform-level
+`404 NOT_FOUND`). The bare `/api/ops-requests` route (`index.ts`, not a
+catch-all) was unaffected the whole time.
+
+- **Fix**: dropped the filesystem catch-all convention for these two routes
+  in favor of explicit `vercel.json` rewrites, which Vercel documents as
+  reliably populating route-segment query params:
+  - `api/support/[...path].ts` → `api/support/router.ts` (plain filename).
+  - `api/ops-requests/[...path].ts` → `api/ops-requests/router.ts` (plain filename).
+  - `vercel.json` gained two rewrites ahead of the existing SPA fallback:
+    `/api/support/:path+` → `/api/support/router?path=:path*` and
+    `/api/ops-requests/:path+` → `/api/ops-requests/router?path=:path*`.
+  - Both files' `pathSegments()` now also splits a `/`-joined string (what
+    the rewrite's wildcard capture sends), not just an array (what a direct
+    test-harness call sends) — handles either representation.
+  - Public URLs, function count (still 5), and every handler's business
+    logic are unchanged.
+- **Tests updated**: `tests/api-support-categories.test.mjs`,
+  `tests/api-support-typing.test.mjs`, `tests/api-ops-requests.test.mjs` —
+  esbuild entry points retargeted to the renamed files (they call the handler
+  directly with `query: { path: [...] }`, so the array-vs-string change
+  doesn't affect them).
+- **Not yet re-verified against production** — this fix has not yet been
+  deployed/tested against `ggx-corporate.vercel.app`. Next session (or this
+  one, once deployed) should re-run the `curl` checks against
+  `/api/support/categories`, `/api/support/tickets`, `/api/support/tickets/:id`,
+  `/api/ops-requests/catalog`, and `/api/ops-requests/:id/updates` to confirm
+  all now route correctly instead of 404ing.
+
 ## Most Recent Work — Bulk Upload Review: "View all ready rows" now opens an in-page drawer (2026-09-18)
 
 Replaced the "View all ready rows" **page navigation** on the Review Before

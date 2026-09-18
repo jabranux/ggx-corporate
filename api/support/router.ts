@@ -2,13 +2,22 @@
  * /api/support/... — GGX Corporate support proxy: categories, tickets
  * (list/create/detail/reply), and typing presence (send / subscribe).
  *
- * Consolidated into one Serverless Function (dispatching on the catch-all
- * `path` segments) to stay under Vercel's per-deployment function-count
- * limit on the Hobby plan — this is a routing-shell change only; each branch
- * below is the original, unmodified route handler. Public URLs are unchanged
+ * Consolidated into one Serverless Function (dispatching on the `path`
+ * segments) to stay under Vercel's per-deployment function-count limit on
+ * the Hobby plan — this is a routing-shell change only; each branch below is
+ * the original, unmodified route handler. Public URLs are unchanged
  * (`/api/support/categories`, `/api/support/tickets`,
  * `/api/support/tickets/:id`, `/api/support/tickets/:id/messages`,
  * `/api/support/tickets/:id/typing`, `/api/support/tickets/:id/typing/subscribe`).
+ *
+ * Routed via an explicit `vercel.json` rewrite (`/api/support/:path*` →
+ * `/api/support/router?path=:path*`) rather than the filesystem's own
+ * `[...path].ts` catch-all convention: on this project's build (framework
+ * "vite", not Next.js), that convention matched at most one path segment and
+ * left `req.query.path` empty even then, 404ing every real route — a fresh,
+ * confirmed production defect on 2026-09-18, not a hypothetical. The
+ * rewrite's wildcard capture arrives as a single `/`-joined string, not an
+ * array, so `pathSegments` below splits it.
  *
  * See `api/_lib/bridge.ts` for the security boundary and `api/_lib/session.ts`
  * / `api/_lib/demoUsers.ts` for the server-verified identity this proxy
@@ -265,11 +274,16 @@ async function handleTypingSubscribe(req: ProxyRequest, res: ProxyResponse, id: 
   await relay(res, bridgeRes);
 }
 
-/** Normalize the catch-all `path` query param into a segment array. */
+/**
+ * Normalize the `path` query param into a segment array. The rewrite's
+ * wildcard capture arrives as one `/`-joined string (e.g. `'tickets/abc123'`);
+ * `filter(Boolean)` also drops empty segments from a stray leading/trailing
+ * slash. An array is accepted too, for direct-call test harnesses.
+ */
 function pathSegments(req: ProxyRequest): string[] {
   const raw = req.query?.path;
   if (Array.isArray(raw)) return raw;
-  if (typeof raw === 'string') return [raw];
+  if (typeof raw === 'string') return raw.split('/').filter(Boolean);
   return [];
 }
 

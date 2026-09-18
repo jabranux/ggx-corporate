@@ -94,11 +94,11 @@ before(async () => {
 
   // typing (send) and typing/subscribe (receive credential) are consolidated,
   // along with every other /api/support/* route, into one Serverless
-  // Function (api/support/[...path].ts) to stay under Vercel's function-count
+  // Function (api/support/router.ts) to stay under Vercel's function-count
   // limit — both handlers below are the SAME module, dispatched by
   // `req.query.path` (see typingQuery/subscribeQuery below).
   const [supportOut, sessionOut] = await Promise.all([
-    esbuild.build({ entryPoints: [`${ROOT}/api/support/[...path].ts`], bundle: true, platform: 'node', format: 'cjs', write: false }),
+    esbuild.build({ entryPoints: [`${ROOT}/api/support/router.ts`], bundle: true, platform: 'node', format: 'cjs', write: false }),
     esbuild.build({ entryPoints: [`${ROOT}/api/_lib/session.ts`], bundle: true, platform: 'node', format: 'cjs', write: false }),
   ]);
   const supportFile = path.join(TMP_DIR, 'supportHandler.cjs');

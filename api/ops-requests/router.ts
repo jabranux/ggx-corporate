@@ -1,14 +1,20 @@
 /**
  * /api/ops-requests/... — GGX Corporate proxy: catalog / one Ops Request / its update history.
  *
- * Consolidated into one Serverless Function (dispatching on the catch-all
- * `path` segments) to stay under Vercel's per-deployment function-count
- * limit on the Hobby plan — this is a routing-shell change only; each branch
- * below is the original, unmodified route handler. Public URLs are unchanged
+ * Consolidated into one Serverless Function (dispatching on the `path`
+ * segments) to stay under Vercel's per-deployment function-count limit on
+ * the Hobby plan — this is a routing-shell change only; each branch below is
+ * the original, unmodified route handler. Public URLs are unchanged
  * (`/api/ops-requests/catalog`, `/api/ops-requests/:id`,
  * `/api/ops-requests/:id/updates`). The bare `/api/ops-requests` list/create
- * route stays its own file (`index.ts`) since a required catch-all can't
- * match zero path segments.
+ * route stays its own file (`index.ts`) since a rewrite requiring 1+
+ * segments (`:path+`) can't match zero.
+ *
+ * Routed via an explicit `vercel.json` rewrite (`/api/ops-requests/:path+` →
+ * `/api/ops-requests/router?path=:path*`) rather than the filesystem's own
+ * `[...path].ts` catch-all convention — see `api/support/router.ts`'s
+ * docblock for why: on this project's build, that convention 404'd every
+ * real route.
  */
 import {
   bridgeFetch, requireSessionIdentity, relay, relayJson, failConfig, failUpstream,
@@ -27,7 +33,7 @@ interface RawOpsRequestRow {
  * task's own instruction, with GGX's own keys translated to Bridge's at the
  * write boundary — see `api/_lib/bridge.ts`), but exposed 1:1 for parity with
  * the real Bridge contract and future use. Session-gated like every other
- * /api/* route on this proxy, consistent with `api/support/[...path].ts`.
+ * /api/* route on this proxy, consistent with `api/support/router.ts`.
  */
 async function handleCatalog(req: ProxyRequest, res: ProxyResponse): Promise<void> {
   res.setHeader('Cache-Control', 'no-store');
@@ -114,11 +120,16 @@ async function handleUpdates(req: ProxyRequest, res: ProxyResponse, id: string):
   if (updates !== null) res.status(200).json(updates);
 }
 
-/** Normalize the catch-all `path` query param into a segment array. */
+/**
+ * Normalize the `path` query param into a segment array. The rewrite's
+ * wildcard capture arrives as one `/`-joined string (e.g. `'abc123/updates'`);
+ * `filter(Boolean)` also drops empty segments from a stray leading/trailing
+ * slash. An array is accepted too, for direct-call test harnesses.
+ */
 function pathSegments(req: ProxyRequest): string[] {
   const raw = req.query?.path;
   if (Array.isArray(raw)) return raw;
-  if (typeof raw === 'string') return [raw];
+  if (typeof raw === 'string') return raw.split('/').filter(Boolean);
   return [];
 }
 
