@@ -3,6 +3,7 @@ import { IconCash, IconWallet, IconCreditCard, IconBuildingBank, IconReceipt2 } 
 import { Badge } from './ui/Badge';
 import { Input } from './ui/Input';
 import { Select } from './ui/Select';
+import { Separator } from './ui/Separator';
 
 type Tab = 'cash' | 'ewallet' | 'card' | 'banking';
 
@@ -64,9 +65,15 @@ interface NormalPaymentCardProps {
   disabled?: boolean;
   /** Called whenever the user changes their payment selection. */
   onChange?: (method: SelectedPaymentMethod) => void;
+  /**
+   * When true, this card is nested inside a parent card that already
+   * provides the outer border/rounding (the unified "Other payment options"
+   * card) — skip its own outer border and corner rounding.
+   */
+  embedded?: boolean;
 }
 
-function NormalPaymentCard({ disabled = false, onChange }: NormalPaymentCardProps) {
+function NormalPaymentCard({ disabled = false, onChange, embedded = false }: NormalPaymentCardProps) {
   const [active,     setActive]     = useState<Tab>('cash');
   const [cashOption, setCashOption] = useState<'pickup' | 'deduct'>('pickup');
   const [wallet,     setWallet]     = useState('GCash');
@@ -110,10 +117,10 @@ function NormalPaymentCard({ disabled = false, onChange }: NormalPaymentCardProp
   return (
     <div
       aria-disabled={disabled}
-      className={`rounded-lg border border-gray-200 ${disabled ? 'opacity-60 pointer-events-none select-none' : ''}`}
+      className={`${embedded ? '' : 'rounded-lg border border-gray-200'} ${disabled ? 'opacity-60 pointer-events-none select-none' : ''}`}
     >
       {/* Tab row */}
-      <div className="flex bg-gray-50 rounded-t-lg overflow-hidden border-b border-gray-200 overflow-x-auto">
+      <div className={`flex bg-gray-50 border-b border-gray-200 overflow-x-auto ${embedded ? '' : 'rounded-t-lg overflow-hidden'}`}>
         {TABS.map((t) => {
           const selected = active === t.id;
           return (
@@ -303,27 +310,38 @@ export function PaymentMethodTabs({ billingAvailable = false, onPaymentMethodCha
         </span>
       </button>
 
-      <button
-        type="button"
-        onClick={handleOtherClick}
-        className={`w-full flex items-center gap-3 px-4 py-3 rounded-lg border text-left transition-colors ${
-          otherSelected ? 'border-blue-500 bg-blue-50/40' : 'border-gray-200 hover:bg-gray-50'
+      {/* "Other payment options" — one unified bordered card: header, tabs, and
+          active tab content share a single outer border with internal dividers. */}
+      <div
+        className={`rounded-lg border overflow-hidden transition-colors ${
+          otherSelected ? 'border-blue-500' : 'border-gray-200'
         }`}
       >
-        <span className={`w-4 h-4 rounded-full border flex items-center justify-center flex-shrink-0 ${otherSelected ? 'border-blue-600' : 'border-gray-300'}`}>
-          {otherSelected && <span className="w-2 h-2 rounded-full bg-blue-600" />}
-        </span>
-        <span className="flex-1">
-          <span className="text-sm font-medium text-gray-900">Other payment options</span>
-          <span className="block text-xs text-gray-500 mt-0.5">Cash, e-wallets, card, or online banking.</span>
-        </span>
-      </button>
+        <button
+          type="button"
+          onClick={handleOtherClick}
+          className={`w-full flex items-center gap-3 px-4 py-3 text-left transition-colors ${
+            otherSelected ? 'bg-blue-50/40' : 'hover:bg-gray-50'
+          }`}
+        >
+          <span className={`w-4 h-4 rounded-full border flex items-center justify-center flex-shrink-0 ${otherSelected ? 'border-blue-600' : 'border-gray-300'}`}>
+            {otherSelected && <span className="w-2 h-2 rounded-full bg-blue-600" />}
+          </span>
+          <span className="flex-1">
+            <span className="text-sm font-medium text-gray-900">Other payment options</span>
+            <span className="block text-xs text-gray-500 mt-0.5">Cash, e-wallets, card, or online banking.</span>
+          </span>
+        </button>
 
-      {/* Tabs are disabled (visually + functionally) until "Other payment options" is selected. */}
-      <NormalPaymentCard
-        disabled={!otherSelected}
-        onChange={otherSelected ? handleNormalChange : undefined}
-      />
+        <Separator />
+
+        {/* Tabs are disabled (visually + functionally) until "Other payment options" is selected. */}
+        <NormalPaymentCard
+          embedded
+          disabled={!otherSelected}
+          onChange={otherSelected ? handleNormalChange : undefined}
+        />
+      </div>
     </div>
   );
 }
