@@ -95,7 +95,17 @@ export function SpreadsheetBookingGrid({
   // Live availability index for attached-product validation (stock + status).
   const productIndex = useMemo(() => {
     const m = new Map<string, ProductAvailability>();
-    for (const p of products) m.set(p.id, { stockQuantity: p.unlimitedStock ? Infinity : p.stockQuantity, status: p.status });
+    for (const p of products) {
+      // ProductAvailability's status vocabulary is a simplified 'active' |
+      // 'inactive' (booking-attachment concern only) — the backend's richer
+      // 'draft' | 'active' | 'archived' collapses to 'inactive' for anything
+      // that isn't sellable. A variant-carrying product's OWN stockQuantity
+      // doesn't reflect real per-variant availability (same reasoning as
+      // `ProductAttachDialog.tsx`'s `stockCap`) — treated as unlimited here
+      // too, so a previously-attached variant product's row is never
+      // incorrectly flagged as out of stock against its base row's own count.
+      m.set(p.id, { stockQuantity: (p.unlimitedStock || p.hasVariants) ? Infinity : p.stockQuantity, status: p.status === 'active' ? 'active' : 'inactive' });
+    }
     return m;
   }, [products]);
 

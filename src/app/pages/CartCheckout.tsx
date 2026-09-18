@@ -1,18 +1,23 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useNavigate } from 'react-router';
 import {
-  IconBuildingStore, IconCash, IconClock, IconPackage,
+  IconBuildingStore, IconCash, IconClock, IconPackage, IconTag, IconX,
 } from '@tabler/icons-react';
 import { Card, CardContent } from '../components/ui/Card';
 import { Button } from '../components/ui/Button';
 import { Input } from '../components/ui/Input';
+import { Alert } from '../components/ui/Alert';
 import { LocationCascadeFields } from '../components/LocationCascadeFields';
 import { CheckoutDeliveryOptions } from '../components/CheckoutDeliveryOptions';
 import { CheckoutPaymentOptions } from '../components/CheckoutPaymentOptions';
-import { useCartItems, clearCart, getCartSeller } from '../lib/cartStore';
+import {
+  useCartItems, clearCart, getCartSeller,
+  useAppliedPromoCode, setAppliedPromoCode,
+} from '../lib/cartStore';
 import { getFeatureStateSync } from '../services/featureEnablementService';
-import { getStorefrontProfile } from '../services/storefrontService';
+import { getPublicStore } from '../services/publicStorefrontService';
 import { placeStorefrontOrder } from '../services/storefrontOrdersService';
+import { validatePromotionCode, redeemPromotionCode, type DiscountResult } from '../services/promotionsService';
 import { classifyRegion, estimateDeliveryFee, isMetroManila } from '../lib/checkoutEstimates';
 import type { DeliveryServiceType } from '../services/transactionService';
 
@@ -45,7 +50,19 @@ export function CartCheckout() {
   const [form, setForm] = useState<CheckoutForm>(blank);
   const [placed, setPlaced] = useState(false);
   const [placedOrderId, setPlacedOrderId] = useState<string | null>(null);
-  const [snapshot, setSnapshot] = useState({ subtotal: 0, fee: 0, total: 0, itemCount: 0, service: 'standard' as DeliveryServiceType });
+  const [snapshot, setSnapshot] = useState({
+    subtotal: 0, fee: 0, discount: 0, promoCode: undefined as string | undefined, total: 0, itemCount: 0, service: 'standard' as DeliveryServiceType,
+  });
+
+  // Promo code applied on the cart page (CartReview owns entry/editing — this
+  // page only displays + redeems it). Re-validated on mount/cart-change so a
+  // stale discount is never shown; the actual authoritative amount is always
+  // whatever the server returns, both here (display) and at redeem time.
+  const appliedPromoCode = useAppliedPromoCode();
+  const [discount, setDiscount] = useState<DiscountResult | null>(null);
+  const [promoError, setPromoError] = useState<string | null>(null);
+  const [placing, setPlacing] = useState(false);
+  const [placeError, setPlaceError] = useState<string | null>(null);
 
   // Seller context (set while browsing /shop/:slug) gates delivery options and
   // attributes the placed order.
@@ -55,11 +72,16 @@ export function CartCheckout() {
   useEffect(() => {
     let active = true;
     if (!seller) { setSameDayOffered(false); return; }
-    getStorefrontProfile(seller.scopeId).then((p) => {
+    // Public route — checkout is reached by anonymous buyers with no
+    // merchant session, so this must never call the authenticated
+    // `storefrontService.getStorefrontProfile` (which would 401 for a
+    // signed-out buyer, or return a signed-IN manager's own scoped profile
+    // instead of the actual seller's, if one happens to be logged in).
+    getPublicStore(seller.slug).then((p) => {
       if (active) setSameDayOffered(!!p?.deliveryOptions.includes('same_day'));
     });
     return () => { active = false; };
-  }, [seller?.scopeId]);
+  }, [seller?.scopeId, seller?.slug]);
 
   const deliveryOptions: DeliveryServiceType[] = [
     'standard',
@@ -92,24 +114,94 @@ export function CartCheckout() {
     () => items.reduce((sum, i) => sum + i.quantity, 0),
     [items],
   );
+  const productIds = useMemo(() => Array.from(new Set(items.map((i) => i.productId))), [items]);
+
+  // Idempotency key for `redeemPromotionCode` — must be reused across repeat
+  // clicks of the SAME checkout attempt (e.g. after a network error whose
+  // outcome is unknown: the server may have already committed the
+  // redemption), so a retry can never double-redeem a limited-use code. Only
+  // rotates when the cart contents or applied promo actually change, i.e.
+  // this has genuinely become a different attempt.
+  const idempotencyKeyRef = useRef<{ signature: string; key: string } | null>(null);
+  const cartSignature = useMemo(
+    () => `${appliedPromoCode ?? ''}|${items.map((i) => `${i.productId}:${i.variantId ?? ''}:${i.quantity}`).join(',')}`,
+    [appliedPromoCode, items],
+  );
+  function getIdempotencyKey(): string {
+    if (idempotencyKeyRef.current?.signature !== cartSignature) {
+      idempotencyKeyRef.current = { signature: cartSignature, key: crypto.randomUUID() };
+    }
+    return idempotencyKeyRef.current.key;
+  }
 
   const region = classifyRegion(form.province);
   const feeKnown = region !== 'unknown';
   // Buyer always pays the delivery fee on COD orders (mock default). Who covers
   // the fee is seller/store configuration, not a buyer-facing choice.
   const deliveryFee = estimateDeliveryFee(deliveryOption, region);
-  const collectTotal = subtotal + (feeKnown ? deliveryFee : 0);
+  const discountAmount = discount?.discountAmount ?? 0;
+  const collectTotal = Math.max(0, subtotal - discountAmount) + (feeKnown ? deliveryFee : 0);
+
+  // Refresh the applied promo's discount whenever it's set or the cart
+  // changes (never display an amount computed against a stale subtotal).
+  useEffect(() => {
+    if (!appliedPromoCode || !seller || items.length === 0) {
+      setDiscount(null);
+      return;
+    }
+    let ignore = false;
+    validatePromotionCode(seller.slug, appliedPromoCode, subtotal, productIds).then((res) => {
+      if (ignore) return;
+      if (res.ok) {
+        setDiscount(res.data);
+        setPromoError(null);
+      } else {
+        setDiscount(null);
+        setPromoError(res.message);
+      }
+    });
+    return () => { ignore = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [appliedPromoCode, subtotal, productIds.join(','), seller?.slug, items.length]);
 
   const canOrder = !!(
     items.length > 0 &&
     form.name.trim() && form.mobile.trim() && form.street.trim() &&
-    form.province.trim() && form.city.trim() && form.barangay.trim()
+    form.province.trim() && form.city.trim() && form.barangay.trim() &&
+    !placing
   );
 
   const handlePlace = async () => {
     // Seller context is required to attribute + place the order. Without it we
     // must not fabricate a confirmation (see the "Store session expired" guard).
     if (!canOrder || !seller) return;
+    setPlacing(true);
+    setPlaceError(null);
+
+    // Redeem the promo (real, backend-authoritative) BEFORE placing the mock
+    // order — if this fails (e.g. the usage limit was reached by a concurrent
+    // checkout since the last validate), the mock order must NOT be placed,
+    // so the two never disagree. The idempotency key is stable for this exact
+    // cart+promo attempt (see `getIdempotencyKey`) — a retry after an
+    // ambiguous failure (e.g. the response was lost after the server already
+    // committed the redemption) replays the SAME key instead of consuming a
+    // second unit of a limited-use code; only a genuinely different attempt
+    // (cart or promo changed) gets a new one.
+    let redeemedAmount = 0;
+    let redeemedCode: string | undefined;
+    if (appliedPromoCode) {
+      const idempotencyKey = getIdempotencyKey();
+      const res = await redeemPromotionCode(seller.slug, appliedPromoCode, subtotal, productIds, idempotencyKey);
+      if (!res.ok) {
+        setPlaceError(`Your promo code could not be applied: ${res.message} Please remove it or try again.`);
+        setPlacing(false);
+        return;
+      }
+      redeemedAmount = res.data.discountAmount;
+      redeemedCode = res.data.code;
+    }
+
+    const total = Math.max(0, subtotal - redeemedAmount) + (feeKnown ? deliveryFee : 0);
     const order = await placeStorefrontOrder({
       scopeAccountId: seller.scopeId,
       storeName: seller.storeName,
@@ -124,15 +216,25 @@ export function CartCheckout() {
       },
       items: items.map((i) => ({
         productId: i.productId,
+        variantId: i.variantId,
+        variantLabel: i.productSnapshot.variantLabel,
+        sku: i.productSnapshot.sku,
         name: i.productSnapshot.name,
         quantity: i.quantity,
         unitPrice: i.productSnapshot.unitPrice,
       })),
-      codTotal: collectTotal,
+      codTotal: total,
+      promoCode: redeemedCode,
+      discountAmount: redeemedAmount || undefined,
     });
     setPlacedOrderId(order.id);
-    setSnapshot({ subtotal, fee: feeKnown ? deliveryFee : 0, total: collectTotal, itemCount, service: deliveryOption });
+    setSnapshot({
+      subtotal, fee: feeKnown ? deliveryFee : 0, discount: redeemedAmount, promoCode: redeemedCode,
+      total, itemCount, service: deliveryOption,
+    });
     clearCart();
+    setAppliedPromoCode(null);
+    setPlacing(false);
     setPlaced(true);
   };
 
@@ -194,6 +296,11 @@ export function CartCheckout() {
               <Row label="Deliver to">{form.name} · {form.mobile}</Row>
               <Row label="Address">{[form.street, form.barangay, form.city, form.province].filter(Boolean).join(', ')}</Row>
               <Row label="Subtotal">{peso(snapshot.subtotal)}</Row>
+              {snapshot.discount > 0 && (
+                <Row label={`Discount${snapshot.promoCode ? ` (${snapshot.promoCode})` : ''}`}>
+                  <span className="text-green-700">−{peso(snapshot.discount)}</span>
+                </Row>
+              )}
               <Row label="Delivery fee">{peso(snapshot.fee)}</Row>
               <div className="border-t border-gray-100 pt-2 flex justify-between font-semibold">
                 <span className="text-gray-900">Total to collect (COD)</span>
@@ -273,7 +380,7 @@ export function CartCheckout() {
                 {items.map((item) => {
                   const cover = item.productSnapshot.images[0];
                   return (
-                    <div key={item.productId} className="flex items-center gap-3">
+                    <div key={`${item.productId}-${item.variantId ?? 'base'}`} className="flex items-center gap-3">
                       <div className="w-10 h-10 rounded-lg bg-gray-100 overflow-hidden flex-shrink-0 flex items-center justify-center">
                         {cover
                           ? <img src={cover} alt={item.productSnapshot.name} className="w-full h-full object-cover" />
@@ -281,6 +388,9 @@ export function CartCheckout() {
                       </div>
                       <div className="flex-1 min-w-0">
                         <p className="text-sm text-gray-900 leading-snug truncate">{item.productSnapshot.name}</p>
+                        {item.productSnapshot.variantLabel && (
+                          <p className="text-xs text-gray-400 truncate">{item.productSnapshot.variantLabel}</p>
+                        )}
                         <p className="text-xs text-gray-500">Qty {item.quantity}</p>
                       </div>
                       <p className="text-sm font-medium text-gray-900 flex-shrink-0">
@@ -290,11 +400,36 @@ export function CartCheckout() {
                   );
                 })}
               </div>
+              {appliedPromoCode && (
+                <div className="flex items-center justify-between gap-2 rounded-lg border border-green-200 bg-green-50 px-3 py-2">
+                  <div className="flex items-center gap-1.5 text-sm text-green-800 min-w-0">
+                    <IconTag className="w-4 h-4 flex-shrink-0" />
+                    <span className="font-medium truncate">{appliedPromoCode}</span>
+                    {discount && <span className="text-xs text-green-700 flex-shrink-0">applied</span>}
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setAppliedPromoCode(null)}
+                    className="text-green-700 hover:text-green-900 flex-shrink-0"
+                    aria-label="Remove promo code"
+                  >
+                    <IconX className="w-4 h-4" />
+                  </button>
+                </div>
+              )}
+              {promoError && <p className="text-xs text-red-600">{promoError}</p>}
+
               <div className="border-t border-gray-100 pt-3 space-y-1.5 text-sm">
                 <div className="flex justify-between">
                   <span className="text-gray-600">Item subtotal ({itemCount} item{itemCount === 1 ? '' : 's'})</span>
                   <span className="font-medium text-gray-900">{peso(subtotal)}</span>
                 </div>
+                {discount && (
+                  <div className="flex justify-between text-green-700">
+                    <span>Discount ({discount.code})</span>
+                    <span className="font-medium">−{peso(discount.discountAmount)}</span>
+                  </div>
+                )}
                 <div className="flex justify-between">
                   <span className="text-gray-600">Delivery fee</span>
                   <span className="font-medium text-gray-900">
@@ -307,8 +442,11 @@ export function CartCheckout() {
                 </div>
                 <p className="text-[11px] text-gray-400">Delivery fee is an estimate; final fees are confirmed when the seller books delivery.</p>
               </div>
+
+              {placeError && <Alert variant="destructive">{placeError}</Alert>}
+
               <Button className="w-full" disabled={!canOrder} onClick={handlePlace}>
-                <IconCash className="w-4 h-4" /> Place COD order · {peso(collectTotal)}
+                <IconCash className="w-4 h-4" /> {placing ? 'Placing order…' : `Place COD order · ${peso(collectTotal)}`}
               </Button>
               <p className="text-xs text-gray-400 text-center">
                 Your order is sent to the seller to accept before it&apos;s booked for delivery.

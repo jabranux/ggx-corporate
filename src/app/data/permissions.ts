@@ -25,6 +25,7 @@ export type PermissionKey =
   | 'storefront.unpublish'
   | 'storefront.manageProducts'
   | 'storefront.viewOrders'
+  | 'storefront.managePromotions'
   // Delivery service types
   | 'service.onDemand.use'
   // Module activation / requesting (account-level)
@@ -39,6 +40,7 @@ export const INVENTORY_PERMISSIONS: PermissionKey[] = [
 export const STOREFRONT_PERMISSIONS: PermissionKey[] = [
   'storefront.view', 'storefront.configure', 'storefront.publish',
   'storefront.unpublish', 'storefront.manageProducts', 'storefront.viewOrders',
+  'storefront.managePromotions',
 ];
 
 /**

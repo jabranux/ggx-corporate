@@ -146,6 +146,21 @@ describe('Commerce storefront/collections/banners/promotions API', { skip: docke
     assert.equal(notFound._status, 404);
   });
 
+  it('public/product/:id (legacy direct share link) resolves an active product with no session and no storefront-publish requirement, 404s for inactive/unknown ids', async () => {
+    const draftProduct = await call('POST', 'products', { headers: managerCookie(), body: { name: 'Draft Widget', sku: 'DFT-001', unitPrice: 50, status: 'draft' } });
+    const draftId = draftProduct._body.product.id;
+
+    const active = await callPublic('GET', `public/product/${productId}`);
+    assert.equal(active._status, 200);
+    assert.equal(active._body.product.name, 'Widget');
+
+    const draft = await callPublic('GET', `public/product/${draftId}`);
+    assert.equal(draft._status, 404, 'a draft product must not be resolvable by this public route');
+
+    const unknown = await callPublic('GET', 'public/product/00000000-0000-0000-0000-000000000000');
+    assert.equal(unknown._status, 404);
+  });
+
   it('does not expose a draft/unpublished storefront publicly', async () => {
     const other = await call('PATCH', 'storefront', { headers: otherManagerCookie(), body: { storeName: 'Unpublished Shop' } });
     const slug = other._body.storefront.slug;
@@ -188,6 +203,41 @@ describe('Commerce storefront/collections/banners/promotions API', { skip: docke
       },
     });
     assert.equal(res._status, 400);
+  });
+
+  it('public homepage: returns enabled collection/new_arrivals sections and in-window banners, drops disabled/invisible/expired ones', async () => {
+    const collection = await call('POST', 'collections', { headers: managerCookie(), body: { name: 'Homepage Featured', type: 'featured' } });
+    const collectionId = collection._body.collection.id;
+    await call('PUT', `collections/${collectionId}/products`, { headers: managerCookie(), body: { productIds: [productId] } });
+
+    const hiddenCollection = await call('POST', 'collections', { headers: managerCookie(), body: { name: 'Hidden', type: 'custom', visible: false } });
+
+    const collectionSection = await call('POST', 'homepage-sections', { headers: managerCookie(), body: { title: 'Featured', sectionType: 'collection', collectionId } });
+    const arrivalsSection = await call('POST', 'homepage-sections', { headers: managerCookie(), body: { title: 'New Arrivals', sectionType: 'new_arrivals' } });
+    const hiddenSection = await call('POST', 'homepage-sections', { headers: managerCookie(), body: { title: 'Hidden Collection Section', sectionType: 'collection', collectionId: hiddenCollection._body.collection.id } });
+    const disabledSection = await call('POST', 'homepage-sections', { headers: managerCookie(), body: { title: 'Disabled', sectionType: 'new_arrivals', enabled: false } });
+    assert.equal(collectionSection._status, 201);
+    assert.equal(arrivalsSection._status, 201);
+    assert.equal(hiddenSection._status, 201);
+    assert.equal(disabledSection._status, 201);
+
+    const liveBanner = await call('POST', 'hero-banners', { headers: managerCookie(), body: { desktopImage: { r2ObjectKey: 'accounts/acme-luzon/storefront/banners/live.jpg', url: 'https://cdn/live.jpg' }, headline: 'Live banner' } });
+    const disabledBanner = await call('POST', 'hero-banners', { headers: managerCookie(), body: { desktopImage: { r2ObjectKey: 'accounts/acme-luzon/storefront/banners/off.jpg', url: 'https://cdn/off.jpg' }, headline: 'Disabled banner', enabled: false } });
+    const expiredBanner = await call('POST', 'hero-banners', { headers: managerCookie(), body: { desktopImage: { r2ObjectKey: 'accounts/acme-luzon/storefront/banners/expired.jpg', url: 'https://cdn/expired.jpg' }, headline: 'Expired banner', endDate: '2000-01-01T00:00:00Z' } });
+    assert.equal(liveBanner._status, 201);
+    assert.equal(disabledBanner._status, 201);
+    assert.equal(expiredBanner._status, 201);
+
+    const homepage = await callPublic('GET', `public/store/${storeSlug}/homepage`);
+    assert.equal(homepage._status, 200);
+    const sectionTypes = homepage._body.sections.map((s) => s.sectionType);
+    assert.deepEqual(sectionTypes, ['collection', 'new_arrivals'], 'disabled and hidden-collection sections must be dropped');
+    assert.deepEqual(homepage._body.sections[0].collection.productIds, [productId]);
+    assert.equal(homepage._body.sections[1].collection, null);
+    assert.deepEqual(homepage._body.banners.map((b) => b.headline), ['Live banner'], 'disabled and expired banners must be dropped');
+
+    const notFound = await callPublic('GET', 'public/store/does-not-exist/homepage');
+    assert.equal(notFound._status, 404);
   });
 
   it('promotions: full validate/redeem lifecycle with server-computed discount', async () => {

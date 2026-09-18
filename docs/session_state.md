@@ -3,7 +3,124 @@
 > Lightweight resume/checkpoint file. Detailed June 2026 history was archived to
 > `docs/archive/session_log_2026-06.md`.
 
-## In Progress — Commerce Enhancement: real backend built; frontend not started (2026-09-19)
+## Commerce Enhancement — all 4 phases complete, Codex-audited, pending commit (2026-09-19)
+
+Full Commerce enhancement spec now implemented end-to-end: Inventory
+variants/SKU (Phase 1), Storefront branding/collections/homepage/banners
+(Phase 2), public storefront + product detail (Phase 3), and Promotions UI +
+cart/checkout promo wiring + cart redesign (Phase 4). One Codex CLI audit
+pass (`codex exec -s read-only` over the full uncommitted diff) found 13
+issues (3 High, 8 Medium, 2 Low) — all fixed, re-verified (typecheck/build
+clean, backend tests 24/24, full suite 253/253, targeted browser re-checks).
+See `docs/commerce/COMMERCE_IMPLEMENTATION_CHECKPOINT.md` for the full
+backend/route contract (now including two post-checkpoint additive public
+routes added during this pass — `/public/store/:slug/homepage` and
+`/public/product/:id` — see below).
+
+- **Codex findings and fixes** (file:line refers to the pre-fix diff Codex reviewed):
+  - **High** — `addToCart`/`updateQty` (`cartStore.ts`) didn't cap quantity
+    at real stock, so repeated adds or a variant switch could carry an
+    invalid quantity into checkout; now clamped at the line's own
+    `stockQuantity`/`unlimitedStock`, and `StorefrontProductDetail.tsx`
+    resets its qty stepper to 1 whenever the resolved variant changes.
+  - **High** — placed orders (`CartCheckout.tsx` → `placeStorefrontOrder`)
+    dropped `variantId`/`variantLabel`/`sku`, making two different variants
+    of the same product indistinguishable to the seller; `StorefrontOrderItem`
+    gained those as additive fields, threaded through, and now rendered on
+    `StorefrontOrderDetail.tsx`.
+  - **High** — the legacy `/buy/:productId` share link (`BuyerCheckout.tsx`)
+    broke for anonymous buyers once `inventoryService.getInventoryProduct`
+    became session-authenticated in Phase 1; fixed with a new public backend
+    route (`GET /api/commerce/public/product/:id`, no session, no storefront-
+    publish requirement — see `getPublicProductById`'s docblock in
+    `api/_lib/commerceProducts.ts`) and `Inventory.tsx`'s "share" action now
+    copies the real `/shop/:slug/product/:slug` link instead of the broken one.
+  - **Medium** (all fixed) — `CartCheckout.tsx` read the AUTHENTICATED
+    `getStorefrontProfile` for delivery options (401s for a signed-out buyer,
+    or leaks a logged-in manager's own store) → switched to the public
+    `getPublicStore`; promo redemption minted a fresh idempotency key on
+    every click, so a retry after an ambiguous (e.g. network) failure could
+    double-consume a usage-limit-1 code → the key is now stable per
+    cart+promo "attempt" (`getIdempotencyKey` in `CartCheckout.tsx`); the new
+    `getPublicStorefrontHomepage` (added this session, see below) could leak
+    an archived/draft product's id via a collection's `productIds` → now
+    joined against `commerce_products.status = 'active'`;
+    `ProductAttachDialog.tsx`/`SpreadsheetBookingGrid.tsx` (bulk booking)
+    used a variant-carrying product's own (meaningless) base stock, both
+    over- and under-blocking attachment → treated like unlimited stock, same
+    as the dialog's pre-existing "checked but not reserved" model;
+    `StorefrontPreview.tsx`'s `category`-type hero banner CTA resolved to no
+    destination → now filters the grid + scrolls to it; `Storefront.tsx`'s
+    init `Promise.all` had no `.catch`, so an Inventory API failure left a
+    silent, unrecoverable "Switch to a subaccount" state → added an error
+    state with Retry; `ProductPickerDialog.tsx` permanently disabled an
+    already-selected-but-since-archived product, with no way to deselect it
+    → deselection is always allowed, only new selection requires `active`;
+    the mobile filter drawer had no focus trap/restore → added, same pattern
+    as `ReadyRowsDrawer.tsx`.
+  - **Low** (both fixed) — a direct product-detail entry could record an
+    empty `storeName` on the cart seller (branding/product load as two
+    independently-timed fetches) → the seller-attribution effect now depends
+    on both; a variant's `null` `compareAtPriceOverride` was treated as "no
+    compare-at price" instead of "inherit the base product's" (inconsistent
+    with how `price_override` already inherits) → fixed to match.
+- **Two small additive backend routes added post-checkpoint** (by the
+  session orchestrator, not a phase agent — both read-only, both tested):
+  `GET /api/commerce/public/store/:slug/homepage` (`getPublicStorefrontHomepage`,
+  `api/_lib/commerceStorefront.ts`) — the original checkpoint's public-route
+  table didn't include a way to publicly read homepage sections/hero
+  banners at all, which Phase 3 correctly flagged as a real backend gap
+  rather than a frontend oversight; and `GET /api/commerce/public/product/:id`
+  (`getPublicProductById`, `api/_lib/commerceProducts.ts`) for the
+  `/buy/:productId` fix above. Both covered by new cases in
+  `tests/api-commerce-storefront-promotions.test.mjs` (backend suite now
+  24 cases across the two files, up from 22).
+
+- **Phase 4 additions**: new `src/app/services/promotionsService.ts` (admin
+  CRUD + public `validatePromotionCode`/`redeemPromotionCode`, same
+  session/no-session conventions as `storefrontService.ts`/
+  `publicStorefrontService.ts`); new Commerce → Promotions admin page
+  (`src/app/pages/Promotions.tsx` + `src/app/components/PromotionDialog.tsx`,
+  reuses `ProductPickerDialog`) at `/dashboard/promotions`, gated on
+  Storefront's own enablement (new permission key
+  `storefront.managePromotions`); promo-code entry lives on the cart page
+  (`CartReview.tsx`) via `validate`, redemption fires at `CartCheckout.tsx`'s
+  place-order step via `redeem` (fresh `crypto.randomUUID()` idempotency key
+  per attempt) immediately before the existing mock `placeOrder()` call —
+  redeem failure aborts the mock order too, so the two never disagree.
+  `cartStore.ts` gained two more additive pieces: `appliedPromoCode`
+  (persisted, code-only — the discount amount itself is always re-fetched
+  from the server, never cached) and `stockQuantity`/`unlimitedStock` on
+  `CartItem.productSnapshot` (caps the cart's own qty stepper).
+  `data/storefrontOrders.ts` gained additive `promoCode`/`discountAmount`
+  fields on `PlaceOrderInput`/`StorefrontOrder`.
+- **Cart redesign** (`CartReview.tsx`): desktop two-column grid with a
+  sticky right-rail Order Summary (subtotal/discount/total/promo/CTA);
+  mobile collapses to one column with a fixed bottom bar (total + Checkout)
+  and the promo code in a `<details>` disclosure. Line items show
+  SKU/variant label/compare-at price and cap "+" at real stock.
+- **Verified in a real browser** against the actual Postgres/R2 backend (via
+  a throwaway esbuild-bundled local server per the checkpoint doc's
+  suggested pattern, deleted after use — never committed): created a real
+  promotion through the new admin UI, applied it in the redesigned cart at
+  both desktop and 375px widths, completed checkout, confirmed the
+  promotion's `usage_count` incremented server-side, and confirmed a second
+  redemption attempt past its `usage_limit` is rejected with the server's
+  own message. Test-only promotion row deleted afterward; no other backend
+  data changed except one product variant's stock (bumped from 0 so a
+  variant line could be exercised in the cart — left in place, harmless).
+- `npm run typecheck` and `npm run build` clean;
+  `tests/api-commerce-products.test.mjs` +
+  `tests/api-commerce-storefront-promotions.test.mjs` still 23/23.
+- **Not done / deferred**: no new automated frontend tests were added for
+  Phase 4 (verification was manual/browser-based, matching how Phases 1-3
+  were verified per this doc); `StorefrontOrderDetail.tsx` was not touched
+  (per scope) so the placed-order detail view doesn't yet render
+  `promoCode`/`discountAmount` even though the fields now exist on the
+  order record.
+
+<details>
+<summary>Original Phase 1-3 checkpoint (backend + Phases 1-3 frontend), kept for history</summary>
 
 Implementing the full Commerce enhancement spec (Inventory variants/SKU,
 Storefront branding/collections/homepage/banners, Cart redesign, Promotions).
@@ -110,6 +227,8 @@ yet** — this entry is a mid-task checkpoint, not a finished feature.
   only on explicit instruction). HeyQ/Bridge repo: inspected, confirmed no
   changes needed or made (Commerce is intentionally isolated from it — see
   the architecture decision above).
+
+</details>
 
 ## Most Recent Work — fixed production 404s on /api/support/* and /api/ops-requests/* (2026-09-18)
 

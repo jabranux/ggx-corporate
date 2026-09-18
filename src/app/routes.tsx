@@ -69,12 +69,14 @@ import { OpsRequestDetail } from './pages/OpsRequestDetail';
 import { AccountAddOns } from './pages/AccountAddOns';
 import { Inventory } from './pages/Inventory';
 import { Storefront } from './pages/Storefront';
+import { Promotions } from './pages/Promotions';
 import { StorefrontOrderDetail } from './pages/StorefrontOrderDetail';
 import { BasicAnalytics } from './pages/BasicAnalytics';
 import { CustomReports } from './pages/CustomReports';
 import { ProtectedRoute, AdminRoute } from './components/RouteGuards';
 import { TrackingPage } from './pages/TrackingPage';
 import { StorefrontPreview } from './pages/StorefrontPreview';
+import { StorefrontProductDetail } from './pages/StorefrontProductDetail';
 import { BuyerCheckout } from './pages/BuyerCheckout';
 import { CartReview } from './pages/CartReview';
 import { CartCheckout } from './pages/CartCheckout';
@@ -158,6 +160,11 @@ export const router = createBrowserRouter([
     Component: StorefrontPreview,
   },
   {
+    // Public product detail (gallery, variant selection, add to cart).
+    path: '/shop/:slug/product/:productSlug',
+    Component: StorefrontProductDetail,
+  },
+  {
     // Cart review for a storefront session (adjust quantities → checkout).
     path: '/shop/:slug/cart',
     Component: CartReview,
@@ -219,6 +226,7 @@ export const router = createBrowserRouter([
       { path: 'account-add-ons', Component: AccountAddOns },
       { path: 'inventory', Component: Inventory },
       { path: 'storefront', Component: Storefront },
+      { path: 'promotions', Component: Promotions },
       // Store Orders list now lives as a tab under Transactions; the order detail
       // keeps its own route (linked from that tab).
       { path: 'storefront/orders/:id', Component: StorefrontOrderDetail },

@@ -10,9 +10,9 @@ import { Input } from '../components/ui/Input';
 import { LocationCascadeFields } from '../components/LocationCascadeFields';
 import { CheckoutDeliveryOptions } from '../components/CheckoutDeliveryOptions';
 import { CheckoutPaymentOptions } from '../components/CheckoutPaymentOptions';
-import { getInventoryProduct, productCover, type InventoryProduct } from '../services/inventoryService';
+import { productCover } from '../services/inventoryService';
+import { getPublicProductById, type PublicProductDetail } from '../services/publicStorefrontService';
 import { getFeatureStateSync } from '../services/featureEnablementService';
-import { getStorefrontProfile } from '../services/storefrontService';
 import { placeStorefrontOrder } from '../services/storefrontOrdersService';
 import { classifyRegion, estimateDeliveryFee, isMetroManila } from '../lib/checkoutEstimates';
 import type { DeliveryServiceType } from '../services/transactionService';
@@ -42,7 +42,7 @@ const DELIVERY_TITLE: Record<DeliveryServiceType, string> = {
 export function BuyerCheckout() {
   const { productId } = useParams();
   const [loading, setLoading] = useState(true);
-  const [product, setProduct] = useState<InventoryProduct | null>(null);
+  const [product, setProduct] = useState<PublicProductDetail | null>(null);
   const [form, setForm] = useState<OrderForm>(blank);
   const [activeImage, setActiveImage] = useState<string | undefined>();
   const [placed, setPlaced] = useState(false);
@@ -50,7 +50,7 @@ export function BuyerCheckout() {
 
   // Seller scope drives delivery-option availability (On-Demand add-on gating)
   // and order attribution. Resolved from the product's owning scope.
-  const scopeId = product?.scopeAccountId;
+  const scopeId = product?.accountId;
   const [storeMeta, setStoreMeta] = useState<{ name: string; slug?: string; sameDay: boolean }>({ name: 'Store', sameDay: false });
   const odEnabled = scopeId ? getFeatureStateSync('on_demand', scopeId).enabled : false;
   const deliveryOptions: DeliveryServiceType[] = [
@@ -62,21 +62,19 @@ export function BuyerCheckout() {
 
   useEffect(() => {
     let active = true;
-    getInventoryProduct(productId ?? '')
-      .then(async (p) => {
+    // Public route, deliberately no-session (this link is meant for a
+    // signed-out buyer) — see `getPublicProductById`'s docblock for why it
+    // doesn't require the seller's storefront to be published. Store
+    // name/slug/same-day personalization isn't available from a bare
+    // product id (no public by-account-id storefront lookup exists), so
+    // this legacy single-product checkout keeps the generic "Store" default
+    // for those — only the product itself and On-Demand's own feature-flag
+    // check (keyed off `accountId`, not the storefront) are real here.
+    getPublicProductById(productId ?? '')
+      .then((p) => {
         if (!active) return;
         setProduct(p);
         setActiveImage(p ? productCover(p) : undefined);
-        if (p) {
-          const profile = await getStorefrontProfile(p.scopeAccountId);
-          if (active && profile) {
-            setStoreMeta({
-              name: profile.storeName,
-              slug: profile.slug,
-              sameDay: profile.deliveryOptions.includes('same_day'),
-            });
-          }
-        }
       })
       .finally(() => { if (active) setLoading(false); });
     return () => { active = false; };

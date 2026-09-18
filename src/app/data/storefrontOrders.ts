@@ -50,6 +50,14 @@ export interface StoreOrderDisplayStatus {
 
 export interface StorefrontOrderItem {
   productId?: string;
+  /** Selected variant id, when this line was a specific variant — additive
+   * (Commerce Phase 4 fix). Without it, two differently-selected variants of
+   * the same product are indistinguishable to the seller fulfilling the order. */
+  variantId?: string;
+  /** Human-readable variant label (e.g. "Black / M") and SKU, carried
+   * through from `CartItem.productSnapshot` — additive (Commerce Phase 4 fix). */
+  variantLabel?: string;
+  sku?: string;
   name: string;
   quantity: number;
   unitPrice: number;
@@ -74,6 +82,16 @@ export interface StorefrontOrder {
   deliveryStage?: OnDemandDeliveryStage;
   acceptedAt?: string;
   rejectedReason?: string;
+  /**
+   * Applied promo code + the server-computed discount amount already
+   * subtracted into `codTotal` — additive (Commerce Phase 4). The discount
+   * itself is never computed here; by the time `placeOrder` is called it has
+   * already been authoritatively validated/redeemed against the real
+   * Commerce backend (`promotionsService.ts`'s `redeemPromotionCode`). Absent
+   * when no promo was applied.
+   */
+  promoCode?: string;
+  discountAmount?: number;
 }
 
 // ─── Seed (demo) ────────────────────────────────────────────────────────────────
@@ -190,6 +208,9 @@ export interface PlaceOrderInput {
   buyer: { name: string; mobile: string; address: string; destination: string };
   items: StorefrontOrderItem[];
   codTotal: number;
+  /** See `StorefrontOrder.promoCode`/`discountAmount` — additive, optional. */
+  promoCode?: string;
+  discountAmount?: number;
 }
 
 let seq = 100;
@@ -232,6 +253,8 @@ export function placeOrder(input: PlaceOrderInput): StorefrontOrder {
     buyer: input.buyer,
     items: input.items,
     codTotal: input.codTotal,
+    promoCode: input.promoCode,
+    discountAmount: input.discountAmount,
   };
   orders.unshift(order);
   persist();

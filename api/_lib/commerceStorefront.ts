@@ -518,3 +518,95 @@ export async function reorderHeroBanners(accountId: string, orderedBannerIds: st
   });
   return listHeroBanners(accountId);
 }
+
+// ─── Public homepage (no session required) ─────────────────────────────────
+
+export interface PublicHomepageSection {
+  id: string;
+  title: string;
+  sectionType: 'collection' | 'new_arrivals';
+  collection: { id: string; name: string; slug: string; type: Collection['type']; productIds: string[] } | null;
+}
+
+export interface PublicHeroBanner {
+  id: string;
+  desktopImageUrl: string;
+  mobileImageUrl: string | null;
+  headline: string;
+  supportingText: string | null;
+  ctaLabel: string | null;
+  ctaType: HeroBanner['ctaType'];
+  ctaTargetId: string | null;
+  ctaExternalUrl: string | null;
+}
+
+/** Public read — no session/scope required. Only enabled sections/banners for
+ * an already-published storefront (the caller must have resolved `accountId`
+ * via `getPublicStorefront` first, same as every other public/store route).
+ * A `collection` section whose target collection is missing/not `visible` is
+ * silently dropped rather than surfaced broken; hero banners additionally
+ * respect their own start/end date window server-side (never trust the
+ * browser's clock for what should show, even though this is presentation-only,
+ * not a security control). */
+export async function getPublicStorefrontHomepage(accountId: string): Promise<{ sections: PublicHomepageSection[]; banners: PublicHeroBanner[] }> {
+  const sql = getCommerceSql();
+
+  const sectionRows = await sql<any[]>`
+    select id, title, section_type, collection_id from commerce_homepage_sections
+    where account_id = ${accountId} and enabled = true order by display_order asc
+  `;
+  const collectionIds = sectionRows.map((r) => r.collection_id).filter((id): id is string => !!id);
+  const collectionRows = collectionIds.length
+    ? await sql<any[]>`select * from commerce_collections where account_id = ${accountId} and visible = true and id = any(${collectionIds})`
+    : [];
+  // Joined against commerce_products and filtered to `active` — a collection
+  // can reference a product that was later archived/drafted without ever
+  // being removed from the collection, and this is a PUBLIC read: the id of
+  // a non-active product must never appear here, even though the frontend
+  // already separately drops it when resolving ids against the public
+  // product list (defense in depth, not just a display-layer filter).
+  const productRows = collectionIds.length
+    ? await sql<any[]>`
+        select cp.collection_id, cp.product_id from commerce_collection_products cp
+        join commerce_products p on p.id = cp.product_id and p.status = 'active'
+        where cp.collection_id = any(${collectionIds})
+        order by cp.display_order asc
+      `
+    : [];
+  const sections: PublicHomepageSection[] = [];
+  for (const row of sectionRows) {
+    if (row.section_type === 'new_arrivals') {
+      sections.push({ id: row.id, title: row.title, sectionType: 'new_arrivals', collection: null });
+      continue;
+    }
+    const collectionRow = collectionRows.find((c) => c.id === row.collection_id);
+    if (!collectionRow) continue; // deleted or unpublished collection — drop the section, don't surface broken
+    sections.push({
+      id: row.id,
+      title: row.title,
+      sectionType: 'collection',
+      collection: {
+        id: collectionRow.id,
+        name: collectionRow.name,
+        slug: collectionRow.slug,
+        type: collectionRow.type,
+        productIds: productRows.filter((p) => p.collection_id === collectionRow.id).map((p) => p.product_id),
+      },
+    });
+  }
+
+  const bannerRows = await sql<any[]>`
+    select * from commerce_hero_banners
+    where account_id = ${accountId} and enabled = true
+      and (start_date is null or start_date <= now())
+      and (end_date is null or end_date >= now())
+    order by display_order asc
+  `;
+  const banners: PublicHeroBanner[] = bannerRows.map((row) => ({
+    id: row.id, desktopImageUrl: row.desktop_image_url, mobileImageUrl: row.mobile_image_url,
+    headline: row.headline, supportingText: row.supporting_text, ctaLabel: row.cta_label,
+    ctaType: row.cta_type, ctaTargetId: row.cta_target_id, ctaExternalUrl: row.cta_external_url,
+  }));
+
+  return { sections, banners };
+}

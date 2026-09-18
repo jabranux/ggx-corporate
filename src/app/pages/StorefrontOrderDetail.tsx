@@ -220,6 +220,7 @@ export function StorefrontOrderDetail() {
                     </div>
                     <div className="flex-1 min-w-0">
                       <p className="text-sm font-medium text-gray-900 truncate">{it.name}</p>
+                      {it.variantLabel && <p className="text-xs text-gray-500 truncate">{it.variantLabel}{it.sku ? ` · SKU ${it.sku}` : ''}</p>}
                       <p className="text-xs text-gray-500">Qty {it.quantity} · {peso(it.unitPrice)} each</p>
                     </div>
                     <p className="text-sm font-semibold text-gray-900">{peso(it.unitPrice * it.quantity)}</p>

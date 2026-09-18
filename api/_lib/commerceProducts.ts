@@ -370,6 +370,21 @@ export async function getPublicProductBySlug(accountId: string, productSlug: str
   return getProductDetail({ mode: 'single', accountId }, row.id);
 }
 
+/** Public, unauthenticated single-product read by its own id — backs the
+ * legacy direct "share this product" link (`/buy/:productId`, predates the
+ * storefront-slug-based public routes above). Deliberately does NOT require
+ * the owning account's storefront to be `published` — this is a merchant
+ * explicitly sharing one product's own direct link, independent of their
+ * storefront's publish state, matching this feature's pre-Commerce-backend
+ * behavior (the old mock model had no publish concept at all, only the
+ * product's own `active` status). Only ever resolves an `active` product. */
+export async function getPublicProductById(productId: string): Promise<ProductDetail> {
+  const sql = getCommerceSql();
+  const [row] = await sql<any[]>`select id from commerce_products where id = ${productId} and status = 'active'`;
+  if (!row) throw new CommerceNotFoundError('Product not found.');
+  return getProductDetail({ mode: 'consolidated' }, productId);
+}
+
 export async function getProductDetail(scope: ScopeSelection, productId: string): Promise<ProductDetail> {
   const sql = getCommerceSql();
   const [p] = await sql<any[]>`

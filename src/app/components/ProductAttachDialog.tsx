@@ -11,16 +11,27 @@ import { attachmentSubtotal, attachmentTotalQty, type AttachedProduct } from '..
 const peso = (n: number) =>
   `₱${n.toLocaleString('en-PH', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 
-/** Effective stock cap for clamping (unlimited products use a high ceiling). */
-const stockCap = (p: InventoryProduct): number => (p.unlimitedStock ? 9999 : p.stockQuantity);
+/**
+ * Effective stock cap for clamping. A variant-carrying product's OWN
+ * `stockQuantity` doesn't track real availability — stock lives per-variant
+ * (`commerce_product_variants.stock_quantity`), and this dialog has no
+ * variant picker of its own (bulk booking predates Commerce's variant model
+ * and attaches by product, not by exact SKU) — treated like unlimited stock,
+ * same as the dialog's own "checked but not reserved" disclaimer already
+ * covers for the base-product case.
+ */
+const stockCap = (p: InventoryProduct): number => (p.unlimitedStock || p.hasVariants ? 9999 : p.stockQuantity);
 
-/** Selectable = active and has stock (unlimited always has stock). */
+/** Selectable = active, and either has stock or is a variant-carrying
+ * product (see `stockCap` — the base row's own zero/low stock doesn't mean
+ * every variant is unavailable, so it must never block attachment outright). */
 function isSelectable(p: InventoryProduct): boolean {
-  return p.status === 'active' && (p.unlimitedStock || p.stockQuantity > 0);
+  return p.status === 'active' && (p.hasVariants || p.unlimitedStock || p.stockQuantity > 0);
 }
 
 function stockBadge(p: InventoryProduct) {
-  if (p.status === 'inactive') return <Badge variant="default">Inactive</Badge>;
+  if (p.status !== 'active') return <Badge variant="default">Inactive</Badge>;
+  if (p.hasVariants) return <Badge variant="outline">Has options</Badge>;
   if (p.unlimitedStock) return <Badge variant="success">In stock</Badge>;
   if (p.stockQuantity === 0) return <Badge variant="danger">Out of stock</Badge>;
   if (isLowStock(p)) return <Badge variant="warning">Low · {p.stockQuantity} left</Badge>;

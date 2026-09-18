@@ -1,19 +1,26 @@
-import { useRef, useState } from 'react';
-import { IconPhoto, IconStar, IconStarFilled, IconX, IconUpload } from '@tabler/icons-react';
+import { useEffect, useState } from 'react';
+import { IconAlertTriangle, IconCircleCheck, IconLock } from '@tabler/icons-react';
 import { Dialog } from './ui/Dialog';
 import { Button } from './ui/Button';
 import { Input } from './ui/Input';
 import { Select } from './ui/Select';
 import { Textarea } from './ui/Textarea';
-import { cn } from '../lib/utils';
-import { PRODUCT_CATEGORIES, type InventoryProduct, type ProductInput, type ProductStatus } from '../services/inventoryService';
+import { Tabs, TabsList, TabsTrigger, TabsContent } from './ui/Tabs';
+import { ProductImageGallery } from './ProductImageGallery';
+import { ProductVariantBuilder } from './ProductVariantBuilder';
+import {
+  PRODUCT_CATEGORIES, getInventoryProduct, createInventoryProduct, updateInventoryProduct, getSkuSettings,
+  type InventoryProductDetail, type ProductInput, type ProductStatus, type SkuSettings,
+} from '../services/inventoryService';
 
 interface FormState {
   name: string;
   sku: string;
   category: string;
   description: string;
+  status: ProductStatus;
   unitPrice: string;
+  compareAtPrice: string;
   weight: string;
   length: string;
   width: string;
@@ -21,30 +28,29 @@ interface FormState {
   stockQuantity: string;
   lowStockThreshold: string;
   unlimited: boolean;
-  status: ProductStatus;
 }
 
 function blankForm(): FormState {
   return {
-    name: '', sku: '', category: '', description: '',
-    unitPrice: '', weight: '', length: '', width: '', height: '',
-    stockQuantity: '', lowStockThreshold: '10', unlimited: false, status: 'active',
+    name: '', sku: '', category: '', description: '', status: 'active',
+    unitPrice: '', compareAtPrice: '', weight: '', length: '', width: '', height: '',
+    stockQuantity: '', lowStockThreshold: '10', unlimited: false,
   };
 }
 
-function productToForm(p: InventoryProduct): FormState {
+function formFrom(p: InventoryProductDetail): FormState {
   return {
-    name: p.name, sku: p.sku, category: p.category, description: p.description,
-    unitPrice: String(p.unitPrice), weight: String(p.weight),
-    length: String(p.dimensions.length), width: String(p.dimensions.width), height: String(p.dimensions.height),
-    stockQuantity: String(p.stockQuantity), lowStockThreshold: String(p.lowStockThreshold),
-    unlimited: p.unlimitedStock, status: p.status,
+    name: p.name, sku: p.sku, category: p.category, description: p.description, status: p.status,
+    unitPrice: String(p.unitPrice), compareAtPrice: p.compareAtPrice == null ? '' : String(p.compareAtPrice),
+    weight: String(p.weight), length: String(p.dimensions.length ?? ''), width: String(p.dimensions.width ?? ''), height: String(p.dimensions.height ?? ''),
+    stockQuantity: String(p.stockQuantity), lowStockThreshold: String(p.lowStockThreshold), unlimited: p.unlimitedStock,
   };
 }
 
-const num = (v: string) => {
+const num = (v: string): number | undefined => {
+  if (v.trim() === '') return undefined;
   const n = Number(v);
-  return Number.isFinite(n) && n >= 0 ? n : 0;
+  return Number.isFinite(n) && n >= 0 ? n : undefined;
 };
 
 const Label = ({ children, required }: { children: React.ReactNode; required?: boolean }) => (
@@ -53,232 +59,303 @@ const Label = ({ children, required }: { children: React.ReactNode; required?: b
   </label>
 );
 
+type Tab = 'details' | 'images' | 'variants';
+
 /**
- * Create / edit an inventory product. A controlled form over `ProductInput`;
- * numeric fields are held as strings and coerced (≥ 0) on submit. Stock is a
- * managed field here (merchant inventory), not a booking deduction.
+ * Create / edit an Inventory product against the real Commerce backend.
+ * Details (name/price/stock/etc.) save explicitly; the Photos and Variants
+ * tabs apply each action immediately (upload, reorder, cover, variant
+ * generate/edit) since both need a real product id to attach to — so a
+ * brand-new product saves its Details first (unlocking those tabs), then the
+ * dialog stays open for photos/variants instead of closing. Editing an
+ * existing product opens straight into all three tabs.
  */
 export function ProductFormDialog({
   open,
   mode,
-  product,
+  productId,
+  scopeId,
   onClose,
-  onSubmit,
+  onSaved,
 }: {
   open: boolean;
   mode: 'create' | 'edit';
-  product?: InventoryProduct;
+  /** Required for `mode: 'edit'`. */
+  productId?: string;
+  /** Concrete account/subaccount id — callers only render this dialog when
+   * `canMutate` (a concrete scope) is true. */
+  scopeId: string;
   onClose: () => void;
-  onSubmit: (input: ProductInput) => void;
+  /** Called after any successful create/update/image/variant change, so the
+   * Inventory list can refresh without waiting for the dialog to close. */
+  onSaved: () => void;
 }) {
-  const [form, setForm] = useState<FormState>(() => (product ? productToForm(product) : blankForm()));
+  const [loading, setLoading] = useState(mode === 'edit');
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const [product, setProduct] = useState<InventoryProductDetail | null>(null);
+  const [form, setForm] = useState<FormState>(blankForm);
+  const [skuSettings, setSkuSettings] = useState<SkuSettings | null>(null);
+  const [tab, setTab] = useState<Tab>('details');
+  const [saving, setSaving] = useState(false);
+  const [saveError, setSaveError] = useState<string | null>(null);
+  const [justSaved, setJustSaved] = useState(false);
+
   const set = (k: keyof FormState, v: string) => setForm((prev) => ({ ...prev, [k]: v }));
 
-  // Product photos (data URLs in the demo). Cover defaults to the first image.
-  const [images, setImages] = useState<string[]>(() => product?.images ?? []);
-  const [cover, setCover] = useState<string | undefined>(() => product?.coverImage ?? product?.images?.[0]);
-  const fileRef = useRef<HTMLInputElement>(null);
+  useEffect(() => {
+    let active = true;
+    getSkuSettings(scopeId).then((s) => { if (active) setSkuSettings(s); }).catch(() => {});
+    if (mode === 'edit' && productId) {
+      setLoading(true);
+      getInventoryProduct(productId, scopeId)
+        .then((p) => {
+          if (!active) return;
+          if (!p) { setLoadError('This product could not be loaded — it may have been removed.'); return; }
+          setProduct(p);
+          setForm(formFrom(p));
+        })
+        .finally(() => { if (active) setLoading(false); });
+    }
+    return () => { active = false; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [mode, productId, scopeId]);
 
-  const addFiles = (files: FileList | null) => {
-    if (!files) return;
-    Array.from(files)
-      .filter((f) => f.type.startsWith('image/'))
-      .forEach((file) => {
-        const reader = new FileReader();
-        reader.onload = () => {
-          const url = String(reader.result);
-          setImages((prev) => {
-            const next = [...prev, url];
-            setCover((c) => c ?? next[0]); // first image becomes cover by default
-            return next;
-          });
-        };
-        reader.readAsDataURL(file);
-      });
+  const applyProduct = (updated: InventoryProductDetail) => {
+    setProduct(updated);
+    onSaved();
   };
 
-  const removeImage = (url: string) => {
-    setImages((prev) => {
-      const next = prev.filter((u) => u !== url);
-      setCover((c) => (c === url ? next[0] : c));
-      return next;
-    });
-  };
+  const canSubmit = form.name.trim().length > 0 && num(form.unitPrice) !== undefined;
 
-  const canSubmit = form.name.trim().length > 0;
+  const buildInput = (): ProductInput => ({
+    name: form.name.trim(),
+    category: form.category.trim() || 'Uncategorized',
+    description: form.description.trim(),
+    status: form.status,
+    sku: product ? undefined : (form.sku.trim() || undefined), // SKU is immutable after creation
+    unitPrice: num(form.unitPrice) ?? 0,
+    compareAtPrice: form.compareAtPrice.trim() === '' ? null : num(form.compareAtPrice) ?? null,
+    weight: form.weight.trim() === '' ? null : num(form.weight) ?? null,
+    dimensions: {
+      length: form.length.trim() === '' ? null : num(form.length) ?? null,
+      width: form.width.trim() === '' ? null : num(form.width) ?? null,
+      height: form.height.trim() === '' ? null : num(form.height) ?? null,
+    },
+    stockQuantity: form.unlimited ? 0 : (num(form.stockQuantity) ?? 0),
+    lowStockThreshold: form.unlimited ? 0 : (num(form.lowStockThreshold) ?? 0),
+    unlimitedStock: form.unlimited,
+  });
 
-  const handleSubmit = () => {
+  const handleSaveDetails = async () => {
     if (!canSubmit) return;
-    onSubmit({
-      name: form.name.trim(),
-      sku: form.sku.trim(),
-      category: form.category.trim() || 'Uncategorized',
-      description: form.description.trim(),
-      unitPrice: num(form.unitPrice),
-      weight: num(form.weight),
-      dimensions: { length: num(form.length), width: num(form.width), height: num(form.height) },
-      stockQuantity: num(form.stockQuantity),
-      lowStockThreshold: num(form.lowStockThreshold),
-      unlimitedStock: form.unlimited,
-      images,
-      coverImage: cover ?? images[0],
-      status: form.status,
-    });
+    setSaving(true);
+    setSaveError(null);
+    setJustSaved(false);
+    try {
+      if (!product) {
+        const created = await createInventoryProduct(scopeId, buildInput());
+        setProduct(created);
+        setForm(formFrom(created));
+        onSaved();
+        setTab('images');
+      } else {
+        const updated = await updateInventoryProduct(product.id, buildInput(), scopeId);
+        setProduct(updated);
+        setForm(formFrom(updated));
+        onSaved();
+      }
+      setJustSaved(true);
+      window.setTimeout(() => setJustSaved(false), 2500);
+    } catch (err) {
+      setSaveError(err instanceof Error ? err.message : 'Could not save this product.');
+    } finally {
+      setSaving(false);
+    }
   };
+
+  const handleClose = () => { onClose(); };
+
+  const skuHint = skuSettings
+    ? (skuSettings.autoGenerate
+        ? `Leave blank to auto-generate (${skuSettings.prefix}-${String(skuSettings.nextSequence).padStart(6, '0')}).`
+        : 'Auto-generate is off for this account — a SKU is required.')
+    : undefined;
 
   return (
-    <Dialog open={open} onClose={onClose} title={mode === 'create' ? 'Add product' : 'Edit product'} size="lg">
-      <div className="space-y-4 max-h-[60vh] overflow-y-auto pr-1">
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-          <div>
-            <Label required>Product name</Label>
-            <Input value={form.name} onChange={(e) => set('name', e.target.value)} placeholder="e.g. Premium Coffee Beans 1kg" />
-          </div>
-          <div>
-            <Label>SKU</Label>
-            <Input value={form.sku} onChange={(e) => set('sku', e.target.value)} placeholder="Optional — e.g. COF-1KG-001" />
-          </div>
-          <div>
-            <Label>Category</Label>
-            <Select value={form.category} onChange={(e) => set('category', e.target.value)}>
-              <option value="">Select a category</option>
-              {!PRODUCT_CATEGORIES.includes(form.category as (typeof PRODUCT_CATEGORIES)[number]) && form.category && (
-                <option value={form.category}>{form.category}</option>
-              )}
-              {PRODUCT_CATEGORIES.map((c) => <option key={c} value={c}>{c}</option>)}
-            </Select>
-          </div>
-          <div>
-            <Label>Status</Label>
-            <Select value={form.status} onChange={(e) => set('status', e.target.value as ProductStatus)}>
-              <option value="active">Active</option>
-              <option value="inactive">Inactive</option>
-            </Select>
-          </div>
+    <Dialog
+      open={open}
+      onClose={handleClose}
+      title={mode === 'create' ? 'Add product' : 'Edit product'}
+      size="lg"
+    >
+      {loading ? (
+        <p className="text-sm text-gray-500 py-8 text-center">Loading product…</p>
+      ) : loadError ? (
+        <div className="flex items-start gap-2 rounded-lg bg-red-50 border border-red-100 px-3 py-2.5 text-sm text-red-700">
+          <IconAlertTriangle className="w-4 h-4 mt-0.5 flex-shrink-0" />
+          {loadError}
         </div>
+      ) : (
+        <>
+          <Tabs value={tab} onValueChange={(v) => setTab(v as Tab)}>
+            <TabsList>
+              <TabsTrigger value="details">Details</TabsTrigger>
+              <TabsTrigger value="images" disabled={!product}>
+                {!product && <IconLock className="w-3 h-3 mr-1" />}Photos
+              </TabsTrigger>
+              <TabsTrigger value="variants" disabled={!product}>
+                {!product && <IconLock className="w-3 h-3 mr-1" />}Variants{product && product.hasVariants ? ` (${product.variants.length})` : ''}
+              </TabsTrigger>
+            </TabsList>
 
-        <div>
-          <Label>Description</Label>
-          <Textarea
-            value={form.description}
-            onChange={(e) => set('description', e.target.value)}
-            rows={2}
-            placeholder="Short product description"
-          />
-        </div>
+            <TabsContent value="details">
+              <div className="space-y-4 max-h-[52vh] overflow-y-auto pr-1">
+                {!product && (
+                  <p className="text-xs text-gray-500 -mt-1">
+                    Save the product's details first — photos and variants unlock right after.
+                  </p>
+                )}
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <div>
+                    <Label required>Product name</Label>
+                    <Input value={form.name} onChange={(e) => set('name', e.target.value)} placeholder="e.g. Premium Coffee Beans 1kg" />
+                  </div>
+                  <div>
+                    <Label>SKU</Label>
+                    <Input
+                      value={form.sku}
+                      onChange={(e) => set('sku', e.target.value)}
+                      placeholder={skuHint ?? 'Optional — e.g. COF-1KG-001'}
+                      disabled={!!product}
+                    />
+                    {product
+                      ? <p className="text-[11px] text-gray-400 mt-1">SKU can't be changed after the product is created.</p>
+                      : skuHint && <p className="text-[11px] text-gray-400 mt-1">{skuHint}</p>}
+                  </div>
+                  <div>
+                    <Label>Category</Label>
+                    <Select value={form.category} onChange={(e) => set('category', e.target.value)}>
+                      <option value="">Select a category</option>
+                      {!PRODUCT_CATEGORIES.includes(form.category as (typeof PRODUCT_CATEGORIES)[number]) && form.category && (
+                        <option value={form.category}>{form.category}</option>
+                      )}
+                      {PRODUCT_CATEGORIES.map((c) => <option key={c} value={c}>{c}</option>)}
+                    </Select>
+                  </div>
+                  <div>
+                    <Label>Status</Label>
+                    <Select value={form.status} onChange={(e) => set('status', e.target.value as ProductStatus)}>
+                      <option value="draft">Draft</option>
+                      <option value="active">Active</option>
+                      <option value="archived">Archived</option>
+                    </Select>
+                  </div>
+                </div>
 
-        {/* Pricing & stock */}
-        <div>
-          <div className="flex items-center justify-between mb-1">
-            <Label>Pricing &amp; stock</Label>
-            <label className="flex items-center gap-1.5 text-xs text-gray-600 cursor-pointer">
-              <input type="checkbox" checked={form.unlimited} onChange={(e) => setForm((p) => ({ ...p, unlimited: e.target.checked }))} className="w-3.5 h-3.5 rounded border-gray-300 text-blue-600 focus:ring-blue-500" />
-              Unlimited stock
-            </label>
-          </div>
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-            <div>
-              <Label>Unit price (₱)</Label>
-              <Input type="number" min={0} value={form.unitPrice} onChange={(e) => set('unitPrice', e.target.value)} placeholder="0" />
-            </div>
-            <div>
-              <Label>Stock qty</Label>
-              <Input
-                type="number" min={0}
-                value={form.unlimited ? '' : form.stockQuantity}
-                disabled={form.unlimited}
-                onChange={(e) => set('stockQuantity', e.target.value)}
-                placeholder={form.unlimited ? 'Unlimited' : '0'}
-              />
-            </div>
-            <div>
-              <Label>Low-stock at</Label>
-              <Input
-                type="number" min={0}
-                value={form.unlimited ? '' : form.lowStockThreshold}
-                disabled={form.unlimited}
-                onChange={(e) => set('lowStockThreshold', e.target.value)}
-                placeholder={form.unlimited ? '—' : '10'}
-              />
-            </div>
-          </div>
-        </div>
+                <div>
+                  <Label>Description</Label>
+                  <Textarea value={form.description} onChange={(e) => set('description', e.target.value)} rows={2} placeholder="Short product description" />
+                </div>
 
-        {/* Weight + dimensions (weight first) */}
-        <div>
-          <Label>Weight &amp; dimensions</Label>
-          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-            <Input type="number" min={0} step="0.01" value={form.weight} onChange={(e) => set('weight', e.target.value)} placeholder="Weight (kg)" />
-            <Input type="number" min={0} value={form.length} onChange={(e) => set('length', e.target.value)} placeholder="L (cm)" />
-            <Input type="number" min={0} value={form.width} onChange={(e) => set('width', e.target.value)} placeholder="W (cm)" />
-            <Input type="number" min={0} value={form.height} onChange={(e) => set('height', e.target.value)} placeholder="H (cm)" />
-          </div>
-        </div>
-
-        {/* Product photos */}
-        <div>
-          <Label>Product photos</Label>
-          <input
-            ref={fileRef}
-            type="file"
-            accept="image/jpeg,image/png,image/webp"
-            multiple
-            className="hidden"
-            onChange={(e) => { addFiles(e.target.files); if (fileRef.current) fileRef.current.value = ''; }}
-          />
-          <button
-            type="button"
-            onClick={() => fileRef.current?.click()}
-            className="w-full rounded-lg border border-dashed border-gray-300 bg-gray-50 hover:bg-gray-100 transition-colors py-4 flex flex-col items-center gap-1.5 cursor-pointer"
-          >
-            <IconUpload className="w-5 h-5 text-gray-400" />
-            <span className="text-sm font-medium text-gray-600">Upload photos</span>
-            <span className="text-xs text-gray-400">JPG, PNG, or WebP</span>
-          </button>
-
-          {images.length > 0 && (
-            <div className="grid grid-cols-4 sm:grid-cols-5 gap-2.5 mt-3">
-              {images.map((url) => {
-                const isCover = (cover ?? images[0]) === url;
-                return (
-                  <div key={url} className={cn('relative group rounded-lg overflow-hidden border', isCover ? 'border-blue-500 ring-1 ring-blue-300' : 'border-gray-200')}>
-                    <img src={url} alt="" className="w-full aspect-square object-cover" />
-                    {isCover && (
-                      <span className="absolute top-1 left-1 inline-flex items-center gap-0.5 rounded bg-blue-600 text-white text-[10px] px-1 py-0.5">
-                        <IconStarFilled className="w-2.5 h-2.5" /> Cover
-                      </span>
-                    )}
-                    <div className="absolute inset-x-0 bottom-0 flex justify-between bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity">
-                      <button type="button" title="Set as cover" onClick={() => setCover(url)} className="p-1 text-white hover:text-blue-200">
-                        <IconStar className="w-3.5 h-3.5" />
-                      </button>
-                      <button type="button" title="Remove" onClick={() => removeImage(url)} className="p-1 text-white hover:text-red-300">
-                        <IconX className="w-3.5 h-3.5" />
-                      </button>
+                <div>
+                  <div className="flex items-center justify-between mb-1">
+                    <Label>Pricing &amp; stock</Label>
+                    <label className="flex items-center gap-1.5 text-xs text-gray-600 cursor-pointer">
+                      <input type="checkbox" checked={form.unlimited} onChange={(e) => setForm((p) => ({ ...p, unlimited: e.target.checked }))} className="w-3.5 h-3.5 rounded border-gray-300 text-blue-600 focus:ring-blue-500" />
+                      Unlimited stock
+                    </label>
+                  </div>
+                  {product?.hasVariants && (
+                    <p className="text-[11px] text-amber-700 bg-amber-50 border border-amber-100 rounded px-2 py-1 mb-2">
+                      This product has variants — the values below are the base/fallback price and stock.
+                      Manage per-variant pricing and stock in the Variants tab.
+                    </p>
+                  )}
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                    <div>
+                      <Label required>Unit price (₱)</Label>
+                      <Input type="number" min={0} value={form.unitPrice} onChange={(e) => set('unitPrice', e.target.value)} placeholder="0" />
+                    </div>
+                    <div>
+                      <Label>Compare-at price (₱)</Label>
+                      <Input type="number" min={0} value={form.compareAtPrice} onChange={(e) => set('compareAtPrice', e.target.value)} placeholder="Optional" />
+                    </div>
+                    <div>
+                      <Label>Low-stock at</Label>
+                      <Input
+                        type="number" min={0}
+                        value={form.unlimited ? '' : form.lowStockThreshold}
+                        disabled={form.unlimited}
+                        onChange={(e) => set('lowStockThreshold', e.target.value)}
+                        placeholder={form.unlimited ? '—' : '10'}
+                      />
                     </div>
                   </div>
-                );
-              })}
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 mt-3">
+                    <div>
+                      <Label>Stock qty</Label>
+                      <Input
+                        type="number" min={0}
+                        value={form.unlimited ? '' : form.stockQuantity}
+                        disabled={form.unlimited}
+                        onChange={(e) => set('stockQuantity', e.target.value)}
+                        placeholder={form.unlimited ? 'Unlimited' : '0'}
+                      />
+                    </div>
+                  </div>
+                </div>
+
+                <div>
+                  <Label>Weight &amp; dimensions</Label>
+                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                    <Input type="number" min={0} step="0.01" value={form.weight} onChange={(e) => set('weight', e.target.value)} placeholder="Weight (kg)" />
+                    <Input type="number" min={0} value={form.length} onChange={(e) => set('length', e.target.value)} placeholder="L (cm)" />
+                    <Input type="number" min={0} value={form.width} onChange={(e) => set('width', e.target.value)} placeholder="W (cm)" />
+                    <Input type="number" min={0} value={form.height} onChange={(e) => set('height', e.target.value)} placeholder="H (cm)" />
+                  </div>
+                </div>
+
+                {saveError && (
+                  <div className="flex items-start gap-2 rounded-lg bg-red-50 border border-red-100 px-3 py-2.5 text-sm text-red-700">
+                    <IconAlertTriangle className="w-4 h-4 mt-0.5 flex-shrink-0" />
+                    {saveError}
+                  </div>
+                )}
+              </div>
+            </TabsContent>
+
+            <TabsContent value="images">
+              <div className="max-h-[52vh] overflow-y-auto pr-1">
+                {product
+                  ? <ProductImageGallery product={product} scopeId={scopeId} onChanged={applyProduct} />
+                  : <p className="text-sm text-gray-500 py-8 text-center">Save the product's details first.</p>}
+              </div>
+            </TabsContent>
+
+            <TabsContent value="variants">
+              <div className="max-h-[52vh] overflow-y-auto pr-1">
+                {product
+                  ? <ProductVariantBuilder product={product} scopeId={scopeId} onChanged={applyProduct} />
+                  : <p className="text-sm text-gray-500 py-8 text-center">Save the product's details first.</p>}
+              </div>
+            </TabsContent>
+          </Tabs>
+
+          <div className="flex items-center justify-between gap-2.5 pt-4 mt-2 border-t border-gray-100">
+            <div className="text-xs text-emerald-600 flex items-center gap-1">
+              {justSaved && <><IconCircleCheck className="w-3.5 h-3.5" /> Saved</>}
             </div>
-          )}
-
-          <div className="mt-2.5 flex items-start gap-2 rounded-lg bg-blue-50 border border-blue-100 px-3 py-2.5">
-            <IconPhoto className="w-4 h-4 text-blue-500 mt-0.5 flex-shrink-0" />
-            <ul className="text-xs text-blue-900/80 space-y-0.5 leading-relaxed">
-              <li>Use square images. Recommended 1200 × 1200 px (minimum 800 × 800 px).</li>
-              <li>Accepted formats: JPG, PNG, WebP. Keep files compressed for faster checkout loading.</li>
-              <li>Use clear product photos on a plain background. The first or selected image is the cover.</li>
-            </ul>
+            <div className="flex gap-2.5">
+              <Button variant="outline" size="sm" onClick={handleClose}>{product ? 'Close' : 'Cancel'}</Button>
+              {tab === 'details' && (
+                <Button size="sm" disabled={!canSubmit || saving} onClick={handleSaveDetails}>
+                  {saving ? 'Saving…' : product ? 'Save details' : 'Create product'}
+                </Button>
+              )}
+            </div>
           </div>
-        </div>
-      </div>
-
-      <div className="flex gap-2.5 justify-end pt-4 mt-2 border-t border-gray-100">
-        <Button variant="outline" size="sm" onClick={onClose}>Cancel</Button>
-        <Button size="sm" disabled={!canSubmit} onClick={handleSubmit}>
-          {mode === 'create' ? 'Add product' : 'Save changes'}
-        </Button>
-      </div>
+        </>
+      )}
     </Dialog>
   );
 }

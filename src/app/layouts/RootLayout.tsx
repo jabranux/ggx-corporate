@@ -32,6 +32,7 @@ import {
   IconClipboardList,
   IconBuildingStore,
   IconApps,
+  IconDiscount2,
 } from '@tabler/icons-react';
 import { useCallback, useEffect, useRef, useState, type ComponentType } from 'react';
 import { cn } from '../lib/utils';
@@ -239,6 +240,9 @@ export function RootLayout() {
   const commerceChildren: NavChild[] = [
     ...(inventoryEnabled ? [{ name: 'Inventory', href: '/dashboard/inventory', icon: IconPackage }] : []),
     ...(storefrontEnabled ? [{ name: 'Storefront', href: '/dashboard/storefront', icon: IconBuildingStore }] : []),
+    // Promotions is a Storefront checkout capability, not its own add-on — it
+    // rides Storefront's own enablement rather than a separate module toggle.
+    ...(storefrontEnabled ? [{ name: 'Promotions', href: '/dashboard/promotions', icon: IconDiscount2 }] : []),
   ];
 
   const addOnsChild: NavChild = { name: 'Account Add-ons', href: '/dashboard/account-add-ons', icon: IconApps };

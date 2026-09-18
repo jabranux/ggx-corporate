@@ -38,9 +38,9 @@ import {
   getStorefrontProductIds, setStorefrontProducts, listCollections, createCollection, updateCollection,
   deleteCollection, setCollectionProducts, listHomepageSections, createHomepageSection, updateHomepageSection,
   deleteHomepageSection, reorderHomepageSections, listHeroBanners, createHeroBanner, updateHeroBanner,
-  deleteHeroBanner, reorderHeroBanners, getPublicStorefront,
+  deleteHeroBanner, reorderHeroBanners, getPublicStorefront, getPublicStorefrontHomepage,
 } from '../_lib/commerceStorefront.js';
-import { listPublicStorefrontProducts, getPublicProductBySlug, type PublicProductSort, type Availability } from '../_lib/commerceProducts.js';
+import { listPublicStorefrontProducts, getPublicProductBySlug, getPublicProductById, type PublicProductSort, type Availability } from '../_lib/commerceProducts.js';
 import { listPromotions, createPromotion, updatePromotion, deletePromotion, validatePromotion, redeemPromotion } from '../_lib/commercePromotions.js';
 
 function pathSegments(req: ProxyRequest): string[] {
@@ -497,6 +497,22 @@ async function handlePublicProductDetail(req: ProxyRequest, res: ProxyResponse, 
   res.status(200).json({ product });
 }
 
+async function handlePublicHomepage(req: ProxyRequest, res: ProxyResponse, slug: string): Promise<void> {
+  if (req.method !== 'GET') return methodNotAllowed(res, ['GET']);
+  const storefront = await getPublicStorefront(slug);
+  const homepage = await getPublicStorefrontHomepage(storefront.accountId);
+  res.status(200).json(homepage);
+}
+
+/** Legacy direct "share this product" link (`/buy/:productId`) — see
+ * `getPublicProductById`'s docblock for why this doesn't gate on storefront
+ * publish status. */
+async function handlePublicProductById(req: ProxyRequest, res: ProxyResponse, productId: string): Promise<void> {
+  if (req.method !== 'GET') return methodNotAllowed(res, ['GET']);
+  const product = await getPublicProductById(productId);
+  res.status(200).json({ product });
+}
+
 // ─── Dispatch ───────────────────────────────────────────────────────────
 
 export default async function handler(req: ProxyRequest, res: ProxyResponse): Promise<void> {
@@ -508,7 +524,11 @@ export default async function handler(req: ProxyRequest, res: ProxyResponse): Pr
       const [, , slug, ...tail] = segments;
       if (tail.length === 0) return await handlePublicStorefront(req, res, slug);
       if (tail.length === 1 && tail[0] === 'products') return await handlePublicProducts(req, res, slug);
+      if (tail.length === 1 && tail[0] === 'homepage') return await handlePublicHomepage(req, res, slug);
       if (tail.length === 2 && tail[0] === 'product') return await handlePublicProductDetail(req, res, slug, tail[1]);
+    }
+    if (segments[0] === 'public' && segments[1] === 'product' && segments.length === 3) {
+      return await handlePublicProductById(req, res, segments[2]);
     }
     if (segments[0] === 'promotions' && segments[1] === 'validate' && segments.length === 2) return await handlePromotionValidate(req, res);
     if (segments[0] === 'promotions' && segments[1] === 'redeem' && segments.length === 2) return await handlePromotionRedeem(req, res);
