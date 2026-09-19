@@ -4,6 +4,7 @@ import {
   IconShoppingCart, IconTrash, IconBuildingStore, IconPackage, IconArrowLeft, IconTag, IconX, IconLoader2,
 } from '@tabler/icons-react';
 import { Card, CardContent } from '../components/ui/Card';
+import { Badge } from '../components/ui/Badge';
 import { Button } from '../components/ui/Button';
 import { Input } from '../components/ui/Input';
 import {
@@ -11,6 +12,7 @@ import {
   useAppliedPromoCode, setAppliedPromoCode,
 } from '../lib/cartStore';
 import { validatePromotionCode, type DiscountResult } from '../services/promotionsService';
+import { getSaleInfo } from '../lib/salePricing';
 
 const peso = (n: number) =>
   `₱${n.toLocaleString('en-PH', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
@@ -183,6 +185,7 @@ export function CartReview() {
             {items.map((item) => {
               const cover = item.productSnapshot.images[0];
               const { stockQuantity, unlimitedStock, compareAtPrice, sku } = item.productSnapshot;
+              const sale = getSaleInfo(item.productSnapshot.unitPrice, compareAtPrice);
               const atMax = !unlimitedStock && stockQuantity != null && item.quantity >= stockQuantity;
               const lowStockHint = !unlimitedStock && stockQuantity != null && stockQuantity <= 5;
               return (
@@ -205,10 +208,13 @@ export function CartReview() {
                           <p className="text-xs text-gray-500">{item.productSnapshot.variantLabel}</p>
                         )}
                         {sku && <p className="text-xs text-gray-400">SKU {sku}</p>}
-                        <div className="flex items-baseline gap-2 mt-1">
+                        <div className="flex items-center gap-2 mt-1 flex-wrap">
                           <p className="text-sm font-bold text-gray-900">{peso(item.productSnapshot.unitPrice)}</p>
-                          {compareAtPrice != null && compareAtPrice > item.productSnapshot.unitPrice && (
-                            <p className="text-xs text-gray-400 line-through">{peso(compareAtPrice)}</p>
+                          {sale && (
+                            <>
+                              <p className="text-xs text-gray-400 line-through">{peso(compareAtPrice!)}</p>
+                              <Badge variant="danger">{sale.percentOff}% OFF</Badge>
+                            </>
                           )}
                         </div>
                       </div>

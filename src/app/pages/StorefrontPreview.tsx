@@ -2,21 +2,22 @@ import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { useParams, Link, useNavigate } from 'react-router';
 import {
   IconBuildingStore, IconShoppingCart, IconPackage, IconCheck, IconAdjustmentsHorizontal,
-  IconX, IconBrandFacebook, IconBrandInstagram, IconBrandTiktok, IconWorld, IconSparkles,
+  IconX, IconBrandFacebook, IconBrandInstagram, IconBrandTiktok, IconWorld, IconSparkles, IconEye,
 } from '@tabler/icons-react';
 import { Card, CardContent } from '../components/ui/Card';
 import { Badge } from '../components/ui/Badge';
 import { Button } from '../components/ui/Button';
-import { Input } from '../components/ui/Input';
 import { Select } from '../components/ui/Select';
+import { PriceRangeSlider } from '../components/ui/PriceRangeSlider';
 import { SearchInput } from '../components/SearchInput';
 import {
   getPublicStore, getPublicStoreProducts, getPublicStoreHomepage,
-  type PublicStorefront, type PublicProductSummary, type PublicProductSort, type PublicAvailability,
+  type PublicStorefront, type PublicProductSummary, type PublicProductSort,
   type PublicHomepageSection, type PublicHeroBanner,
 } from '../services/publicStorefrontService';
 import { getServiceTypeLabel, type ServiceTypeKey } from '../data/serviceTypes';
 import { addToCart, useCartItems, setCartSeller } from '../lib/cartStore';
+import { getSaleInfo } from '../lib/salePricing';
 
 const peso = (n: number) =>
   `₱${n.toLocaleString('en-PH', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
@@ -34,13 +35,19 @@ interface Filters {
   sort: PublicProductSort;
   minPrice: string;
   maxPrice: string;
-  availability: PublicAvailability;
 }
 
-const DEFAULT_FILTERS: Filters = { search: '', category: '', sort: 'featured', minPrice: '', maxPrice: '', availability: 'all' };
+const DEFAULT_FILTERS: Filters = { search: '', category: '', sort: 'featured', minPrice: '', maxPrice: '' };
 
 function hasActiveFilters(f: Filters): boolean {
-  return !!f.search || !!f.category || f.sort !== 'featured' || !!f.minPrice || !!f.maxPrice || f.availability !== 'all';
+  return !!f.search || !!f.category || f.sort !== 'featured' || !!f.minPrice || !!f.maxPrice;
+}
+
+/** A product's own `unitPrice` for a base product, or its variant range's
+ * bounds — used both for the price-slider's min/max and per-product sorting
+ * elsewhere; never a fabricated single number for a ranged product. */
+function priceBoundsOf(p: PublicProductSummary): [number, number] {
+  return p.hasVariants && p.priceRange ? [p.priceRange.min, p.priceRange.max] : [p.unitPrice, p.unitPrice];
 }
 
 /** Grid/New-Arrivals price label — a variant-carrying product shows its real
@@ -160,13 +167,39 @@ export function StorefrontPreview() {
         sort: filters.sort,
         minPrice: filters.minPrice.trim() ? Number(filters.minPrice) : undefined,
         maxPrice: filters.maxPrice.trim() ? Number(filters.maxPrice) : undefined,
-        availability: filters.availability,
       })
         .then((list) => { if (active) setProducts(list); })
         .finally(() => { if (active) setProductsLoading(false); });
     }, filters.search ? 300 : 0);
     return () => { active = false; window.clearTimeout(t); };
-  }, [store, slug, filters.search, filters.category, filters.sort, filters.minPrice, filters.maxPrice, filters.availability]);
+  }, [store, slug, filters.search, filters.category, filters.sort, filters.minPrice, filters.maxPrice]);
+
+  // Price-slider bounds, derived from the real (unfiltered) catalog — never a
+  // fabricated/static range. A slider needs a stable [min, max] to render
+  // meaningfully, so this is computed once per catalog load, not per filter
+  // change (the slider's own selected range lives in `filters`).
+  const priceBounds = (() => {
+    if (allProducts.length === 0) return { min: 0, max: 0 };
+    let lo = Infinity;
+    let hi = -Infinity;
+    for (const p of allProducts) {
+      const [pLo, pHi] = priceBoundsOf(p);
+      if (pLo < lo) lo = pLo;
+      if (pHi > hi) hi = pHi;
+    }
+    return { min: Math.floor(lo), max: Math.ceil(hi) };
+  })();
+  const [draftPriceRange, setDraftPriceRange] = useState<[number, number]>([0, 0]);
+  useEffect(() => {
+    setDraftPriceRange([
+      filters.minPrice.trim() ? Number(filters.minPrice) : priceBounds.min,
+      filters.maxPrice.trim() ? Number(filters.maxPrice) : priceBounds.max,
+    ]);
+    // Re-sync whenever the catalog's bounds resolve or a filter is cleared —
+    // deliberately NOT on every keystroke of a drag (that's `onChange` below,
+    // which only updates the live label until the drag commits).
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [filters.minPrice, filters.maxPrice, priceBounds.min, priceBounds.max]);
 
   if (storeLoading) return null;
 
@@ -231,29 +264,14 @@ export function StorefrontPreview() {
         </Select>
       </div>
       <div>
-        <label className="text-xs font-medium text-gray-600 mb-1.5 block">Price range (₱)</label>
-        <div className="flex items-center gap-2">
-          <Input
-            type="number" min={0} inputMode="numeric" placeholder="Min" value={filters.minPrice}
-            onChange={(e) => setFilters((f) => ({ ...f, minPrice: e.target.value }))}
-          />
-          <span className="text-gray-400 text-sm">–</span>
-          <Input
-            type="number" min={0} inputMode="numeric" placeholder="Max" value={filters.maxPrice}
-            onChange={(e) => setFilters((f) => ({ ...f, maxPrice: e.target.value }))}
-          />
-        </div>
-      </div>
-      <div>
-        <label className="text-xs font-medium text-gray-600 mb-1.5 block">Availability</label>
-        <Select
-          value={filters.availability}
-          onChange={(e) => setFilters((f) => ({ ...f, availability: e.target.value as PublicAvailability }))}
-        >
-          <option value="all">All</option>
-          <option value="in_stock">In stock</option>
-          <option value="out_of_stock">Out of stock</option>
-        </Select>
+        <label className="text-xs font-medium text-gray-600 mb-1.5 block">Price range</label>
+        <PriceRangeSlider
+          min={priceBounds.min}
+          max={priceBounds.max}
+          value={draftPriceRange}
+          onChange={setDraftPriceRange}
+          onCommit={([lo, hi]) => setFilters((f) => ({ ...f, minPrice: String(lo), maxPrice: String(hi) }))}
+        />
       </div>
       <div>
         <label className="text-xs font-medium text-gray-600 mb-1.5 block">Sort by</label>
@@ -442,8 +460,15 @@ export function StorefrontPreview() {
                   </CardContent>
                 </Card>
               ) : (
-                <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-4">
-                  {products.map((p) => (
+                (() => {
+                  // Available-first grouping (no separate Availability filter
+                  // any more — unavailable products stay discoverable, just
+                  // never compete with purchasable inventory, regardless of
+                  // the selected sort). Each group keeps the server's own
+                  // sort order; only the grouping itself is client-side.
+                  const availableProducts = products.filter((p) => p.stockStatus !== 'out_of_stock');
+                  const unavailableProducts = products.filter((p) => p.stockStatus === 'out_of_stock');
+                  const renderCard = (p: PublicProductSummary) => (
                     <ProductCard
                       key={p.id}
                       product={p}
@@ -465,8 +490,29 @@ export function StorefrontPreview() {
                         setTimeout(() => setJustAddedId(null), 2000);
                       }}
                     />
-                  ))}
-                </div>
+                  );
+                  return (
+                    <>
+                      {availableProducts.length > 0 && (
+                        <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-4">
+                          {availableProducts.map(renderCard)}
+                        </div>
+                      )}
+                      {unavailableProducts.length > 0 && (
+                        <div className={availableProducts.length > 0 ? 'mt-8' : ''}>
+                          <div className="flex items-center gap-3 mb-4">
+                            <div className="h-px flex-1 bg-gray-200" />
+                            <span className="text-xs font-medium text-gray-400 uppercase tracking-wide whitespace-nowrap">Available again soon</span>
+                            <div className="h-px flex-1 bg-gray-200" />
+                          </div>
+                          <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-4">
+                            {unavailableProducts.map(renderCard)}
+                          </div>
+                        </div>
+                      )}
+                    </>
+                  );
+                })()
               )}
             </div>
           </div>
@@ -497,13 +543,17 @@ function ProductCard({
 }) {
   const outOfStock = p.stockStatus === 'out_of_stock';
   const lowStock = p.stockStatus === 'low_stock';
+  // A variant-carrying product shows a price range, which doesn't map onto a
+  // single before/after sale pair — sale presentation is base-product only.
+  const sale = !p.hasVariants ? getSaleInfo(p.unitPrice, p.compareAtPrice) : null;
   const gridPriceLabel = p.hasVariants && p.priceRange
     ? (p.priceRange.min === p.priceRange.max ? peso(p.priceRange.min) : `${peso(p.priceRange.min)} – ${peso(p.priceRange.max)}`)
     : peso(p.unitPrice);
+  const productHref = `/shop/${slug}/product/${p.slug}`;
 
   return (
     <Card className="flex flex-col overflow-hidden">
-      <Link to={`/shop/${slug}/product/${p.slug}`} className="flex flex-col flex-1">
+      <Link to={productHref} className="flex flex-col flex-1">
         <div className="h-36 bg-gray-100 flex items-center justify-center overflow-hidden">
           {p.coverImageUrl
             ? <img src={p.coverImageUrl} alt={p.name} className="w-full h-full object-cover" />
@@ -520,28 +570,48 @@ function ProductCard({
                 : <Badge variant="success">In stock</Badge>}
             {p.hasVariants && <Badge variant="outline">Options</Badge>}
           </div>
-          <p className="text-base font-bold text-gray-900 mt-auto pt-3">{gridPriceLabel}</p>
+          <div className="mt-auto pt-3">
+            {sale ? (
+              <>
+                <div className="flex items-center gap-1.5 flex-wrap">
+                  <span className="text-base font-bold text-gray-900">{peso(p.unitPrice)}</span>
+                  <span className="text-xs text-gray-400 line-through">{peso(p.compareAtPrice!)}</span>
+                </div>
+                <Badge variant="danger" className="mt-1">{sale.percentOff}% OFF</Badge>
+              </>
+            ) : (
+              <p className="text-base font-bold text-gray-900">{gridPriceLabel}</p>
+            )}
+          </div>
         </CardContent>
       </Link>
-      <div className="px-4 pb-4">
+      <div className="px-4 pb-4 flex items-center gap-2">
+        <Link
+          to={productHref}
+          aria-label="View product"
+          title="View product"
+          className="inline-flex items-center justify-center w-9 h-9 flex-shrink-0 rounded-lg border border-gray-300 bg-white hover:bg-gray-50 text-gray-500 transition-colors"
+        >
+          <IconEye className="w-4 h-4" />
+        </Link>
         {p.hasVariants ? (
           <Link
-            to={`/shop/${slug}/product/${p.slug}`}
-            className="w-full inline-flex items-center justify-center gap-1.5 rounded-lg border border-gray-300 bg-white hover:bg-gray-50 text-gray-700 text-sm font-medium h-9 transition-colors"
+            to={productHref}
+            className="flex-1 inline-flex items-center justify-center gap-1.5 rounded-lg border border-gray-300 bg-white hover:bg-gray-50 text-gray-700 text-sm font-medium h-9 transition-colors"
           >
             View options
           </Link>
         ) : outOfStock ? (
           <button
             type="button" disabled
-            className="w-full inline-flex items-center justify-center gap-1.5 rounded-lg border border-gray-200 bg-gray-50 text-gray-400 text-sm font-medium h-9 cursor-not-allowed"
+            className="flex-1 inline-flex items-center justify-center gap-1.5 rounded-lg border border-gray-200 bg-gray-50 text-gray-400 text-sm font-medium h-9 cursor-not-allowed"
           >
             Out of stock
           </button>
         ) : justAdded ? (
           <button
             type="button" disabled
-            className="w-full inline-flex items-center justify-center gap-1.5 rounded-lg bg-green-600 text-white text-sm font-medium h-9 cursor-default"
+            className="flex-1 inline-flex items-center justify-center gap-1.5 rounded-lg bg-green-600 text-white text-sm font-medium h-9 cursor-default"
           >
             <IconCheck className="w-4 h-4" />
             Added!
@@ -551,7 +621,7 @@ function ProductCard({
             type="button"
             onClick={onAdd}
             style={accentStyle}
-            className="w-full inline-flex items-center justify-center gap-1.5 rounded-lg bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium h-9 transition-colors"
+            className="flex-1 inline-flex items-center justify-center gap-1.5 rounded-lg bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium h-9 transition-colors"
           >
             <IconShoppingCart className="w-4 h-4" />
             Add to cart

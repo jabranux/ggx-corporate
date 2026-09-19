@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
-import { IconAlertTriangle, IconCircleCheck, IconLock } from '@tabler/icons-react';
-import { Dialog } from './ui/Dialog';
+import { IconAlertTriangle, IconCircleCheck, IconLock, IconSettings, IconTag } from '@tabler/icons-react';
+import { Dialog, ConfirmDialog } from './ui/Dialog';
 import { Button } from './ui/Button';
 import { Input } from './ui/Input';
 import { Select } from './ui/Select';
@@ -8,6 +8,8 @@ import { Textarea } from './ui/Textarea';
 import { Tabs, TabsList, TabsTrigger, TabsContent } from './ui/Tabs';
 import { ProductImageGallery } from './ProductImageGallery';
 import { ProductVariantBuilder } from './ProductVariantBuilder';
+import { SkuSettingsPanel } from './SkuSettingsPanel';
+import { useDiscardChangesGuard } from '../hooks/useDiscardChangesGuard';
 import {
   PRODUCT_CATEGORIES, getInventoryProduct, createInventoryProduct, updateInventoryProduct, getSkuSettings,
   type InventoryProductDetail, type ProductInput, type ProductStatus, type SkuSettings,
@@ -19,8 +21,13 @@ interface FormState {
   category: string;
   description: string;
   status: ProductStatus;
-  unitPrice: string;
-  compareAtPrice: string;
+  /** Effective selling price when NOT on sale. Ignored (but preserved) while `onSale` is true. */
+  itemPrice: string;
+  /** On-sale only: the higher pre-sale price, struck through everywhere — maps to `compareAtPrice`. */
+  originalPrice: string;
+  /** On-sale only: the actual discounted selling price — maps to `unitPrice`. */
+  salePrice: string;
+  onSale: boolean;
   weight: string;
   length: string;
   width: string;
@@ -33,15 +40,24 @@ interface FormState {
 function blankForm(): FormState {
   return {
     name: '', sku: '', category: '', description: '', status: 'active',
-    unitPrice: '', compareAtPrice: '', weight: '', length: '', width: '', height: '',
+    itemPrice: '', originalPrice: '', salePrice: '', onSale: false,
+    weight: '', length: '', width: '', height: '',
     stockQuantity: '', lowStockThreshold: '10', unlimited: false,
   };
 }
 
+/** A product is treated as "on sale" only when `compareAtPrice` is both set
+ * and genuinely higher than the selling price — a stray/legacy compare-at
+ * value that doesn't actually discount anything renders as a normal single
+ * price instead of a nonsensical sale. */
 function formFrom(p: InventoryProductDetail): FormState {
+  const onSale = p.compareAtPrice != null && p.compareAtPrice > p.unitPrice;
   return {
     name: p.name, sku: p.sku, category: p.category, description: p.description, status: p.status,
-    unitPrice: String(p.unitPrice), compareAtPrice: p.compareAtPrice == null ? '' : String(p.compareAtPrice),
+    itemPrice: onSale ? String(p.compareAtPrice) : String(p.unitPrice),
+    originalPrice: onSale ? String(p.compareAtPrice) : '',
+    salePrice: onSale ? String(p.unitPrice) : '',
+    onSale,
     weight: String(p.weight), length: String(p.dimensions.length ?? ''), width: String(p.dimensions.width ?? ''), height: String(p.dimensions.height ?? ''),
     stockQuantity: String(p.stockQuantity), lowStockThreshold: String(p.lowStockThreshold), unlimited: p.unlimitedStock,
   };
@@ -52,6 +68,19 @@ const num = (v: string): number | undefined => {
   const n = Number(v);
   return Number.isFinite(n) && n >= 0 ? n : undefined;
 };
+
+/** Discount preview + validation shared by the "On sale" pricing UI. */
+function saleMath(originalPrice: string, salePrice: string) {
+  const original = num(originalPrice);
+  const sale = num(salePrice);
+  const validOriginal = original != null && original > 0;
+  const validSale = sale != null && sale > 0;
+  const saleBelowOriginal = validOriginal && validSale && sale! < original!;
+  const valid = validOriginal && validSale && saleBelowOriginal;
+  const percentOff = valid ? Math.round(((original! - sale!) / original!) * 100) : null;
+  const amountOff = valid ? original! - sale! : null;
+  return { valid, validOriginal, validSale, saleBelowOriginal, percentOff, amountOff };
+}
 
 const Label = ({ children, required }: { children: React.ReactNode; required?: boolean }) => (
   <label className="block text-xs font-medium text-gray-600 mb-1">
@@ -94,7 +123,12 @@ export function ProductFormDialog({
   const [loadError, setLoadError] = useState<string | null>(null);
   const [product, setProduct] = useState<InventoryProductDetail | null>(null);
   const [form, setForm] = useState<FormState>(blankForm);
+  // The last saved (or, before any save, blank) form — dirty-form protection
+  // compares live `form` against this, never against the original load, so a
+  // successful save always leaves the dialog closable without a prompt.
+  const [savedSnapshot, setSavedSnapshot] = useState<FormState>(blankForm);
   const [skuSettings, setSkuSettings] = useState<SkuSettings | null>(null);
+  const [skuSettingsOpen, setSkuSettingsOpen] = useState(false);
   const [tab, setTab] = useState<Tab>('details');
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
@@ -112,7 +146,9 @@ export function ProductFormDialog({
           if (!active) return;
           if (!p) { setLoadError('This product could not be loaded — it may have been removed.'); return; }
           setProduct(p);
-          setForm(formFrom(p));
+          const loaded = formFrom(p);
+          setForm(loaded);
+          setSavedSnapshot(loaded);
         })
         .finally(() => { if (active) setLoading(false); });
     }
@@ -125,7 +161,14 @@ export function ProductFormDialog({
     onSaved();
   };
 
-  const canSubmit = form.name.trim().length > 0 && num(form.unitPrice) !== undefined;
+  const sale = saleMath(form.originalPrice, form.salePrice);
+  // On-sale pricing must be fully valid before the product can save at all —
+  // never a half-configured "on sale but no real sale price" state.
+  const priceValid = form.onSale ? sale.valid : num(form.itemPrice) !== undefined;
+  const canSubmit = form.name.trim().length > 0 && priceValid;
+  const isDirty = () => JSON.stringify(form) !== JSON.stringify(savedSnapshot);
+  const { confirmOpen: discardConfirmOpen, requestClose, keepEditing, discardChanges } =
+    useDiscardChangesGuard(isDirty, onClose);
 
   const buildInput = (): ProductInput => ({
     name: form.name.trim(),
@@ -133,8 +176,8 @@ export function ProductFormDialog({
     description: form.description.trim(),
     status: form.status,
     sku: product ? undefined : (form.sku.trim() || undefined), // SKU is immutable after creation
-    unitPrice: num(form.unitPrice) ?? 0,
-    compareAtPrice: form.compareAtPrice.trim() === '' ? null : num(form.compareAtPrice) ?? null,
+    unitPrice: form.onSale ? (num(form.salePrice) ?? 0) : (num(form.itemPrice) ?? 0),
+    compareAtPrice: form.onSale ? (num(form.originalPrice) ?? null) : null,
     weight: form.weight.trim() === '' ? null : num(form.weight) ?? null,
     dimensions: {
       length: form.length.trim() === '' ? null : num(form.length) ?? null,
@@ -155,13 +198,17 @@ export function ProductFormDialog({
       if (!product) {
         const created = await createInventoryProduct(scopeId, buildInput());
         setProduct(created);
-        setForm(formFrom(created));
+        const saved = formFrom(created);
+        setForm(saved);
+        setSavedSnapshot(saved);
         onSaved();
         setTab('images');
       } else {
         const updated = await updateInventoryProduct(product.id, buildInput(), scopeId);
         setProduct(updated);
-        setForm(formFrom(updated));
+        const saved = formFrom(updated);
+        setForm(saved);
+        setSavedSnapshot(saved);
         onSaved();
       }
       setJustSaved(true);
@@ -173,18 +220,17 @@ export function ProductFormDialog({
     }
   };
 
-  const handleClose = () => { onClose(); };
-
   const skuHint = skuSettings
     ? (skuSettings.autoGenerate
         ? `Leave blank to auto-generate (${skuSettings.prefix}-${String(skuSettings.nextSequence).padStart(6, '0')}).`
         : 'Auto-generate is off for this account — a SKU is required.')
     : undefined;
+  const showSkuSettingsAction = !product && skuSettings && !skuSettings.autoGenerate;
 
   return (
     <Dialog
       open={open}
-      onClose={handleClose}
+      onClose={requestClose}
       title={mode === 'create' ? 'Add product' : 'Edit product'}
       size="lg"
     >
@@ -228,9 +274,22 @@ export function ProductFormDialog({
                       placeholder={skuHint ?? 'Optional — e.g. COF-1KG-001'}
                       disabled={!!product}
                     />
-                    {product
-                      ? <p className="text-[11px] text-gray-400 mt-1">SKU can't be changed after the product is created.</p>
-                      : skuHint && <p className="text-[11px] text-gray-400 mt-1">{skuHint}</p>}
+                    {product ? (
+                      <p className="text-[11px] text-gray-400 mt-1">SKU can't be changed after the product is created.</p>
+                    ) : (
+                      <div className="flex items-center justify-between gap-2 mt-1">
+                        {skuHint && <p className="text-[11px] text-gray-400">{skuHint}</p>}
+                        {showSkuSettingsAction && (
+                          <button
+                            type="button"
+                            onClick={() => setSkuSettingsOpen(true)}
+                            className="text-[11px] font-medium text-blue-600 hover:text-blue-800 whitespace-nowrap flex items-center gap-0.5 flex-shrink-0"
+                          >
+                            <IconSettings className="w-3 h-3" /> SKU settings
+                          </button>
+                        )}
+                      </div>
+                    )}
                   </div>
                   <div>
                     <Label>Category</Label>
@@ -257,9 +316,70 @@ export function ProductFormDialog({
                   <Textarea value={form.description} onChange={(e) => set('description', e.target.value)} rows={2} placeholder="Short product description" />
                 </div>
 
+                {/* Pricing — a normal product shows exactly one price; "On sale"
+                    expands it into an explicit Original/Sale pair with a
+                    computed discount preview. Kept structurally separate from
+                    Stock below so each section has one job. */}
                 <div>
                   <div className="flex items-center justify-between mb-1">
-                    <Label>Pricing &amp; stock</Label>
+                    <Label required={!form.onSale}>{form.onSale ? 'Pricing' : 'Item price (₱)'}</Label>
+                    <label className="flex items-center gap-1.5 text-xs text-gray-600 cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={form.onSale}
+                        onChange={(e) => {
+                          const onSale = e.target.checked;
+                          setForm((p) => (onSale
+                            ? { ...p, onSale: true, originalPrice: p.itemPrice, salePrice: '' }
+                            : { ...p, onSale: false, itemPrice: p.originalPrice || p.itemPrice, originalPrice: '', salePrice: '' }));
+                        }}
+                        className="w-3.5 h-3.5 rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+                      />
+                      On sale
+                    </label>
+                  </div>
+                  {product?.hasVariants && (
+                    <p className="text-[11px] text-amber-700 bg-amber-50 border border-amber-100 rounded px-2 py-1 mb-2">
+                      This product has variants — the values below are the base/fallback price.
+                      Manage per-variant pricing in the Variants tab.
+                    </p>
+                  )}
+                  {!form.onSale ? (
+                    <Input type="number" min={0} value={form.itemPrice} onChange={(e) => set('itemPrice', e.target.value)} placeholder="0" />
+                  ) : (
+                    <>
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                        <div>
+                          <Label required>Original price (₱)</Label>
+                          <Input type="number" min={0} value={form.originalPrice} onChange={(e) => set('originalPrice', e.target.value)} placeholder="0" />
+                        </div>
+                        <div>
+                          <Label required>Sale price (₱)</Label>
+                          <Input type="number" min={0} value={form.salePrice} onChange={(e) => set('salePrice', e.target.value)} placeholder="0" />
+                        </div>
+                      </div>
+                      {sale.valid ? (
+                        <p className="text-xs font-medium text-emerald-700 mt-1.5 flex items-center gap-1">
+                          <IconTag className="w-3.5 h-3.5" /> {sale.percentOff}% off · Save ₱{sale.amountOff!.toLocaleString('en-PH')}
+                        </p>
+                      ) : (form.originalPrice.trim() || form.salePrice.trim()) ? (
+                        <p className="text-xs text-red-600 mt-1.5">
+                          {!sale.validOriginal ? 'Enter a valid original price.'
+                            : !sale.validSale ? 'Sale price must be greater than zero.'
+                            : 'Sale price must be lower than the original price.'}
+                        </p>
+                      ) : (
+                        <p className="text-[11px] text-gray-400 mt-1.5">Enter both prices to see the discount.</p>
+                      )}
+                    </>
+                  )}
+                </div>
+
+                {/* Stock — kept as one coherent subsection regardless of the
+                    pricing layout above it. */}
+                <div>
+                  <div className="flex items-center justify-between mb-1">
+                    <Label>Stock</Label>
                     <label className="flex items-center gap-1.5 text-xs text-gray-600 cursor-pointer">
                       <input type="checkbox" checked={form.unlimited} onChange={(e) => setForm((p) => ({ ...p, unlimited: e.target.checked }))} className="w-3.5 h-3.5 rounded border-gray-300 text-blue-600 focus:ring-blue-500" />
                       Unlimited stock
@@ -267,42 +387,32 @@ export function ProductFormDialog({
                   </div>
                   {product?.hasVariants && (
                     <p className="text-[11px] text-amber-700 bg-amber-50 border border-amber-100 rounded px-2 py-1 mb-2">
-                      This product has variants — the values below are the base/fallback price and stock.
-                      Manage per-variant pricing and stock in the Variants tab.
+                      This product has variants — the values below are the base/fallback stock.
+                      Manage per-variant stock in the Variants tab.
                     </p>
                   )}
-                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-                    <div>
-                      <Label required>Unit price (₱)</Label>
-                      <Input type="number" min={0} value={form.unitPrice} onChange={(e) => set('unitPrice', e.target.value)} placeholder="0" />
+                  {!form.unlimited && (
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                      <div>
+                        <Label>Stock qty</Label>
+                        <Input
+                          type="number" min={0}
+                          value={form.stockQuantity}
+                          onChange={(e) => set('stockQuantity', e.target.value)}
+                          placeholder="0"
+                        />
+                      </div>
+                      <div>
+                        <Label>Low-stock alert at</Label>
+                        <Input
+                          type="number" min={0}
+                          value={form.lowStockThreshold}
+                          onChange={(e) => set('lowStockThreshold', e.target.value)}
+                          placeholder="10"
+                        />
+                      </div>
                     </div>
-                    <div>
-                      <Label>Compare-at price (₱)</Label>
-                      <Input type="number" min={0} value={form.compareAtPrice} onChange={(e) => set('compareAtPrice', e.target.value)} placeholder="Optional" />
-                    </div>
-                    <div>
-                      <Label>Low-stock at</Label>
-                      <Input
-                        type="number" min={0}
-                        value={form.unlimited ? '' : form.lowStockThreshold}
-                        disabled={form.unlimited}
-                        onChange={(e) => set('lowStockThreshold', e.target.value)}
-                        placeholder={form.unlimited ? '—' : '10'}
-                      />
-                    </div>
-                  </div>
-                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 mt-3">
-                    <div>
-                      <Label>Stock qty</Label>
-                      <Input
-                        type="number" min={0}
-                        value={form.unlimited ? '' : form.stockQuantity}
-                        disabled={form.unlimited}
-                        onChange={(e) => set('stockQuantity', e.target.value)}
-                        placeholder={form.unlimited ? 'Unlimited' : '0'}
-                      />
-                    </div>
-                  </div>
+                  )}
                 </div>
 
                 <div>
@@ -346,7 +456,7 @@ export function ProductFormDialog({
               {justSaved && <><IconCircleCheck className="w-3.5 h-3.5" /> Saved</>}
             </div>
             <div className="flex gap-2.5">
-              <Button variant="outline" size="sm" onClick={handleClose}>{product ? 'Close' : 'Cancel'}</Button>
+              <Button variant="outline" size="sm" onClick={requestClose}>{product ? 'Close' : 'Cancel'}</Button>
               {tab === 'details' && (
                 <Button size="sm" disabled={!canSubmit || saving} onClick={handleSaveDetails}>
                   {saving ? 'Saving…' : product ? 'Save details' : 'Create product'}
@@ -356,6 +466,33 @@ export function ProductFormDialog({
           </div>
         </>
       )}
+
+      {/* SKU settings — reuses the same panel as Inventory's toolbar action, so
+          there's exactly one SKU-settings implementation. Opening this never
+          touches `form`/`product` state, so the partially-completed product
+          form underneath is untouched; closing it (Save or the implicit
+          backdrop/Escape) just removes the overlay and returns to the form. */}
+      <Dialog
+        open={skuSettingsOpen}
+        onClose={() => setSkuSettingsOpen(false)}
+        title="SKU settings"
+        size="md"
+        elevated
+      >
+        <SkuSettingsPanel scopeId={scopeId} onSaved={(next) => { setSkuSettings(next); setSkuSettingsOpen(false); }} />
+      </Dialog>
+
+      <ConfirmDialog
+        open={discardConfirmOpen}
+        onClose={keepEditing}
+        onConfirm={discardChanges}
+        title="Discard changes?"
+        description="Your unsaved changes will be lost."
+        confirmLabel="Discard changes"
+        cancelLabel="Keep editing"
+        variant="destructive"
+        elevated
+      />
     </Dialog>
   );
 }

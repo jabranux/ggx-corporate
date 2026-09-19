@@ -19,6 +19,7 @@ import { getPublicStore } from '../services/publicStorefrontService';
 import { placeStorefrontOrder } from '../services/storefrontOrdersService';
 import { validatePromotionCode, redeemPromotionCode, type DiscountResult } from '../services/promotionsService';
 import { classifyRegion, estimateDeliveryFee, isMetroManila } from '../lib/checkoutEstimates';
+import { getSaleInfo } from '../lib/salePricing';
 import type { DeliveryServiceType } from '../services/transactionService';
 
 const DELIVERY_TITLE: Record<DeliveryServiceType, string> = {
@@ -61,6 +62,8 @@ export function CartCheckout() {
   const appliedPromoCode = useAppliedPromoCode();
   const [discount, setDiscount] = useState<DiscountResult | null>(null);
   const [promoError, setPromoError] = useState<string | null>(null);
+  const [promoInput, setPromoInput] = useState('');
+  const [validatingPromo, setValidatingPromo] = useState(false);
   const [placing, setPlacing] = useState(false);
   const [placeError, setPlaceError] = useState<string | null>(null);
 
@@ -164,17 +167,49 @@ export function CartCheckout() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [appliedPromoCode, subtotal, productIds.join(','), seller?.slug, items.length]);
 
+  // Apply/replace a promo code directly from Checkout — same server-authoritative
+  // `validatePromotionCode` call CartReview uses; this only sets which code is
+  // APPLIED (persisted in cartStore), never redeems it. Redemption still only
+  // happens once, at `handlePlace` below, so visiting/editing Checkout can
+  // never itself consume a promo's usage.
+  //
+  // `orderPlacedRef` guards against a real race Codex flagged: order placement
+  // is blocked while `validatingPromo` is true (see `canOrder`), but a promo
+  // apply already in flight when placement STARTS can still resolve after
+  // `handlePlace` has cleared the cart/applied-code — without this guard, that
+  // late resolution would silently reapply a promo code onto an already-placed,
+  // already-cleared order.
+  const orderPlacedRef = useRef(false);
+  const handleApplyPromo = async () => {
+    const code = promoInput.trim();
+    if (!code || !seller || placing) return;
+    setValidatingPromo(true);
+    setPromoError(null);
+    const res = await validatePromotionCode(seller.slug, code, subtotal, productIds);
+    setValidatingPromo(false);
+    if (orderPlacedRef.current) return; // order placed while this was in flight — its result is moot
+    if (res.ok) {
+      setDiscount(res.data);
+      setAppliedPromoCode(res.data.code);
+      setPromoInput('');
+    } else {
+      setDiscount(null);
+      setPromoError(res.message);
+    }
+  };
+
   const canOrder = !!(
     items.length > 0 &&
     form.name.trim() && form.mobile.trim() && form.street.trim() &&
     form.province.trim() && form.city.trim() && form.barangay.trim() &&
-    !placing
+    !placing && !validatingPromo
   );
 
   const handlePlace = async () => {
     // Seller context is required to attribute + place the order. Without it we
     // must not fabricate a confirmation (see the "Store session expired" guard).
     if (!canOrder || !seller) return;
+    orderPlacedRef.current = true;
     setPlacing(true);
     setPlaceError(null);
 
@@ -193,6 +228,7 @@ export function CartCheckout() {
       const idempotencyKey = getIdempotencyKey();
       const res = await redeemPromotionCode(seller.slug, appliedPromoCode, subtotal, productIds, idempotencyKey);
       if (!res.ok) {
+        orderPlacedRef.current = false; // placement did not go through — a promo apply may resume
         setPlaceError(`Your promo code could not be applied: ${res.message} Please remove it or try again.`);
         setPlacing(false);
         return;
@@ -379,6 +415,7 @@ export function CartCheckout() {
               <div className="space-y-3">
                 {items.map((item) => {
                   const cover = item.productSnapshot.images[0];
+                  const sale = getSaleInfo(item.productSnapshot.unitPrice, item.productSnapshot.compareAtPrice);
                   return (
                     <div key={`${item.productId}-${item.variantId ?? 'base'}`} className="flex items-center gap-3">
                       <div className="w-10 h-10 rounded-lg bg-gray-100 overflow-hidden flex-shrink-0 flex items-center justify-center">
@@ -393,14 +430,21 @@ export function CartCheckout() {
                         )}
                         <p className="text-xs text-gray-500">Qty {item.quantity}</p>
                       </div>
-                      <p className="text-sm font-medium text-gray-900 flex-shrink-0">
-                        {peso(item.productSnapshot.unitPrice * item.quantity)}
-                      </p>
+                      <div className="flex-shrink-0 text-right">
+                        <p className="text-sm font-medium text-gray-900">
+                          {peso(item.productSnapshot.unitPrice * item.quantity)}
+                        </p>
+                        {sale && (
+                          <p className="text-xs text-gray-400 line-through">
+                            {peso(item.productSnapshot.compareAtPrice! * item.quantity)}
+                          </p>
+                        )}
+                      </div>
                     </div>
                   );
                 })}
               </div>
-              {appliedPromoCode && (
+              {appliedPromoCode ? (
                 <div className="flex items-center justify-between gap-2 rounded-lg border border-green-200 bg-green-50 px-3 py-2">
                   <div className="flex items-center gap-1.5 text-sm text-green-800 min-w-0">
                     <IconTag className="w-4 h-4 flex-shrink-0" />
@@ -415,6 +459,24 @@ export function CartCheckout() {
                   >
                     <IconX className="w-4 h-4" />
                   </button>
+                </div>
+              ) : (
+                // A promo applied on the Cart page already carries into this
+                // component via `appliedPromoCode` (persisted in cartStore);
+                // this input is only for applying one for the first time, or
+                // re-applying a different one after removing the last, right
+                // from Checkout — same validate-only call CartReview uses.
+                <div className="flex items-center gap-2">
+                  <Input
+                    value={promoInput}
+                    onChange={(e) => setPromoInput(e.target.value.toUpperCase())}
+                    onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); handleApplyPromo(); } }}
+                    placeholder="Promo code"
+                    className="uppercase"
+                  />
+                  <Button size="sm" variant="outline" disabled={!promoInput.trim() || validatingPromo || placing} onClick={handleApplyPromo}>
+                    {validatingPromo ? 'Applying…' : 'Apply'}
+                  </Button>
                 </div>
               )}
               {promoError && <p className="text-xs text-red-600">{promoError}</p>}

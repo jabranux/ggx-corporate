@@ -1,9 +1,10 @@
 import { useRef, useState } from 'react';
 import { IconUpload, IconLoader2, IconX, IconBuildingStore } from '@tabler/icons-react';
-import { Dialog } from './ui/Dialog';
+import { Dialog, ConfirmDialog } from './ui/Dialog';
 import { Button } from './ui/Button';
 import { Input } from './ui/Input';
 import { cn } from '../lib/utils';
+import { useDiscardChangesGuard } from '../hooks/useDiscardChangesGuard';
 import { STOREFRONT_DELIVERY_OPTIONS, getServiceTypeLabel, type ServiceTypeKey } from '../data/serviceTypes';
 import {
   requestStorefrontLogoUpload, uploadToPresignedUrl, setStorefrontLogo, removeStorefrontLogo,
@@ -78,6 +79,17 @@ export function StorefrontProfileDialog({
   const setSocialField = <K extends keyof SocialForm>(k: K, v: string) =>
     setSocial((prev) => ({ ...prev, [k]: v }));
 
+  // Dirty-form protection: compares against the `profile` this dialog opened
+  // with (it always mounts fresh — see `Storefront.tsx`'s `{editOpen && ...}`
+  // conditional). Logo upload/removal apply immediately against the backend
+  // (like `ProductImageGallery`), so they're intentionally excluded — there's
+  // nothing "unsaved" about them to discard.
+  const initial = useRef({ form: { ...form }, social: { ...social } }).current;
+  const isDirty = () =>
+    JSON.stringify(form) !== JSON.stringify(initial.form) || JSON.stringify(social) !== JSON.stringify(initial.social);
+  const { confirmOpen: discardConfirmOpen, requestClose, keepEditing, discardChanges } =
+    useDiscardChangesGuard(isDirty, onClose);
+
   const toggleDelivery = (key: ServiceTypeKey) =>
     setForm((prev) => ({
       ...prev,
@@ -144,7 +156,7 @@ export function StorefrontProfileDialog({
   };
 
   return (
-    <Dialog open={open} onClose={onClose} title="Edit store profile" size="lg">
+    <Dialog open={open} onClose={requestClose} title="Edit store profile" size="lg">
       <div className="space-y-4 max-h-[65vh] overflow-y-auto pr-1">
         {/* Logo */}
         <div>
@@ -272,9 +284,21 @@ export function StorefrontProfileDialog({
       </div>
 
       <div className="flex gap-2.5 justify-end pt-4 mt-2 border-t border-gray-100">
-        <Button variant="outline" size="sm" onClick={onClose}>Cancel</Button>
+        <Button variant="outline" size="sm" onClick={requestClose}>Cancel</Button>
         <Button size="sm" disabled={!canSubmit} onClick={handleSubmit}>Save changes</Button>
       </div>
+
+      <ConfirmDialog
+        open={discardConfirmOpen}
+        onClose={keepEditing}
+        onConfirm={discardChanges}
+        title="Discard changes?"
+        description="Your unsaved changes will be lost."
+        confirmLabel="Discard changes"
+        cancelLabel="Keep editing"
+        variant="destructive"
+        elevated
+      />
     </Dialog>
   );
 }

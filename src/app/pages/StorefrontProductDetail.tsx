@@ -3,7 +3,6 @@ import { useParams, Link, useNavigate } from 'react-router';
 import {
   IconBuildingStore, IconShoppingCart, IconPackage, IconCheck, IconArrowLeft, IconMinus, IconPlus,
 } from '@tabler/icons-react';
-import { Card, CardContent } from '../components/ui/Card';
 import { Badge } from '../components/ui/Badge';
 import { cn } from '../lib/utils';
 import {
@@ -11,6 +10,7 @@ import {
   type PublicStorefront, type PublicProductDetail, type PublicProductVariant,
 } from '../services/publicStorefrontService';
 import { addToCart, setCartSeller, useCartItems } from '../lib/cartStore';
+import { getSaleInfo } from '../lib/salePricing';
 
 const peso = (n: number) =>
   `₱${n.toLocaleString('en-PH', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
@@ -155,6 +155,8 @@ export function StorefrontProductDetail() {
   // at all" — mirrors `price` a few lines up, which already inherits this way.
   const compareAt = hasOptions ? (resolvedVariant ? resolvedVariant.compareAtPriceOverride ?? product.compareAtPrice : product.compareAtPrice) : product.compareAtPrice;
   const isFromPrice = hasOptions && !resolvedVariant && !!product.priceRange && product.priceRange.min !== product.priceRange.max;
+  // A "from ₱X" range price has no single before/after pair to show a sale for.
+  const sale = !isFromPrice ? getSaleInfo(price, compareAt) : null;
 
   const selectionIncomplete = hasOptions && !resolvedVariant && product.options.some((o) => !selected[o.id]);
   const combinationUnavailable = hasOptions && !resolvedVariant && !selectionIncomplete;
@@ -186,11 +188,28 @@ export function StorefrontProductDetail() {
   return (
     <div className="min-h-screen bg-gray-50">
       {accentStyle && <div className="h-1 w-full" style={accentStyle} />}
+      {/* Storefront identity header — Product Detail is still part of the
+          merchant's own store, not a generic GGX page, so it carries the same
+          logo/name/accent branding as the storefront grid, plus an explicit
+          route back to it (whole block is a link, with a labeled "Back to
+          store" line so it doesn't read as just a logo). */}
       <header className="bg-white border-b border-gray-200">
-        <div className="max-w-5xl mx-auto px-6 py-3 flex items-center justify-between gap-3">
-          <Link to={`/shop/${slug}`} className="inline-flex items-center gap-2 text-sm text-gray-600 hover:text-gray-900">
-            <IconArrowLeft className="w-4 h-4" />
-            <span className="font-medium">{store.storeName}</span>
+        <div className="max-w-5xl mx-auto px-6 py-4 flex items-center justify-between gap-3">
+          <Link to={`/shop/${slug}`} className="group flex items-center gap-3 min-w-0">
+            <div
+              className="w-10 h-10 rounded-xl overflow-hidden flex items-center justify-center flex-shrink-0"
+              style={accentStyle ?? { backgroundColor: '#2563eb' }}
+            >
+              {store.logoUrl
+                ? <img src={store.logoUrl} alt={store.storeName} className="w-full h-full object-cover" />
+                : <IconBuildingStore className="w-5 h-5 text-white" />}
+            </div>
+            <div className="min-w-0">
+              <p className="text-sm font-semibold text-gray-900 truncate">{store.storeName}</p>
+              <p className="text-xs text-gray-400 group-hover:text-gray-600 flex items-center gap-1 transition-colors">
+                <IconArrowLeft className="w-3 h-3" /> Back to store
+              </p>
+            </div>
           </Link>
           {cartCount > 0 && (
             <button
@@ -255,14 +274,18 @@ export function StorefrontProductDetail() {
             {!hasOptions && <span className="text-xs text-gray-400">SKU {product.sku}</span>}
           </div>
 
-          <div className="flex items-baseline gap-2 mt-3">
+          <div className="flex items-center gap-2 mt-3 flex-wrap">
             <span className="text-2xl font-bold text-gray-900">
               {isFromPrice ? 'From ' : ''}{peso(price)}
             </span>
-            {compareAt != null && compareAt > price && (
-              <span className="text-sm text-gray-400 line-through">{peso(compareAt)}</span>
+            {sale && (
+              <>
+                <span className="text-sm text-gray-400 line-through">{peso(compareAt!)}</span>
+                <Badge variant="danger">{sale.percentOff}% OFF</Badge>
+              </>
             )}
           </div>
+          {sale && <p className="text-xs text-emerald-700 font-medium mt-1">Save {peso(sale.amountOff)}</p>}
 
           {product.description && <p className="text-sm text-gray-600 mt-4 whitespace-pre-line">{product.description}</p>}
 
@@ -352,13 +375,6 @@ export function StorefrontProductDetail() {
               </button>
             )}
           </div>
-
-          <Card className="mt-6">
-            <CardContent className="p-4 text-xs text-gray-500 flex items-center gap-2">
-              <IconBuildingStore className="w-4 h-4 text-gray-400" />
-              Sold by {store.storeName} · Cash on Delivery
-            </CardContent>
-          </Card>
         </div>
       </main>
     </div>

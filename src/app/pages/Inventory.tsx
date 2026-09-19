@@ -323,7 +323,7 @@ export function Inventory() {
           mode={editingId ? 'edit' : 'create'}
           productId={editingId ?? undefined}
           scopeId={scopeId}
-          onClose={() => { setFormOpen(false); setEditingId(null); reload(); }}
+          onClose={() => { setFormOpen(false); setEditingId(null); }}
           onSaved={reload}
         />
       )}

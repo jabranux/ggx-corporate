@@ -1,10 +1,11 @@
-import { useState } from 'react';
-import { Dialog } from './ui/Dialog';
+import { useRef, useState } from 'react';
+import { Dialog, ConfirmDialog } from './ui/Dialog';
 import { Button } from './ui/Button';
 import { Input } from './ui/Input';
 import { Textarea } from './ui/Textarea';
 import { Select } from './ui/Select';
 import { Switch } from './ui/Switch';
+import { useDiscardChangesGuard } from '../hooks/useDiscardChangesGuard';
 import type { Collection, CollectionInput, CollectionType } from '../services/storefrontService';
 
 const Label = ({ children }: { children: React.ReactNode }) => (
@@ -53,8 +54,15 @@ export function StorefrontCollectionDialog({
     onSubmit({ ...form, name: form.name.trim() });
   };
 
+  // This dialog always mounts fresh (parent's `{collectionDialog && ...}`
+  // conditional), so the initializer above IS the unedited baseline.
+  const initial = useRef({ ...form }).current;
+  const isDirty = () => JSON.stringify(form) !== JSON.stringify(initial);
+  const { confirmOpen: discardConfirmOpen, requestClose, keepEditing, discardChanges } =
+    useDiscardChangesGuard(isDirty, onClose);
+
   return (
-    <Dialog open={open} onClose={onClose} title={collection ? 'Edit collection' : 'New collection'} size="md">
+    <Dialog open={open} onClose={requestClose} title={collection ? 'Edit collection' : 'New collection'} size="md">
       <div className="space-y-4">
         <div>
           <Label>Collection name</Label>
@@ -92,9 +100,21 @@ export function StorefrontCollectionDialog({
       </div>
 
       <div className="flex gap-2.5 justify-end pt-4 mt-4 border-t border-gray-100">
-        <Button variant="outline" size="sm" onClick={onClose}>Cancel</Button>
+        <Button variant="outline" size="sm" onClick={requestClose}>Cancel</Button>
         <Button size="sm" disabled={!canSubmit} onClick={handleSubmit}>{collection ? 'Save changes' : 'Create collection'}</Button>
       </div>
+
+      <ConfirmDialog
+        open={discardConfirmOpen}
+        onClose={keepEditing}
+        onConfirm={discardChanges}
+        title="Discard changes?"
+        description="Your unsaved changes will be lost."
+        confirmLabel="Discard changes"
+        cancelLabel="Keep editing"
+        variant="destructive"
+        elevated
+      />
     </Dialog>
   );
 }

@@ -1,11 +1,12 @@
 import { useRef, useState } from 'react';
 import { IconUpload, IconLoader2, IconPhoto } from '@tabler/icons-react';
-import { Dialog } from './ui/Dialog';
+import { Dialog, ConfirmDialog } from './ui/Dialog';
 import { Button } from './ui/Button';
 import { Input } from './ui/Input';
 import { Textarea } from './ui/Textarea';
 import { Select } from './ui/Select';
 import { Switch } from './ui/Switch';
+import { useDiscardChangesGuard } from '../hooks/useDiscardChangesGuard';
 import { PRODUCT_CATEGORIES, type InventoryProduct } from '../services/inventoryService';
 import {
   requestStorefrontBannerUpload, uploadToPresignedUrl,
@@ -113,6 +114,23 @@ export function StorefrontBannerDialog({
   const [uploadingMobile, setUploadingMobile] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  // Dirty-form protection: this dialog always mounts fresh (its parent only
+  // renders it inside an `{open && ...}` conditional), so the props it opened
+  // with ARE the "unedited" baseline — captured once, never resynced.
+  const initial = useRef({
+    headline: banner?.headline ?? '', supportingText: banner?.supportingText ?? '',
+    ctaLabel: banner?.ctaLabel ?? '', ctaType: banner?.ctaType ?? '', ctaTargetId: banner?.ctaTargetId ?? '',
+    ctaExternalUrl: banner?.ctaExternalUrl ?? '', enabled: banner?.enabled ?? true,
+    startDate: banner?.startDate?.slice(0, 10) ?? '', endDate: banner?.endDate?.slice(0, 10) ?? '',
+  }).current;
+  const isDirty = () =>
+    headline !== initial.headline || supportingText !== initial.supportingText || ctaLabel !== initial.ctaLabel
+    || ctaType !== initial.ctaType || ctaTargetId !== initial.ctaTargetId || ctaExternalUrl !== initial.ctaExternalUrl
+    || enabled !== initial.enabled || startDate !== initial.startDate || endDate !== initial.endDate
+    || !!desktopUpload || !!mobileUpload;
+  const { confirmOpen: discardConfirmOpen, requestClose, keepEditing, discardChanges } =
+    useDiscardChangesGuard(isDirty, onClose);
+
   const validateFile = (file: File): string | null => {
     if (!ACCEPTED_TYPES.has(file.type)) return 'Use a JPG, PNG, or WebP image.';
     if (file.size > MAX_BYTES) return 'Image must be 10 MB or smaller.';
@@ -192,7 +210,7 @@ export function StorefrontBannerDialog({
   };
 
   return (
-    <Dialog open={open} onClose={onClose} title={isEdit ? 'Edit hero banner' : 'New hero banner'} size="lg">
+    <Dialog open={open} onClose={requestClose} title={isEdit ? 'Edit hero banner' : 'New hero banner'} size="lg">
       <div className="space-y-4 max-h-[65vh] overflow-y-auto pr-1">
         {isEdit ? (
           <div className="grid grid-cols-2 gap-3">
@@ -205,6 +223,14 @@ export function StorefrontBannerDialog({
             <ImageUploader label="Mobile image (optional)" previewUrl={mobileUpload?.url ?? null} uploading={uploadingMobile} onPick={pickMobile} />
           </div>
         )}
+        {/* Derived from the storefront's own banner render (`StorefrontPreview.tsx`'s
+            `BannerSlide`, full-width `object-cover` at h-64 desktop / h-40
+            mobile inside a max-w-6xl page) — recommendations, not hard
+            validation, since `object-cover` tolerates other ratios too. */}
+        <div className="grid grid-cols-2 gap-3 -mt-2">
+          <p className="text-[11px] text-gray-400">Recommended: 2000 × 500px (about 4:1)</p>
+          <p className="text-[11px] text-gray-400">Recommended: 1200 × 500px (about 2.4:1)</p>
+        </div>
         {error && <p className="text-xs text-red-600">{error}</p>}
 
         <div>
@@ -293,9 +319,21 @@ export function StorefrontBannerDialog({
       </div>
 
       <div className="flex gap-2.5 justify-end pt-4 mt-2 border-t border-gray-100">
-        <Button variant="outline" size="sm" onClick={onClose}>Cancel</Button>
+        <Button variant="outline" size="sm" onClick={requestClose}>Cancel</Button>
         <Button size="sm" disabled={!canSubmit} onClick={handleSubmit}>{isEdit ? 'Save changes' : 'Create banner'}</Button>
       </div>
+
+      <ConfirmDialog
+        open={discardConfirmOpen}
+        onClose={keepEditing}
+        onConfirm={discardChanges}
+        title="Discard changes?"
+        description="Your unsaved changes will be lost."
+        confirmLabel="Discard changes"
+        cancelLabel="Keep editing"
+        variant="destructive"
+        elevated
+      />
     </Dialog>
   );
 }
