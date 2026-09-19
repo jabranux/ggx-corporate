@@ -3,6 +3,124 @@
 > Lightweight resume/checkpoint file. Detailed June 2026 history was archived to
 > `docs/archive/session_log_2026-06.md`.
 
+## Commerce production UX/bug-fix pass (2026-09-19)
+
+First hands-on-production-testing pass over the Commerce feature landed in the
+prior session (Inventory, Storefront admin, public storefront, cart/checkout).
+Root-caused and fixed the reported bugs, added dirty-form protection, redesigned
+product pricing around an explicit "On sale" state, and closed several public-
+storefront UX gaps. Commit `0c21958`.
+
+- **Root cause for the accidental-dismiss AND Photos/Variants-tab-closes-modal
+  bugs was the same line**: `ui/Dialog.tsx`'s backdrop `onClick={onClose}` closed
+  on any click that reached it — including a click-drag that starts inside the
+  modal (e.g. across a tab trigger, or while scrolling a horizontally-scrollable
+  `TabsList`) and releases outside the panel. The browser fires that `click` on
+  the nearest common ancestor of the mousedown/mouseup targets, which is the
+  backdrop `div` itself, even though the interaction never touched it directly —
+  confirmed by reproducing it with a literal drag gesture against the
+  pre-fix code. Fixed by requiring the SAME element for both `mousedown` and
+  `click` before treating it as a real backdrop click. `Dialog` also gained
+  Escape-to-close (didn't exist before at all), restricted to the topmost open
+  dialog via a small id stack (a Codex finding — a naive global listener let one
+  Escape press close a nested dialog's parent too, e.g. a picker opened from
+  inside another dialog).
+- **Dirty-form protection** — new `hooks/useDiscardChangesGuard.ts`, applied to
+  `ProductFormDialog`, `StorefrontBannerDialog`, `StorefrontProfileDialog`, and
+  `StorefrontCollectionDialog`: backdrop click, Escape, and the Cancel/Close
+  button all funnel through one `requestClose()` that only prompts ("Discard
+  changes? / Keep editing / Discard changes") when the live form differs from
+  its last-saved snapshot; a successful save updates that snapshot so closing
+  right after never prompts. `StorefrontHomepageSectionDialog`/
+  `StorefrontProductsDialog` were left as-is (lightweight picker/quick-add forms
+  with little free-text to lose).
+- **Inventory reload-on-close bug**: `Inventory.tsx`'s dialog `onClose` called
+  `reload()` unconditionally, refetching the product list even when Add Product
+  was cancelled untouched. Removed — every real mutation already triggers
+  `onSaved` → `reload` from inside `ProductFormDialog` itself.
+- **SKU settings reachable from Add Product**: when auto-generate is off, a
+  "SKU settings" link next to the SKU field opens the existing
+  `SkuSettingsPanel` in a nested, elevated `Dialog` that never touches the
+  in-progress product form's state.
+- **Pricing redesign** (`ProductFormDialog.tsx`): default state shows one "Item
+  price"; toggling "On sale" turns that value into "Original price" and asks
+  for a new "Sale price", with a computed "`X% off · Save ₱Y`" preview and
+  validation (sale > 0, sale < original — an invalid/incomplete on-sale state
+  blocks save entirely). Maps onto the existing `unitPrice`/`compareAtPrice`
+  columns with no schema change (`unitPrice` = the effective/sale price,
+  `compareAtPrice` = the struck-through original) — loading an existing product
+  whose `compareAtPrice` is already genuinely higher than `unitPrice` opens
+  straight into the on-sale UI. Stock is now its own subsection (Unlimited
+  stock / Stock qty / Low-stock alert at) instead of being interleaved with
+  pricing fields in one four-column row.
+- **Buyer-facing sale display** — new `lib/salePricing.ts` (`getSaleInfo`)
+  shared by the storefront product grid, product detail, cart, and checkout
+  order summary: struck-through original price + "X% OFF" badge everywhere a
+  sale applies; product detail additionally shows "Save ₱Y" where space
+  permits. Normal (non-sale) products are unaffected.
+- **Public storefront** (`StorefrontPreview.tsx`): added a compact "View
+  product" eye-icon action beside Add to cart on every product card; replaced
+  the Min/Max price number inputs and the Availability dropdown with a new
+  `ui/PriceRangeSlider.tsx` (two native `<input type="range">` thumbs, no new
+  dependency) whose bounds are derived from the real catalog and which only
+  commits into the real server-side filter on drag-release/keyup, plus
+  available-first / unavailable-after grouping with an "Available again soon"
+  divider (unavailable products stay browsable but never outrank in-stock ones
+  regardless of sort).
+- **Product Detail header** (`StorefrontProductDetail.tsx`): now carries the
+  storefront's own logo/name/accent branding with an explicit "← Back to
+  store" line, replacing a bare arrow + store name; the now-redundant "Sold by
+  [Store] · Cash on Delivery" card was removed.
+- **Checkout promo controls** (`CartCheckout.tsx`): the Order Summary now shows
+  its own promo code input + Apply when none is applied yet (previously only
+  Cart could apply a code; Checkout could only display/remove one already
+  applied there). Still calls the same server-authoritative
+  `validatePromotionCode`/`redeemPromotionCode` — no client-side discount math,
+  and redemption still only fires once, at place-order. A Codex-flagged race
+  (placing an order while a promo `Apply` was still in flight could leave a
+  stale/incorrect promo state after the cart was cleared) is fixed: order
+  placement is blocked while a promo validation is pending, and an
+  `orderPlacedRef` guard drops a promo-apply response that resolves after
+  placement has started.
+- **Investigated, not reproduced**: the reported "returning from Product Detail
+  can show 'No products match your filters'" bug. Extensive live testing
+  (repeated Storefront → Product → Storefront cycles, browser Back, and the
+  in-app back link, against the real backend) always recovered correctly once
+  the fetch settled. The task's own hint ("price-slider bounds/state") pointed
+  at a real, avoidable failure mode — a slider whose just-loaded default bounds
+  get auto-committed as a real `minPrice`/`maxPrice` filter before the catalog
+  has loaded would filter out every product — so the new `PriceRangeSlider`
+  integration deliberately keeps a draft/commit split (dragging updates a local
+  display value; only drag-release/keyup writes into the real filter state)
+  specifically to avoid that. No other deterministic cause was found in the
+  effect/state guards, which already use the same `active`-flag-per-effect
+  pattern as the rest of this codebase.
+- **Codex CLI audit**: one `codex review --uncommitted` pass found 2 issues (P2
+  each), both fixed and re-verified live — the nested-dialog Escape bug and the
+  checkout promo race, both described above.
+- **Verified against the real Commerce Postgres backend** via a throwaway local
+  harness (esbuild-bundled `api/auth`/`api/commerce` handlers over plain Node
+  `http`, proxied from Vite — not committed, deleted after use, same spirit as
+  prior sessions' "throwaway esbuild-bundled local server"): drag-out no longer
+  closes/reloads Inventory; dirty-guard confirm/keep-editing/discard behave
+  correctly including through a nested SKU-settings round-trip; an on-sale
+  product created end-to-end (₱1,000 → ₱800, 20% off) shows correct sale math
+  through storefront grid → product detail → cart → checkout; a promo code
+  applied directly in Checkout discounts correctly and is visibly distinct from
+  the product's own sale discount.
+- `npm run typecheck` and `npm run build` clean. Full suite **230/230** passing
+  (`npm test`); 24 pre-existing commerce-backend test cases (in
+  `tests/api-commerce-products.test.mjs`/`tests/api-commerce-storefront-promotions.test.mjs`)
+  were cancelled in this sandbox — its `docker --version` CLI check passes but
+  there is no reachable Docker daemon, so their `before()` hook's `docker run`
+  fails; unrelated to this session's frontend-only changes (no backend/API
+  files were touched).
+- **Not done / deferred**: image upload wasn't exercised this session (no
+  `GGX_COMMERCE_R2_*` credentials in this sandbox's `.env.local`); variant
+  generation/editing wasn't re-exercised (out of scope — no variant-facing
+  code changed). Committed only (`0c21958`) — not pushed, per this repo's
+  standing rule.
+
 ## Commerce Enhancement — all 4 phases complete, Codex-audited, pending commit (2026-09-19)
 
 Full Commerce enhancement spec now implemented end-to-end: Inventory
