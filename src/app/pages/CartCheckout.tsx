@@ -375,20 +375,8 @@ export function CartCheckout() {
   return (
     <div className="min-h-screen bg-gray-50">
       <header className="bg-white border-b border-gray-200">
-        <div className="max-w-5xl mx-auto px-6 py-3 flex items-center justify-between gap-3">
-          {seller ? (
-            <Link
-              to={`/shop/${seller.slug}/cart`}
-              className="inline-flex items-center gap-1.5 text-sm font-medium text-gray-600 hover:text-gray-900 transition-colors"
-            >
-              <IconArrowLeft className="w-4 h-4" /> Back to cart
-            </Link>
-          ) : (
-            <span />
-          )}
-          <div className="flex items-center gap-2 text-sm text-gray-500">
-            <IconBuildingStore className="w-4 h-4" /> Secure checkout · Powered by GoGo Xpress
-          </div>
+        <div className="max-w-5xl mx-auto px-6 py-3 flex items-center gap-2 text-sm text-gray-500">
+          <IconBuildingStore className="w-4 h-4" /> Secure checkout · Powered by GoGo Xpress
         </div>
       </header>
 
@@ -396,6 +384,14 @@ export function CartCheckout() {
       <main className="max-w-5xl mx-auto px-6 py-8 grid grid-cols-1 lg:grid-cols-[1.85fr_1fr] gap-6 lg:gap-8 items-start">
         {/* Delivery details + payment (65%) */}
         <div className="space-y-6">
+          {seller && (
+            <Link to={`/shop/${seller.slug}/cart`}>
+              <Button variant="ghost" size="sm">
+                <IconArrowLeft className="w-4 h-4 mr-1.5" /> Back to cart
+              </Button>
+            </Link>
+          )}
+
           <Card>
             <CardContent className="p-6 space-y-4">
               <h2 className="text-base font-semibold text-gray-900">Delivery details</h2>
