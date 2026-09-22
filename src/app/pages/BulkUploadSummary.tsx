@@ -658,8 +658,10 @@ export function BulkUploadSummary() {
 
   const activeAccountName = getCurrentAccountName();
 
-  // Batch-filtered transactions deep link (opens in a new tab; uploader stays open).
-  const txnUrl = `/dashboard/transactions?view=batches&batch=${encodeURIComponent(id ?? '')}`;
+  // Canonical Batch Details deep link (opens in a new tab; uploader stays open).
+  // Same route/component/data source the Transactions "By Batch" view and a
+  // completed Recent Uploads row both resolve to — one batch, one detail page.
+  const txnUrl = `/dashboard/transactions/batches/${encodeURIComponent(id ?? '')}`;
 
   // Billing eligibility (Contract Manager-owned in the end state).
   const [billingAvailable, setBillingAvailable] = useState(true);
@@ -1096,7 +1098,7 @@ export function BulkUploadSummary() {
                 rel="noopener noreferrer"
                 className="inline-flex items-center gap-1 text-sm font-medium text-blue-600 hover:text-blue-700"
               >
-                View all in Transactions
+                View batch
                 <IconExternalLink className="w-3.5 h-3.5" />
               </a>
             ) : (
@@ -1473,7 +1475,7 @@ export function BulkUploadSummary() {
               rel="noopener noreferrer"
               className="flex w-full items-center justify-center gap-1.5 rounded-lg border border-gray-300 px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50"
             >
-              View transactions
+              View batch
               <IconExternalLink className="w-4 h-4" />
             </a>
             <Link to="/dashboard" className="block w-full text-center text-sm font-medium text-blue-600 hover:text-blue-700 py-1">

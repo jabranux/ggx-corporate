@@ -16,7 +16,7 @@ export function BulkUploadPage() {
               ['1 – File drop', 'BulkUploader (/dashboard/bulk-uploader)', 'Drag-and-drop zone, CSV template download, file type validation'],
               ['2 – Row editing', 'BulkSpreadsheet (/bulk-uploader/spreadsheet)', 'Inline editable grid, row errors highlighted in red'],
               ['3 – Summary review', 'BulkUploadSummary (/bulk-uploader/summary/:id)', 'Valid/invalid counts, Table of rows, payment method selection'],
-              ['4 – Confirmation', 'BulkUploadCompleted (/bulk-uploader/completed/:id)', 'Batch ID, success state, download waybills CTA'],
+              ['4 – Confirmation', 'Success dialog (in BulkUploadSummary) → "View batch"', 'Lightweight success state; hands off to the canonical TransactionBatchDetails page (/dashboard/transactions/batches/:batchId), Transactions-owned'],
             ]}
           />
         </Subsection>

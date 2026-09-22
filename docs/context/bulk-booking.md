@@ -66,15 +66,25 @@ Transaction created.
   SAME live per-batch row state the Review page writes
   (`data/bulkUploads.ts`'s `BatchRowsState`/`getSpreadsheetBatchRows`) —
   never hand-duplicate this data into a second list.
-- Completed Batch Details (`BulkUploadCompleted.tsx`) must read its
-  transaction table from `transactionService.getTransactionBatchById()` (the
-  same source the Transactions "By Batch" view uses), not a separate/
-  fabricated row list.
-- Bulk-upload detail pages (Review, Completed) must call
-  `bulkUploadService.canViewBulkUploadBatch()` before rendering a batch's
-  data — a manager may only view their own subaccount's batches. The Ready
-  Rows drawer inherits this scope for free (it only ever renders rows the
-  already-scoped Review page passes into it).
+- **Bulk Upload owns the upload/validation/review/payment/booking workflow
+  (Needs Review, Awaiting Payment); Transactions owns the resulting batch once
+  it's completed/booked.** There is no separate "Completed Batch Details" page
+  under Bulk Upload — a completed Recent Uploads row, the post-booking success
+  dialog's "View batch" CTA, and the Transactions "By Batch" view all resolve
+  to the SAME canonical `TransactionBatchDetails.tsx` page at
+  `/dashboard/transactions/batches/:batchId`, reading
+  `transactionService.getTransactionBatchById()` /
+  `getTransactionBatchTransactions()` — never a separate/fabricated row list
+  or a second completed-batch implementation.
+- The Review page (`BulkUploadSummary.tsx`) must call
+  `bulkUploadService.canViewBulkUploadBatch()` before rendering a batch's data
+  — a manager may only view their own subaccount's batches. The Ready Rows
+  drawer inherits this scope for free (it only ever renders rows the
+  already-scoped Review page passes into it). The canonical Batch Details page
+  enforces the equivalent account-scope rule itself (via
+  `getTransactionBatchById(batchId, subaccountId)`), independent of the
+  Bulk Upload session record — so it stays correctly scoped even for batches
+  Bulk Upload never issued (the static seed batches in Transactions).
 
 ## Upload File Preservation
 

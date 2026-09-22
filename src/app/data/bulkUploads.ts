@@ -114,9 +114,10 @@ export function getSpreadsheetBatchRows(batchId: string): SpreadsheetBatchRow[] 
  * Only rows that started in "Rows needing fixes" or "Needs review" and carry
  * real edited field data are tracked here. The larger base "no issues from the
  * start" count has no per-row mock detail (mirrors `UploadRecord.validRows`)
- * and is rendered as sample/placeholder rows by consumers, the same way
- * `BulkUploadCompleted.tsx` already represents a batch's full row count from a
- * small sample list.
+ * and is rendered as sample/placeholder rows by consumers, the same way the
+ * canonical Batch Details page (`TransactionBatchDetails.tsx`) represents a
+ * batch's full reported row count from a small concrete sample plus generated
+ * filler (see `getTransactionBatchTransactions` in `transactionService.ts`).
  */
 export interface BatchRowSnapshot {
   key: string;
@@ -158,10 +159,11 @@ export function getBatchRowsState(batchId: string): BatchRowsState {
 
 /**
  * Shared sample filler for a batch's base "validated with no issues from the
- * start" rows, which — like `BulkUploadCompleted.tsx`'s completed-batch list —
- * have no per-row mock detail beyond the batch's own valid-row count. Used by
- * both the Ready to book drawer and synthesized Transaction records (see
- * `transactionService.ts`) so the two stay visually consistent.
+ * start" rows, which — like the canonical Batch Details page's generated
+ * filler rows — have no per-row mock detail beyond the batch's own valid-row
+ * count. Used by the Ready to book drawer, synthesized Transaction records,
+ * and the Batch Details page's own filler generator (see `transactionService.ts`)
+ * so all three stay visually consistent.
  */
 export const BATCH_ROW_SAMPLE_FILLER: readonly Omit<BatchRowSnapshot, 'key'>[] = [
   { recipientName: 'Lia Santos',   mobileNumber: '+639171234501', itemName: 'UNO FLIP! Double Sided Card', location: 'Mandaluyong City, Metro Manila', declaredValue: '600', pouchSize: 'SMALL', referenceId: '', cod: 'No' },

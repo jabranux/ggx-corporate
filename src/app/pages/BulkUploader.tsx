@@ -647,10 +647,15 @@ export function BulkUploader() {
                     className={`cursor-pointer hover:bg-gray-50 ${upload.status === 'processing' ? 'opacity-70' : ''}`}
                     onClick={() => {
                       if (upload.status === 'processing') return;
-                      // Completed batches open the read-only detail page; everything
-                      // else opens the editable pre-booking review page.
+                      // Bulk Upload owns the upload/validation/review/payment/booking
+                      // workflow (Needs Review, Awaiting Payment); once a batch is
+                      // actually completed/booked, Transactions owns it — there is no
+                      // separate completed-upload detail page under Bulk Upload, so a
+                      // completed row opens the SAME canonical Batch Details page the
+                      // Transactions "By Batch" view links to (same batch id, same
+                      // route, same data — never a second/duplicated view).
                       navigate(upload.status === 'completed'
-                        ? `/dashboard/bulk-uploader/completed/${upload.id}`
+                        ? `/dashboard/transactions/batches/${upload.id}`
                         : `/dashboard/bulk-uploader/summary/${upload.id}`);
                     }}
                   >

@@ -194,18 +194,52 @@ describe('Booked batches create real Transactions at the correct lifecycle point
   });
 });
 
-describe('Completed Batch Details — same records as the main Transactions page', () => {
-  it('renders the aligned column set and links rows into Transactions, using real seeded batch data', async () => {
-    await page.goto(`${server.base}/dashboard/bulk-uploader/completed/UPLOAD-2026-05-18-002`, { waitUntil: 'networkidle' });
+describe('Completed batches converge on the canonical Transactions Batch Details page (no separate Bulk Upload completed page)', () => {
+  it('a completed Recent Uploads row navigates straight to /dashboard/transactions/batches/:batchId, not a Bulk Upload route', async () => {
+    await page.goto(`${server.base}/dashboard/bulk-uploader`, { waitUntil: 'networkidle' });
+    const row = page.locator('table tbody tr', { hasText: 'UPLOAD-2026-05-18-002' });
+    await row.waitFor({ state: 'visible', timeout: 5_000 });
+    await row.click();
+    await page.waitForURL('**/dashboard/transactions/batches/UPLOAD-2026-05-18-002', { timeout: 10_000 });
+  });
+
+  it('the old /dashboard/bulk-uploader/completed/:id route no longer exists', async () => {
+    const response = await page.goto(`${server.base}/dashboard/bulk-uploader/completed/UPLOAD-2026-05-18-002`, { waitUntil: 'networkidle' });
+    assert.ok(response, 'expected a response for the removed route');
+    const bodyText = await page.evaluate(() => document.body.innerText);
+    assert.ok(!bodyText.includes('Created transactions'), 'the retired completed-upload transaction preview must not render anywhere');
+  });
+
+  it('renders the canonical Batch Details page with the full column set (incl. Source) and links rows into Transactions, using real seeded batch data', async () => {
+    await page.goto(`${server.base}/dashboard/transactions/batches/UPLOAD-2026-05-18-002`, { waitUntil: 'networkidle' });
 
     const headers = await page.$$eval('table thead th', (ths) => ths.map((th) => th.textContent?.trim()));
-    assert.deepEqual(headers, ['Tracking Number', 'Recipient', 'Destination', 'Service Type', 'Status', 'Date']);
+    assert.deepEqual(headers, ['Tracking Number', 'Recipient', 'Destination', 'Source', 'Service Type', 'Status', 'Date', 'Actions']);
 
     const bodyText = await page.evaluate(() => document.body.innerText);
-    assert.ok(!bodyText.includes('Item Name'), 'Item Name must be removed from the completed-batch transaction table');
+    assert.ok(!bodyText.includes('Showing 1 of'), 'the old capped-sample-preview messaging must be gone');
     assert.ok(bodyText.includes('GGX-2024-89239'), 'expected the real seeded transaction linked to this batch to render');
 
     await page.click('table tbody tr');
     await page.waitForURL('**/dashboard/transactions/GGX-2024-89239', { timeout: 10_000 });
+  });
+
+  it('a manager cannot reach another subaccount\'s batch via a direct canonical URL (renders as not found, not a 403/leak)', async () => {
+    const managerSession = await signIn(server.base, 'manager');
+    const mpage = managerSession.page;
+    // The manager fixture is scoped to acme-luzon; UPLOAD-2026-05-18-003 belongs to acme-corporation.
+    await mpage.goto(`${server.base}/dashboard/transactions/batches/UPLOAD-2026-05-18-003`, { waitUntil: 'networkidle' });
+    const bodyText = await mpage.evaluate(() => document.body.innerText);
+    assert.ok(bodyText.includes('This batch could not be found'), 'a batch outside the caller\'s scope must render as not-found');
+    await managerSession.browser.close();
+  });
+
+  it('direct navigation / refresh on the canonical batch URL works', async () => {
+    await page.goto(`${server.base}/dashboard/transactions/batches/UPLOAD-2026-05-18-001`, { waitUntil: 'networkidle' });
+    const bodyText = await page.evaluate(() => document.body.innerText);
+    assert.ok(bodyText.includes('UPLOAD-2026-05-18-001'), 'the batch header must render on a direct/full page load');
+    await page.reload({ waitUntil: 'networkidle' });
+    const afterReload = await page.evaluate(() => document.body.innerText);
+    assert.ok(afterReload.includes('UPLOAD-2026-05-18-001'), 'the batch page must survive a hard refresh');
   });
 });

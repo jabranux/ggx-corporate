@@ -17,7 +17,7 @@ export function BookingFlowsPage() {
               ['Bulk uploader (CSV)', '/dashboard/bulk-uploader', 'BulkUploader.tsx'],
               ['In-app spreadsheet', '/dashboard/bulk-uploader/spreadsheet', 'BulkSpreadsheet.tsx'],
               ['Upload summary / review', '/dashboard/bulk-uploader/summary/:id', 'BulkUploadSummary.tsx'],
-              ['Completed batch', '/dashboard/bulk-uploader/completed/:id', 'BulkUploadCompleted.tsx'],
+              ['Completed batch (Transactions-owned)', '/dashboard/transactions/batches/:batchId', 'TransactionBatchDetails.tsx'],
             ]}
           />
         </Subsection>

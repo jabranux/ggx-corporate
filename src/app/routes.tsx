@@ -32,10 +32,10 @@ import { Login } from './pages/Login';
 import { DashboardWrapper } from './pages/DashboardWrapper';
 import { Transactions } from './pages/Transactions';
 import { TransactionDetails } from './pages/TransactionDetails';
+import { TransactionBatchDetails } from './pages/TransactionBatchDetails';
 import { BulkUploader } from './pages/BulkUploader';
 import { BulkSpreadsheet } from './pages/BulkSpreadsheet';
 import { BulkUploadSummary } from './pages/BulkUploadSummary';
-import { BulkUploadCompleted } from './pages/BulkUploadCompleted';
 // Code-split the recharts-heavy analytics page into its own chunk (keeps the
 // main bundle smaller; resolves the long-standing bundle-size warning).
 const DataAnalytics = lazy(() => import('./pages/DataAnalytics').then((m) => ({ default: m.DataAnalytics })));
@@ -190,6 +190,9 @@ export const router = createBrowserRouter([
       // Shared (Admin + Manager)
       { index: true, Component: DashboardWrapper },
       { path: 'transactions', Component: Transactions },
+      // Dedicated Batch Details route (static segment) — never ambiguous with
+      // `transactions/:id` below, which only ever matches a single segment.
+      { path: 'transactions/batches/:batchId', Component: TransactionBatchDetails },
       { path: 'transactions/:id', Component: TransactionDetails },
       { path: 'claims', Component: Claims },
       { path: 'claims/:id', Component: ClaimDetail },
@@ -200,8 +203,9 @@ export const router = createBrowserRouter([
       // In-app spreadsheet entry — a focused step within Bulk Booking (no sidebar item).
       { path: 'bulk-uploader/spreadsheet', Component: BulkSpreadsheet },
       { path: 'bulk-uploader/summary/:id', Component: BulkUploadSummary },
-      // Completed batches open a read-only detail page (no editable review grid).
-      { path: 'bulk-uploader/completed/:id', Component: BulkUploadCompleted },
+      // Completed/booked batches have no separate Bulk Upload detail page —
+      // Recent Uploads routes them straight to the canonical
+      // `transactions/batches/:batchId` Batch Details page (Transactions-owned).
       { path: 'bulk-upload-summary', Component: BulkUploadSummary },
       {
         path: 'analytics',

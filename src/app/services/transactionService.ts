@@ -99,6 +99,7 @@ import {
   getSpreadsheetBatchRows,
   buildBatchRowFiller,
   spreadsheetRowToBatchRowSnapshot,
+  BATCH_ROW_SAMPLE_FILLER,
   type UploadRecord,
   type BatchRowSnapshot,
 } from '../data/bulkUploads';
@@ -367,7 +368,21 @@ export async function getTransactionById(
   // otherwise a freshly-booked batch's rows would be visible (and clickable)
   // in the Transactions list but 404 on their own detail page.
   const bulk = synthesizedBulkBatchTransactions().find((t) => t.trackingNumber === trackingNumber);
-  return bulk ?? null;
+  if (bulk) return bulk;
+  // Fall back to a generated Batch Details filler row (see
+  // `getTransactionBatchTransactions`/`paginateBatchTransactions`) — a large
+  // batch's rows beyond its small concrete sample must still resolve on their
+  // own detail page (the table's "View" action links every row, not just the
+  // concrete ones), exactly like a real seed/bulk row.
+  const filler = parseFillerTracking(trackingNumber);
+  if (filler) {
+    const group = await getTransactionBatchById(filler.batchId);
+    const fillerCount = group ? group.counts.total - group.transactions.length : 0;
+    if (group && filler.fillerIndex >= 0 && filler.fillerIndex < fillerCount) {
+      return fillerRowToTransaction(group, filler.fillerIndex, fillerStatusBuckets(group));
+    }
+  }
+  return null;
 }
 
 /**
@@ -578,7 +593,8 @@ function batchUploadedDate(batchId: string): string {
 
 /** Roll-up status from a count breakdown (used for backend-reported counts). */
 function rollupStatusFromCounts(c: BatchCounts): { label: string; variant: StatusVariant } {
-  if (c.total > 0 && c.delivered === c.total) return { label: 'Complete', variant: 'success' };
+  if (c.total === 0) return { label: 'Empty', variant: 'default' };
+  if (c.delivered === c.total) return { label: 'Complete', variant: 'success' };
   if (c.inProgress > 0) return { label: 'In Progress', variant: 'info' };
   if (c.failed === c.total) return { label: 'Failed', variant: 'danger' };
   return { label: 'Partial', variant: 'warning' };
@@ -617,6 +633,21 @@ export async function getTransactionBatches(
     map.get(key)!.items.push(tx);
   }
 
+  // A booked (awaiting-payment/completed) Bulk Upload batch with zero valid
+  // rows produces zero synthesized transactions (`buildTransactionsFromBulkBatch`)
+  // and so would otherwise never appear above — indistinguishable from a
+  // nonexistent batch id. It's still a real, existing (empty) batch, so seed an
+  // entry for it directly from the upload record.
+  for (const record of getSessionUploads()) {
+    if (record.status !== 'awaiting-payment' && record.status !== 'completed') continue;
+    if (map.has(record.id)) continue;
+    if (subaccountId && subaccountId !== 'main' && record.accountId !== subaccountId) continue;
+    map.set(record.id, {
+      batch: { batchId: record.id, fileName: record.fileName, uploadedVia: 'bulk_upload', accountId: record.accountId, accountName: record.accountName },
+      items: [],
+    });
+  }
+
   const summaryIndex = allSummaries();
   const groups: TransactionBatchGroup[] = Array.from(map.values()).map(({ batch, items }) => {
     const summaries = items
@@ -648,12 +679,249 @@ export async function getTransactionBatches(
 
 /**
  * Return the single batch group for one batch id (used by the Completed Batch
- * Details page so it renders the SAME transaction records the main
- * Transactions "By Batch" view does — not a separate/copied dataset).
+ * Details page and the dedicated Batch Details page so both render the SAME
+ * transaction records the main Transactions "By Batch" view does — not a
+ * separate/copied dataset).
+ *
+ * `subaccountId` enforces the same account/tenant isolation as
+ * `getTransactionBatches` — a manager (or an admin drilled into a specific
+ * subaccount) passing another account's batch id gets `null`, identical to a
+ * genuinely nonexistent id ("don't reveal existence", same convention as the
+ * Ops Requests proxy routes). Omit it only for an already-scoped caller (e.g.
+ * a session-owned Bulk Upload record already checked by
+ * `canViewBulkUploadBatch`).
  */
-export async function getTransactionBatchById(batchId: string): Promise<TransactionBatchGroup | null> {
-  const groups = await getTransactionBatches();
+export async function getTransactionBatchById(
+  batchId: string,
+  subaccountId?: string
+): Promise<TransactionBatchGroup | null> {
+  const groups = await getTransactionBatches(subaccountId);
   return groups.find((g) => g.batch.batchId === batchId) ?? null;
+}
+
+// ─── Paginated batch transactions (dedicated Batch Details page) ───────────
+//
+// The batch groups above carry only the batch's CONCRETE sample transaction
+// records (real seed rows / real synthesized Bulk Upload rows). A batch's
+// backend-reported `counts.total` can run into the hundreds or thousands —
+// far more than the concrete rows this mock seed maintains per batch — so a
+// real batch detail page cannot just render `group.transactions`. This mirrors
+// a real backend: the concrete rows are returned first (page 0..N), and any
+// remaining reported count is filled by deterministic, indexable sample rows
+// generated ON DEMAND per requested index — never materializing the full
+// batch in memory or in the DOM. Treat this the same as every other
+// "sample precomputed field" in this file: it stands in for a real paginated
+// `GET /transactions/batches/:id/transactions?page=&pageSize=&search=` BFF
+// endpoint, not frontend-owned business logic.
+
+export interface BatchTransactionsQuery {
+  /** 1-based page number. */
+  page: number;
+  pageSize: number;
+  /** Matches tracking number or recipient (case-insensitive substring). */
+  search?: string;
+  status?: TransactionStatus | 'all';
+}
+
+export interface BatchTransactionsPage {
+  items: TransactionSummary[];
+  /** Total rows matching the query (before pagination, after search/status filter). */
+  total: number;
+  page: number;
+  pageSize: number;
+}
+
+/** Remaining status buckets to distribute across generated filler rows, after subtracting the batch's own concrete rows. */
+function fillerStatusBuckets(group: TransactionBatchGroup): { delivered: number; inProgress: number; failed: number } {
+  const { counts, transactions: items } = group;
+  const realDelivered = items.filter((t) => t.status === 'delivered').length;
+  const realFailed = items.filter((t) => t.status === 'failed' || t.status === 'returned' || t.status === 'cancelled').length;
+  const realInProgress = items.length - realDelivered - realFailed;
+  return {
+    delivered: Math.max(0, counts.delivered - realDelivered),
+    inProgress: Math.max(0, counts.inProgress - realInProgress),
+    failed: Math.max(0, counts.failed - realFailed),
+  };
+}
+
+function fillerStatusAt(index: number, buckets: { delivered: number; inProgress: number; failed: number }): TransactionStatus {
+  if (index < buckets.delivered) return 'delivered';
+  if (index < buckets.delivered + buckets.inProgress) return 'in-transit';
+  if (index < buckets.delivered + buckets.inProgress + buckets.failed) return 'failed';
+  return 'delivered'; // overflow past the reported buckets — default to the majority-case outcome
+}
+
+/** Build a generated filler row's tracking number (parsed back by `parseFillerTracking`). */
+function fillerTrackingNumber(batchId: string, fillerIndex: number): string {
+  return `${batchId}-${String(fillerIndex + 1).padStart(5, '0')}`;
+}
+
+/**
+ * Parse a generated filler tracking number back into its originating batch id
+ * + 0-based filler index, so `getTransactionById` can resolve a filler row's
+ * own detail page. Returns `null` for anything else (a real tracking number —
+ * this app's real trackings never end in a bare 5-digit segment).
+ */
+function parseFillerTracking(tracking: string): { batchId: string; fillerIndex: number } | null {
+  const m = tracking.match(/^(.+)-(\d{5})$/);
+  if (!m) return null;
+  return { batchId: m[1], fillerIndex: Number(m[2]) - 1 };
+}
+
+/** Generate one deterministic filler row for a batch at a given filler-local index (0-based, beyond the concrete rows). */
+function fillerBatchRowAt(
+  group: TransactionBatchGroup,
+  fillerIndex: number,
+  buckets: { delivered: number; inProgress: number; failed: number }
+): TransactionSummary {
+  const sample = BATCH_ROW_SAMPLE_FILLER[fillerIndex % BATCH_ROW_SAMPLE_FILLER.length];
+  return {
+    tracking: fillerTrackingNumber(group.batch.batchId, fillerIndex),
+    recipient: sample.recipientName,
+    destination: sample.location,
+    status: fillerStatusAt(fillerIndex, buckets),
+    type: 'Standard',
+    serviceType: 'standard',
+    date: group.uploadedDate,
+    subaccount: group.batch.accountName ?? '—',
+    source: 'bulk_upload',
+    sourceType: 'bulk_upload',
+  };
+}
+
+/**
+ * Build a full (minimal but real-shaped) `Transaction` for a generated filler
+ * row, so it resolves on its own detail page (`getTransactionById`) exactly
+ * like a real seed/bulk-upload row — same sender/fees/payment defaults as
+ * `buildTransactionsFromBulkBatch` uses for real Bulk Upload rows, since a
+ * filler row IS presentationally a bulk-upload delivery, just one this mock
+ * seed has no unique per-row detail for.
+ */
+function fillerRowToTransaction(
+  group: TransactionBatchGroup,
+  fillerIndex: number,
+  buckets: { delivered: number; inProgress: number; failed: number }
+): Transaction {
+  const summary = fillerBatchRowAt(group, fillerIndex, buckets);
+  const attribution: OrderAttribution = {
+    accountScope: group.batch.accountId ? 'subaccount' : 'main',
+    sourceType: 'bulk_upload',
+    bookingMethod: 'bulk_template_upload',
+  };
+  return {
+    trackingNumber: summary.tracking,
+    destination: summary.destination,
+    type: 'Standard',
+    serviceType: summary.serviceType,
+    status: summary.status,
+    date: summary.date,
+    subaccount: summary.subaccount,
+    source: 'bulk_upload',
+    attribution,
+    createdAt: summary.date,
+    pickupDate: summary.date,
+    deliveryDate: summary.status === 'delivered' ? summary.date : '—',
+    sender: BULK_TX_SENDER,
+    recipient: { name: summary.recipient, contactNumber: '—', address: summary.destination },
+    items: [{ name: 'Item', quantity: 1, description: 'Bulk Upload item', price: 0 }],
+    packaging: { size: 'SMALL', dimensions: '30cm x 20cm x 15cm', weight: '1 kg' },
+    store: { name: group.batch.fileName, url: '—' },
+    fees: { serviceFee: 0, shippingFee: 120, protectionFee: 0, discount: 0, processingFee: 0 },
+    payment: { method: 'Prepaid', paidBy: 'Sender', codAmount: 0 },
+    timeline: [],
+    batch: group.batch,
+  };
+}
+
+/** Resolve the row at a global 0-based index within a batch's full (reported) row count. */
+function batchRowAt(group: TransactionBatchGroup, index: number, buckets: { delivered: number; inProgress: number; failed: number }): TransactionSummary {
+  if (index < group.transactions.length) return group.transactions[index];
+  return fillerBatchRowAt(group, index - group.transactions.length, buckets);
+}
+
+function matchesBatchRowQuery(row: TransactionSummary, search: string, status?: TransactionStatus | 'all'): boolean {
+  if (status && status !== 'all' && row.status !== status) return false;
+  if (!search) return true;
+  const q = search.toLowerCase();
+  return row.tracking.toLowerCase().includes(q) || row.recipient.toLowerCase().includes(q);
+}
+
+/**
+ * Pure, synchronous pagination over an ALREADY-RESOLVED batch group. Exposed
+ * so a caller that already holds the group (e.g. the Batch Details page,
+ * which loads it once for the header) can page/search/filter without
+ * re-resolving the batch (and re-scanning every batch in the app) on every
+ * page click or keystroke — `getTransactionBatchTransactions` below is a thin
+ * async wrapper over this for callers that don't already have the group.
+ *
+ * With no search/status filter this only ever computes the requested page
+ * window (`pageSize` rows), never the full reported total. A search/status
+ * filter requires scanning the full reported range to find matches — the
+ * same cost profile as an unindexed backend table scan — but the result
+ * (and therefore the DOM) is still capped at one page.
+ */
+export function paginateBatchTransactions(
+  group: TransactionBatchGroup,
+  query: BatchTransactionsQuery
+): BatchTransactionsPage {
+  const page = Math.max(1, Math.floor(query.page));
+  const pageSize = Math.max(1, Math.floor(query.pageSize));
+  const search = query.search?.trim().toLowerCase() ?? '';
+  const statusFilter = query.status;
+  const total = group.counts.total;
+  const buckets = fillerStatusBuckets(group);
+
+  if (!search && (!statusFilter || statusFilter === 'all')) {
+    const start = (page - 1) * pageSize;
+    const items = Array.from(
+      { length: Math.max(0, Math.min(pageSize, total - start)) },
+      (_, i) => batchRowAt(group, start + i, buckets)
+    );
+    return { items, total, page, pageSize };
+  }
+
+  const matches: TransactionSummary[] = [];
+  for (let i = 0; i < total; i++) {
+    const row = batchRowAt(group, i, buckets);
+    if (matchesBatchRowQuery(row, search, statusFilter)) matches.push(row);
+  }
+  const start = (page - 1) * pageSize;
+  return { items: matches.slice(start, start + pageSize), total: matches.length, page, pageSize };
+}
+
+/**
+ * Return one page of a batch's transactions, scoped/authorized the same way
+ * as `getTransactionBatchById` — a batch outside `subaccountId`'s scope
+ * resolves as `null`, indistinguishable from a nonexistent batch id. Resolves
+ * the batch group itself, then delegates to `paginateBatchTransactions` — a
+ * caller that already has the group (see above) should call that directly
+ * instead of paying for a fresh batch resolution on every page/search change.
+ */
+export async function getTransactionBatchTransactions(
+  batchId: string,
+  query: BatchTransactionsQuery,
+  subaccountId?: string
+): Promise<BatchTransactionsPage | null> {
+  const group = await getTransactionBatchById(batchId, subaccountId);
+  if (!group) return null;
+  return paginateBatchTransactions(group, query);
+}
+
+/**
+ * Return every row of a batch (respecting the same scope/authorization rule)
+ * for client-side CSV export. Only called on an explicit user Export action —
+ * never as part of rendering the paginated table — mirroring how a real
+ * export would hit a separate full-data endpoint/job rather than the
+ * paginated read path.
+ */
+export async function getAllTransactionBatchRows(
+  batchId: string,
+  subaccountId?: string
+): Promise<TransactionSummary[] | null> {
+  const group = await getTransactionBatchById(batchId, subaccountId);
+  if (!group) return null;
+  const buckets = fillerStatusBuckets(group);
+  return Array.from({ length: group.counts.total }, (_, i) => batchRowAt(group, i, buckets));
 }
 
 // ─── Detail totals ───────────────────────────────────────────────────────────

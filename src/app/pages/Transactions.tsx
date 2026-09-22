@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router';
 import {
   IconDownload, IconEye, IconPackages, IconList,
-  IconChevronDown, IconChevronRight, IconTag,
+  IconChevronRight, IconTag,
 } from '@tabler/icons-react';
 import { Card, CardContent, CardHeader } from '../components/ui/Card';
 import { Button } from '../components/ui/Button';
@@ -26,6 +26,7 @@ import {
   getTransactions,
   getTransactionsBySubaccountId,
   getTransactionBatches,
+  getAllTransactionBatchRows,
   statusConfig,
   subaccountDisplayLabel,
   sourceTypeLabel,
@@ -40,6 +41,20 @@ import {
 const SOURCE_FILTER_OPTIONS: SourceType[] = [
   'ggx_dashboard', 'bulk_upload', 'api', 'shopify', 'gobenta', 'product_checkout',
 ];
+
+function csvCell(value: string): string {
+  return /[",\n]/.test(value) ? `"${value.replace(/"/g, '""')}"` : value;
+}
+
+function downloadCsv(filename: string, content: string): void {
+  const blob = new Blob([content], { type: 'text/csv;charset=utf-8;' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = filename;
+  a.click();
+  URL.revokeObjectURL(url);
+}
 
 // ─── component ──────────────────────────────────────────────────────────────
 
@@ -74,11 +89,12 @@ export function Transactions() {
   );
   const showStoreOrders = commerceEnabled && activeTab === 'store-orders';
 
-  // View mode: flat list vs. grouped by batch. A `?batch=<id>` deep link (used by
-  // the Bulk Upload "View transactions" new-tab links) opens the By Batch view
-  // pre-expanded on that batch.
-  const initialBatch = searchParams.get('batch');
-  const [viewMode, setViewMode] = useState<'all' | 'batches'>(initialBatch ? 'batches' : 'all');
+  // View mode: flat list vs. grouped by batch. `?tab=batches` (used by the
+  // Batch Details page's "Back to Transactions" action) opens directly on the
+  // By Batch view.
+  const [viewMode, setViewMode] = useState<'all' | 'batches'>(
+    searchParams.get('tab') === 'batches' ? 'batches' : 'all'
+  );
 
   // "All Transactions" filter state
   const [statusFilter, setStatusFilter] = useState('all');
@@ -86,9 +102,6 @@ export function Transactions() {
   const [sourceFilter, setSourceFilter] = useState('all');
   const [subaccountFilter, setSubaccountFilter] = useState('all');
   const [searchQuery, setSearchQuery] = useState('');
-
-  // "By Batch" state
-  const [expandedBatch, setExpandedBatch] = useState<string | null>(initialBatch);
 
   // Service-backed data
   const [allDeliveries, setAllDeliveries] = useState<TransactionSummary[]>([]);
@@ -117,6 +130,21 @@ export function Transactions() {
       .catch(() => { if (!cancelled) setLoadError('Unable to load batches.'); });
     return () => { cancelled = true; };
   }, [scopeId]);
+
+  // Export a batch's full transaction list as CSV directly from the By Batch
+  // list — kept as a SECONDARY action alongside "View batch" (never the only
+  // way to inspect a batch's contents). Scoped the same way as the batch list.
+  const exportBatchCsv = (batchId: string) => {
+    getAllTransactionBatchRows(batchId, scopeId).then((rows) => {
+      if (!rows) return;
+      const header = ['Tracking Number', 'Recipient', 'Destination', 'Source', 'Service Type', 'Status', 'Date'];
+      const lines = rows.map((r) => [
+        r.tracking, r.recipient, r.destination, sourceTypeLabel(r),
+        SERVICE_TYPE_SHORT_LABEL[r.serviceType], statusConfig[r.status].label, r.date,
+      ].map(csvCell).join(','));
+      downloadCsv(`${batchId}.csv`, [header.join(','), ...lines].join('\n'));
+    });
+  };
 
   // ── All Transactions view (presentation-only filtering) ────────────────────
   const q = searchQuery.trim().toLowerCase();
@@ -342,158 +370,110 @@ export function Transactions() {
                 </p>
               </CardContent>
             </Card>
-          ) : batchGroups.map(({ batch, transactions: items, counts, status: st, uploadedDate }) => {
-            const isExpanded = expandedBatch === batch.batchId;
+          ) : batchGroups.map(({ batch, counts, status: st, uploadedDate }) => {
             const { total, delivered, inProgress, failed } = counts;
-            // Compact, consistent count breakdown (dot + value + label) — replaces
-            // the old row of competing colored badges.
+            // Compact, consistent count breakdown (dot + value + label).
             const countStats = [
               { label: 'Total',     value: total,      dot: 'bg-gray-300' },
               { label: 'Delivered', value: delivered,  dot: 'bg-emerald-500' },
               { label: 'Active',    value: inProgress, dot: 'bg-blue-500' },
               { label: 'Failed',    value: failed,     dot: 'bg-red-500' },
             ];
+            const openBatch = () => navigate(`/dashboard/transactions/batches/${encodeURIComponent(batch.batchId)}`);
 
             return (
               <Card key={batch.batchId}>
-                {/* Batch summary row — click to expand */}
-                <button
-                  className="w-full text-left cursor-pointer"
-                  onClick={() => setExpandedBatch(isExpanded ? null : batch.batchId)}
-                >
-                  <CardContent className="p-5">
-                    <div className="flex items-center gap-4">
-                      {/* Expand icon */}
-                      <div className="flex-shrink-0 text-gray-400">
-                        {isExpanded
-                          ? <IconChevronDown className="w-5 h-5" />
-                          : <IconChevronRight className="w-5 h-5" />}
-                      </div>
-
-                      {/* Batch icon */}
-                      <div className="w-10 h-10 rounded-lg bg-blue-50 flex items-center justify-center flex-shrink-0">
-                        <IconPackages className="w-5 h-5 text-blue-600" />
-                      </div>
-
-                      {/* Batch details */}
-                      <div className="flex-1 min-w-0">
-                        <div className="flex flex-wrap items-center gap-2">
-                          <span className="font-semibold text-gray-900 text-sm">{batch.batchId}</span>
-                          <Badge variant={st.variant}>{st.label}</Badge>
-                          {mainView && batch.accountName && (
-                            <span className="inline-flex items-center gap-1 text-xs text-gray-500 bg-gray-100 rounded-full px-2 py-0.5">
-                              <IconTag className="w-3 h-3" />
-                              {batch.accountName}
-                            </span>
-                          )}
-                        </div>
-                        <p className="text-sm text-gray-500 mt-0.5 truncate">
-                          {batch.fileName} · Uploaded {uploadedDate}
-                        </p>
-                      </div>
-
-                      {/* Counter stats — compact, consistent format */}
-                      <div className="hidden sm:flex items-center gap-5 flex-shrink-0 tabular-nums">
-                        {countStats.map((s) => (
-                          <div key={s.label} className="flex flex-col items-end leading-tight">
-                            <span className="text-sm font-semibold text-gray-900">{s.value.toLocaleString()}</span>
-                            <span className="flex items-center gap-1 text-[11px] text-gray-400">
-                              <span className={`w-1.5 h-1.5 rounded-full ${s.dot}`} />
-                              {s.label}
-                            </span>
-                          </div>
-                        ))}
-                      </div>
-
-                      {/* Download action — stopPropagation so it doesn't toggle expand */}
-                      <Button
-                        variant="ghost" size="sm" iconEnd
-                        className="hidden sm:flex flex-shrink-0 text-gray-500 hover:text-gray-700 text-xs"
-                        onClick={(e) => e.stopPropagation()}
-                      >
-                        Export
-                        <IconDownload className="w-3.5 h-3.5" />
-                      </Button>
+                {/* Compact summary only — clicking anywhere in the card area opens
+                    the dedicated Batch Details page (no inline expansion/preview).
+                    A plain div (not a nested <button>) so the real "View batch" /
+                    "Export" buttons inside stay valid, independently focusable
+                    controls instead of invalid nested interactive elements. */}
+                <CardContent className="p-5 cursor-pointer" onClick={openBatch}>
+                  <div className="flex items-center gap-4">
+                    {/* Batch icon */}
+                    <div className="w-10 h-10 rounded-lg bg-blue-50 flex items-center justify-center flex-shrink-0">
+                      <IconPackages className="w-5 h-5 text-blue-600" />
                     </div>
 
-                    {/* Delivery progress bar — shown below the row */}
-                    {total > 0 && (
-                      <div className="mt-3 mx-0 hidden sm:block">
-                        <div className="h-1 w-full bg-gray-100 rounded-full overflow-hidden">
-                          <div
-                            className="h-full bg-emerald-500 rounded-full"
-                            style={{ width: `${Math.round((delivered / total) * 100)}%` }}
-                          />
-                        </div>
-                        <p className="text-[11px] text-gray-400 mt-0.5">{Math.round((delivered / total) * 100)}% delivered</p>
+                    {/* Batch details */}
+                    <div className="flex-1 min-w-0">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <span className="font-semibold text-gray-900 text-sm">{batch.batchId}</span>
+                        <Badge variant={st.variant}>{st.label}</Badge>
+                        {mainView && batch.accountName && (
+                          <span className="inline-flex items-center gap-1 text-xs text-gray-500 bg-gray-100 rounded-full px-2 py-0.5">
+                            <IconTag className="w-3 h-3" />
+                            {batch.accountName}
+                          </span>
+                        )}
                       </div>
-                    )}
+                      <p className="text-sm text-gray-500 mt-0.5 truncate">
+                        {batch.fileName} · Uploaded {uploadedDate}
+                      </p>
+                    </div>
 
-                    {/* Mobile counts — same compact format, inline */}
-                    <div className="sm:hidden flex flex-wrap items-center gap-x-4 gap-y-1 mt-3 ml-14 tabular-nums">
+                    {/* Counter stats — compact, consistent format */}
+                    <div className="hidden sm:flex items-center gap-5 flex-shrink-0 tabular-nums">
                       {countStats.map((s) => (
-                        <span key={s.label} className="flex items-center gap-1 text-xs text-gray-500">
-                          <span className={`w-1.5 h-1.5 rounded-full ${s.dot}`} />
-                          <span className="font-semibold text-gray-900">{s.value.toLocaleString()}</span> {s.label}
-                        </span>
+                        <div key={s.label} className="flex flex-col items-end leading-tight">
+                          <span className="text-sm font-semibold text-gray-900">{s.value.toLocaleString()}</span>
+                          <span className="flex items-center gap-1 text-[11px] text-gray-400">
+                            <span className={`w-1.5 h-1.5 rounded-full ${s.dot}`} />
+                            {s.label}
+                          </span>
+                        </div>
                       ))}
                     </div>
-                  </CardContent>
-                </button>
 
-                {/* Expanded transaction list */}
-                {isExpanded && (
-                  <div className="border-t border-gray-100">
-                    <Table className="[&_td]:whitespace-nowrap [&_th]:whitespace-nowrap">
-                      <TableHeader>
-                        <TableRow>
-                          <TableHead>Tracking Number</TableHead>
-                          <TableHead>Recipient</TableHead>
-                          <TableHead>Destination</TableHead>
-                          <TableHead>Service Type</TableHead>
-                          <TableHead>Status</TableHead>
-                          <TableHead>Date</TableHead>
-                          <TableHead>Actions</TableHead>
-                        </TableRow>
-                      </TableHeader>
-                      <TableBody>
-                        {items.map((tx) => (
-                          <TableRow
-                            key={tx.tracking}
-                            className="cursor-pointer hover:bg-gray-50 transition-colors"
-                            onClick={() => navigate(`/dashboard/transactions/${tx.tracking}`)}
-                          >
-                            <TableCell className="font-medium">{tx.tracking}</TableCell>
-                            <TableCell>{tx.recipient}</TableCell>
-                            <TableCell>{tx.destination}</TableCell>
-                            <TableCell>
-                              <ServiceTypeBadge serviceType={tx.serviceType} />
-                            </TableCell>
-                            <TableCell>
-                              <Badge variant={statusConfig[tx.status].variant}>
-                                {statusConfig[tx.status].label}
-                              </Badge>
-                            </TableCell>
-                            <TableCell className="text-gray-600">{tx.date}</TableCell>
-                            <TableCell>
-                              <Button variant="ghost" size="sm">
-                                <IconEye className="w-4 h-4 mr-1" />
-                                View
-                              </Button>
-                            </TableCell>
-                          </TableRow>
-                        ))}
-                      </TableBody>
-                    </Table>
-                    {items.length < total && (
-                      <div className="px-5 py-3 border-t border-gray-100">
-                        <p className="text-xs text-gray-400">
-                          Showing {items.length.toLocaleString()} of {total.toLocaleString()} transactions in this batch. Use Export for the full list.
-                        </p>
-                      </div>
-                    )}
+                    {/* Export is a secondary, explicit action — never the only way
+                        to inspect a batch's contents (desktop only; the compact
+                        mobile card keeps just the primary "View batch" action). */}
+                    <Button
+                      variant="ghost" size="sm"
+                      className="hidden sm:flex flex-shrink-0 text-gray-500 hover:text-gray-700 text-xs"
+                      onClick={(e) => { e.stopPropagation(); exportBatchCsv(batch.batchId); }}
+                    >
+                      Export
+                      <IconDownload className="w-3.5 h-3.5 ml-1" />
+                    </Button>
                   </div>
-                )}
+
+                  {/* Delivery progress bar — shown below the row */}
+                  {total > 0 && (
+                    <div className="mt-3 mx-0 hidden sm:block">
+                      <div className="h-1 w-full bg-gray-100 rounded-full overflow-hidden">
+                        <div
+                          className="h-full bg-emerald-500 rounded-full"
+                          style={{ width: `${Math.round((delivered / total) * 100)}%` }}
+                        />
+                      </div>
+                      <p className="text-[11px] text-gray-400 mt-0.5">{Math.round((delivered / total) * 100)}% delivered</p>
+                    </div>
+                  )}
+
+                  {/* Mobile counts — same compact format, inline */}
+                  <div className="sm:hidden flex flex-wrap items-center gap-x-4 gap-y-1 mt-3 ml-14 tabular-nums">
+                    {countStats.map((s) => (
+                      <span key={s.label} className="flex items-center gap-1 text-xs text-gray-500">
+                        <span className={`w-1.5 h-1.5 rounded-full ${s.dot}`} />
+                        <span className="font-semibold text-gray-900">{s.value.toLocaleString()}</span> {s.label}
+                      </span>
+                    ))}
+                  </div>
+
+                  {/* Primary "View batch" action — a real, focusable button at every
+                      breakpoint (mirrors the main table's row + explicit "View"
+                      action convention), not just the clickable card area. */}
+                  <div className="mt-3 sm:mt-3 flex justify-end">
+                    <Button
+                      variant="outline" size="sm" iconEnd
+                      onClick={(e) => { e.stopPropagation(); openBatch(); }}
+                    >
+                      View batch
+                      <IconChevronRight className="w-3.5 h-3.5" />
+                    </Button>
+                  </div>
+                </CardContent>
               </Card>
             );
           })}
