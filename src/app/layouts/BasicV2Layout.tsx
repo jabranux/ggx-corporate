@@ -130,7 +130,7 @@ export function BasicV2Layout() {
       {/* Phone shell — gradient background */}
       <div
         className="relative mx-auto flex h-screen w-full max-w-[430px] flex-col overflow-hidden"
-        style={{ background: 'linear-gradient(180deg, #DDF3FB 0%, #ffffff 100%)' }}
+        style={{ background: 'linear-gradient(180deg, #DDF3FB 0%, #ffffff 100%)', '--basic-shell-max': '430px' } as React.CSSProperties}
       >
         {/* ── Header — transparent so gradient shows through ── */}
         <header className="relative z-10 flex-shrink-0 flex h-14 items-center justify-between px-4">

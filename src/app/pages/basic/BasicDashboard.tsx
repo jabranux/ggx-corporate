@@ -137,7 +137,7 @@ export function BasicDashboard() {
             <button
               key={tile.label}
               onClick={() => navigate(tile.href)}
-              className="relative flex flex-1 cursor-pointer flex-col items-center"
+              className="relative flex min-w-0 flex-1 cursor-pointer flex-col items-center"
               style={{ background: 'none', border: 'none', padding: 0 }}
             >
               {/* Badge */}
@@ -165,7 +165,7 @@ export function BasicDashboard() {
                 <img
                   src={tile.img}
                   alt={tile.label.replace('\n', ' ')}
-                  className="h-[62px] w-[62px] object-contain"
+                  className="h-[62px] w-[62px] max-w-full object-contain"
                 />
               </div>
 
@@ -192,10 +192,10 @@ export function BasicDashboard() {
             <Link
               key={tile.label}
               to={tile.href}
-              className="flex flex-1 flex-col items-center active:opacity-70 transition-opacity"
+              className="flex min-w-0 flex-1 flex-col items-center active:opacity-70 transition-opacity"
             >
-              <div className="flex h-[56px] w-[56px] items-center justify-center">
-                <img src={tile.img} alt={tile.label} className="h-[50px] w-[50px] object-contain" />
+              <div className="flex h-[56px] w-full max-w-[56px] items-center justify-center">
+                <img src={tile.img} alt={tile.label} className="h-[50px] w-[50px] max-w-full object-contain" />
               </div>
               <span
                 className="mt-[6px] text-center text-[10.5px] font-bold"

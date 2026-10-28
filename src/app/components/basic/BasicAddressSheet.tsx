@@ -42,7 +42,7 @@ export function BasicAddressSheet({ open, onClose, onSelect, title = 'Address Bo
     >
       {/* Sheet panel */}
       <div
-        className="relative w-full max-w-[430px] mx-auto rounded-t-[24px] bg-white flex flex-col"
+        className="relative w-full max-w-[var(--basic-shell-max,none)] mx-auto rounded-t-[24px] bg-white flex flex-col"
         style={{ maxHeight: '82vh' }}
         onClick={(e) => e.stopPropagation()}
       >

@@ -56,12 +56,12 @@ export function BasicLayout() {
   const pageTitle = resolveTitle(location.pathname);
 
   return (
-    /* Desktop backdrop */
+    /* Page backdrop (shell is fluid; only visible if the shell is ever inset) */
     <div className="min-h-screen bg-slate-100">
-      {/* Phone shell */}
+      {/* Fluid full-viewport shell (no phone-width cap) */}
       <div
         data-shell="basic"
-        className="relative mx-auto flex h-screen w-full max-w-[430px] flex-col overflow-hidden"
+        className="relative mx-auto flex h-screen w-full flex-col overflow-hidden"
         style={{ background: 'var(--basic-bg)' }}
       >
         {/* Aurora blur blobs — behind everything */}

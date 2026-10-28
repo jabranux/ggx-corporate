@@ -48,7 +48,7 @@ export function BasicItemDetailsDrawer({ open, state, onChange, errors, onSave, 
 
       {/* Drawer panel */}
       <div
-        className="fixed z-50 w-full max-w-[430px] rounded-t-[28px]"
+        className="fixed z-50 w-full max-w-[var(--basic-shell-max,none)] rounded-t-[28px]"
         style={{
           bottom: 0,
           left: '50%',

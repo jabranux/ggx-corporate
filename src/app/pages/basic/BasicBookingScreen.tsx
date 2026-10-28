@@ -422,7 +422,7 @@ export function BasicBookingScreen() {
 
       {/* ── Fixed bottom payment + CTA ── */}
       <div
-        className="fixed z-30 w-full max-w-[430px]"
+        className="fixed z-30 w-full max-w-[var(--basic-shell-max,none)]"
         style={{
           bottom: 0,
           left: '50%',

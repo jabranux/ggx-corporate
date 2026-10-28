@@ -50,7 +50,7 @@ export function BasicBottomNav() {
     /* Outer wrapper — fixed, centered, no overflow clip so FAB can protrude */
     <nav
       className="fixed left-1/2 z-30 -translate-x-1/2"
-      style={{ bottom: 18, width: 'calc(100% - 28px)', maxWidth: 402, overflow: 'visible' }}
+      style={{ bottom: 18, width: 'calc(100% - 28px)', overflow: 'visible' }}
     >
       {/* Glass pill background — only covers the nav strip, not the FAB protrusion */}
       <div

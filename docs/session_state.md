@@ -3,6 +3,27 @@
 > Lightweight resume/checkpoint file. Detailed June 2026 history was archived to
 > `docs/archive/session_log_2026-06.md`.
 
+## Basic responsive layout correction (2026-10-28)
+
+- Workflow: Codex investigated production, Claude implemented, Codex audited and
+  validated. Root cause: `BasicLayout` retained a centered 430px phone-preview
+  cap and `BasicBottomNav` a 402px cap. Production already filled 320–430px;
+  tablet/desktop widths exposed the constraint. Viewport metadata was correct.
+- Removed the shared Basic shell/nav caps; kept existing padding and styling.
+  Booking payment bar and shared sheets/drawer now follow shell sizing, with
+  `--basic-shell-max: 430px` retaining the separate Basic-v2 preview behavior.
+- Audit found and resolved 320px dashboard shortcut overflow: flexible icon
+  wrappers and `min-w-0` keep all five shortcuts within their card padding.
+- `npm run build` passed (existing bundle-size warning). Playwright regression
+  `node scripts/qa-basic-responsive.mjs http://127.0.0.1:18010` passed at 320,
+  375, 390, 430, 768, and 1440px: shared Basic routes, navigation clicks,
+  shell/nav bounds, horizontal overflow, shortcut bounds, account/address/item
+  sheets, booking payment bar, and Basic-v2 sizing. Dashboard screenshots at
+  all six widths visually reviewed; no remaining confirmed layout findings.
+- User authorized one consolidated commit and pushes to both `origin/master`
+  and `james/master`. Unrelated local settings, ignore, and integration-doc
+  changes are excluded. No business logic or backend contracts changed.
+
 ## Commerce production UX/bug-fix pass (2026-09-19)
 
 First hands-on-production-testing pass over the Commerce feature landed in the

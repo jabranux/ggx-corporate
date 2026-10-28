@@ -51,9 +51,9 @@ export function BasicAccountSheet({ open, onClose }: Props) {
       {/* Backdrop */}
       <div className="absolute inset-0" style={{ background: 'rgba(20,40,80,0.35)', backdropFilter: 'blur(4px)' }} />
 
-      {/* Sheet — centered to match the phone shell max-w */}
+      {/* Sheet — centered */}
       <div
-        className="absolute bottom-0 left-1/2 -translate-x-1/2 w-full max-w-[430px] overflow-hidden"
+        className="absolute bottom-0 left-1/2 -translate-x-1/2 w-full max-w-[var(--basic-shell-max,none)] overflow-hidden"
         style={{
           borderRadius: '24px 24px 0 0',
           background: 'rgba(245,249,255,0.98)',
