@@ -31,6 +31,8 @@ export interface SessionPayload {
   role: 'admin' | 'manager';
   accountId: string;
   accountName: string;
+  /** Product tier — see `AccountSegment` in `demoUsers.ts`. */
+  accountSegment: 'basic' | 'business_plus';
   iat: number;
   exp: number;
 }

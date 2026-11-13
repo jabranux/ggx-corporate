@@ -32,6 +32,7 @@ interface PersistedSession {
   role: MockAuthUser['role'];
   accountId: string;
   accountName: string;
+  accountSegment: MockAuthUser['accountSegment'];
 }
 
 function toMockAuthUser(p: PersistedSession): MockAuthUser {
@@ -42,6 +43,7 @@ function toMockAuthUser(p: PersistedSession): MockAuthUser {
     role: p.role,
     accountId: p.accountId,
     accountName: p.accountName,
+    accountSegment: p.accountSegment,
     assignedSubaccountIds: p.role === 'manager' ? [p.accountId] : [],
     permissions: permissionsForRole(p.role),
   };
@@ -84,7 +86,8 @@ async function handleLoginResponse(res: Response, networkErrorFallback: string):
     typeof u.email !== 'string' ||
     (u.role !== 'admin' && u.role !== 'manager') ||
     typeof u.accountId !== 'string' ||
-    typeof u.accountName !== 'string'
+    typeof u.accountName !== 'string' ||
+    (u.accountSegment !== 'basic' && u.accountSegment !== 'business_plus')
   ) {
     return { success: false, user: null, error: 'Unexpected response from the server.' };
   }
@@ -95,6 +98,7 @@ async function handleLoginResponse(res: Response, networkErrorFallback: string):
     role: u.role,
     accountId: u.accountId,
     accountName: u.accountName,
+    accountSegment: u.accountSegment,
   };
   // Persist a lightweight UI-display session (matching AuthContext.tsx shape).
   saveState(AUTH_STORAGE_KEY, session);
@@ -133,7 +137,7 @@ export async function loginMockUser(
  * (`resolveQuickLoginUser`, `api/_lib/demoUsers.ts`) and mints the same
  * signed `ggx_session` cookie `loginMockUser` does.
  */
-export async function quickLoginMockUser(scope: 'main' | 'subaccount'): Promise<LoginResult> {
+export async function quickLoginMockUser(scope: 'main' | 'subaccount' | 'basic'): Promise<LoginResult> {
   let res: Response;
   try {
     res = await fetch('/api/auth/quick-login', {

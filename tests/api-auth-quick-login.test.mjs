@@ -77,7 +77,7 @@ describe('POST /api/auth/quick-login', () => {
     assert.equal(res._status, 200);
     assert.deepEqual(res._body.user, {
       id: 'user-admin-001', name: 'Max Rodriguez', email: 'max@email.com',
-      role: 'admin', accountId: 'main', accountName: 'Main Account',
+      role: 'admin', accountId: 'main', accountName: 'Main Account', accountSegment: 'business_plus',
     });
     assert.ok(!('password' in res._body.user), 'quick-login response must never include a password field');
 
@@ -87,6 +87,7 @@ describe('POST /api/auth/quick-login', () => {
     assert.equal(payload?.sub, 'user-admin-001');
     assert.equal(payload?.role, 'admin');
     assert.equal(payload?.accountId, 'main');
+    assert.equal(payload?.accountSegment, 'business_plus');
   });
 
   it('scope "subaccount" issues a signed session for the seeded manager (user-mgr-001 / Acme Luzon)', async () => {
@@ -96,7 +97,7 @@ describe('POST /api/auth/quick-login', () => {
     assert.equal(res._status, 200);
     assert.deepEqual(res._body.user, {
       id: 'user-mgr-001', name: 'Rina Lopez', email: 'manager@email.com',
-      role: 'manager', accountId: 'acme-luzon', accountName: 'Acme Luzon',
+      role: 'manager', accountId: 'acme-luzon', accountName: 'Acme Luzon', accountSegment: 'business_plus',
     });
 
     const token = cookieToken(res._headers['Set-Cookie']);
@@ -104,6 +105,23 @@ describe('POST /api/auth/quick-login', () => {
     assert.equal(payload?.sub, 'user-mgr-001');
     assert.equal(payload?.role, 'manager');
     assert.equal(payload?.accountId, 'acme-luzon');
+    assert.equal(payload?.accountSegment, 'business_plus');
+  });
+
+  it('scope "basic" issues a signed session for the seeded Basic account (user-basic-001 / Jamie\'s Store)', async () => {
+    const res = makeRes();
+    await quickLoginHandler(makeReq('POST', { scope: 'basic' }), res);
+
+    assert.equal(res._status, 200);
+    assert.deepEqual(res._body.user, {
+      id: 'user-basic-001', name: 'Jamie Cruz', email: 'basic@email.com',
+      role: 'admin', accountId: 'basic-jamie-cruz', accountName: "Jamie's Store", accountSegment: 'basic',
+    });
+
+    const token = cookieToken(res._headers['Set-Cookie']);
+    const payload = verifySessionToken(token);
+    assert.equal(payload?.sub, 'user-basic-001');
+    assert.equal(payload?.accountSegment, 'basic');
   });
 
   it('rejects an unrecognized scope with 400 and issues no session', async () => {

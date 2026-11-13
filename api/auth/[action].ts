@@ -45,6 +45,7 @@ async function handleLogin(req: ProxyRequest, res: ProxyResponse): Promise<void>
       role: user.role,
       accountId: user.accountId,
       accountName: user.accountName,
+      accountSegment: user.accountSegment,
     });
     res.setHeader('Set-Cookie', buildSessionCookie(token));
     res.status(200).json({
@@ -55,6 +56,7 @@ async function handleLogin(req: ProxyRequest, res: ProxyResponse): Promise<void>
         role: user.role,
         accountId: user.accountId,
         accountName: user.accountName,
+        accountSegment: user.accountSegment,
       },
     });
   } catch (err) {
@@ -125,6 +127,7 @@ async function handleQuickLogin(req: ProxyRequest, res: ProxyResponse): Promise<
       role: user.role,
       accountId: user.accountId,
       accountName: user.accountName,
+      accountSegment: user.accountSegment,
     });
     res.setHeader('Set-Cookie', buildSessionCookie(token));
     res.status(200).json({
@@ -135,6 +138,7 @@ async function handleQuickLogin(req: ProxyRequest, res: ProxyResponse): Promise<
         role: user.role,
         accountId: user.accountId,
         accountName: user.accountName,
+        accountSegment: user.accountSegment,
       },
     });
   } catch (err) {

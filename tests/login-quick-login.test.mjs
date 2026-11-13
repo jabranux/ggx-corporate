@@ -76,9 +76,11 @@ describe('Login page — Quick Login', () => {
     const bodyText = await page.textContent('body');
     assert.match(bodyText, /Quick Login/);
     assert.match(bodyText, /Main Account/);
-    assert.match(bodyText, /access to the main corporate account with broader administrative capabilities/i);
+    assert.match(bodyText, /access your business\+ main account/i);
     assert.match(bodyText, /Subaccount/);
-    assert.match(bodyText, /access scoped to a managed subaccount for day-to-day operations/i);
+    assert.match(bodyText, /access your business\+ managed account/i);
+    assert.match(bodyText, /Basic Account/);
+    assert.match(bodyText, /access personal and small-business shipping tools/i);
 
     // No seeded-account internals rendered anywhere on the page.
     for (const leaked of [CREDENTIALS.admin.email, CREDENTIALS.manager.email, CREDENTIALS.admin.password, 'user-admin-001', 'user-mgr-001', 'acme-luzon']) {
@@ -143,6 +145,36 @@ describe('Login page — Quick Login', () => {
     // Wait for the SPA to actually paint post-navigation — waitForURL only
     // observes the history change, not the React re-render.
     await page.waitForFunction(() => document.body.innerText.includes('Acme Luzon'), null, { timeout: 10_000 });
+
+    await context.close();
+  });
+
+  it('Basic Account quick login sends only an opaque scope, signs in as the seeded Basic account, and renders the Basic shell (not the Business+ sidebar)', async () => {
+    const context = await browser.newContext({ viewport: { width: 1280, height: 900 } });
+    const page = await context.newPage();
+    await stubAuthEndpoints(page);
+    await page.goto(server.base + '/', { waitUntil: 'networkidle' });
+
+    await page.getByRole('button', { name: /^Basic Account/ }).click();
+    await page.waitForURL('**/dashboard**', { timeout: 15_000 });
+
+    const requests = await page.evaluate(() => window.__authRequests ?? []);
+    const quickLoginCall = requests.find((r) => r.path === '/api/auth/quick-login');
+    assert.ok(quickLoginCall, 'expected a POST /api/auth/quick-login call');
+    assert.deepEqual(Object.keys(quickLoginCall.body).sort(), ['scope']);
+    assert.equal(quickLoginCall.body.scope, 'basic');
+
+    const auth = await page.evaluate(() => JSON.parse(localStorage.getItem('ggx.auth') ?? 'null'));
+    assert.equal(auth?.email, 'basic@email.com');
+    assert.equal(auth?.accountSegment, 'basic');
+
+    // Basic gets its own shell: the Business+ sidebar's "Business+" wordmark
+    // is replaced by "Basic", and Basic-only nav (Rewards) is present while a
+    // Business+-only nav item (Billing Statements) is not.
+    await page.waitForFunction(() => document.body.innerText.includes('Rewards'), null, { timeout: 10_000 });
+    const bodyText = await page.textContent('body');
+    assert.match(bodyText, /Basic/);
+    assert.ok(!bodyText.includes('Billing Statements'), 'Business+-only nav must not render for a Basic account');
 
     await context.close();
   });

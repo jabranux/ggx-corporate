@@ -9,7 +9,7 @@
  * only encodes what each role *can do* — not who holds which role.
  */
 
-import type { UserRole } from '../../contexts/AuthContext';
+import type { AccountSegment, UserRole } from '../../contexts/AuthContext';
 
 export interface MockAuthUser {
   id: string;
@@ -19,6 +19,8 @@ export interface MockAuthUser {
   /** Canonical account id this user is scoped to. */
   accountId: string;
   accountName: string;
+  /** Product tier — see `AccountSegment`. */
+  accountSegment: AccountSegment;
   /** Subaccount ids this user manages (Managers only). */
   assignedSubaccountIds: string[];
   permissions: MockPermissions;

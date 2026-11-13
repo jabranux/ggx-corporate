@@ -9,6 +9,7 @@ import { Switch } from '../components/ui/Switch';
 import { AddressDisplayCard } from '../components/AddressDisplayCard';
 import type { Address } from '../components/AddressBook';
 import { useSubAccounts } from '../contexts/SubAccountContext';
+import { useAuth } from '../contexts/AuthContext';
 
 // Default pickup address shown on the account. Address Book is the source of
 // truth for creating/editing addresses, so this is display-only here.
@@ -27,6 +28,8 @@ const companyAddress: Address = {
 
 export function Settings() {
   const navigate = useNavigate();
+  const { user } = useAuth();
+  const isBasic = user?.accountSegment === 'basic';
   const { subAccountsEnabled, isMainAccountView, getCurrentAccountName, getCurrentAccountId } = useSubAccounts();
   const [savingAccount, setSavingAccount] = useState(false);
   const [savedAccount, setSavedAccount] = useState(false);
@@ -110,7 +113,8 @@ export function Settings() {
           </Card>
         )}
 
-        {!subAccountsEnabled && (
+        {/* Subaccounts is a Business+-only hierarchy concept — never offered to a Basic account. */}
+        {!subAccountsEnabled && !isBasic && (
           <Card className="border-blue-200 bg-blue-50">
             <CardHeader>
               <div className="flex items-start gap-4">

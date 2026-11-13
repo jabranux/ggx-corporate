@@ -54,7 +54,30 @@ export interface ModuleAccessContext {
   serviceCoverageOk?: boolean;
   /** Whether Subaccounts are enabled (drives the Subaccounts add-on + dependents). */
   subaccountsEnabled?: boolean;
+  /** Product tier ('basic' | 'business_plus') — a Basic account never sees the
+   * Business+-only hierarchy add-ons (Subaccounts, Consolidated Billing), per
+   * the Basic product spec's explicit exclusion. */
+  accountSegment?: 'basic' | 'business_plus';
 }
+
+/**
+ * Add-ons whose routes are Business+-only (wrapped in `BusinessPlusOnlyRoute`
+ * in `routes.tsx`) or that only ever make sense for a Business+ account —
+ * never offered to a Basic account. Keep this in sync with `routes.tsx`'s
+ * `BusinessPlusOnlyRoute` wrapping: a module left out here but gated at the
+ * route level would let Basic "activate" it and then get redirected away by
+ * its own "Open" CTA.
+ */
+const BUSINESS_PLUS_ONLY_MODULE_IDS = new Set([
+  'subaccounts', 'consolidated_billing', 'advanced_analytics', 'custom_reports',
+]);
+
+/**
+ * Commerce add-ons temporarily held to "Coming soon" for Basic accounts —
+ * see the comment in `resolveModuleAccess`. Revisit once the Commerce
+ * backend's consolidated-view query is segment-aware.
+ */
+const BASIC_COMMERCE_PENDING_IDS = new Set(['inventory', 'storefront']);
 
 export type CtaKind =
   | 'open'
@@ -153,6 +176,14 @@ export function resolveModuleAccess(m: BusinessModuleDef, ctx: ModuleAccessConte
     m.scopeLevel === 'account' && ctx.role === 'admin' ? 'main' : ctx.accountType;
   if (!m.availableFor.includes(resolvedType)) return 'not_available';
   if (m.comingSoon) return 'coming_soon';
+  // Basic accounts are standalone (outside the Business+ Main/Subaccount
+  // hierarchy) but the real Commerce backend's "consolidated" Main Account
+  // view has no per-account-hierarchy filter yet, so a Basic account's own
+  // Inventory/Storefront data would be cross-tenant-visible to Business+ if
+  // it went live. Keep these add-ons discoverable (per spec) but not yet
+  // activatable for Basic until that backend isolation gap is closed — see
+  // docs/session_state.md's "Known limitation" entry for this feature.
+  if (ctx.accountSegment === 'basic' && BASIC_COMMERCE_PENDING_IDS.has(m.id)) return 'coming_soon';
   if (m.dependsOn && !isDependencySatisfied(m.dependsOn, ctx)) return 'requires_dependency';
   if (m.coverageGated && ctx.serviceCoverageOk === false) return 'not_available';
 
@@ -316,7 +347,8 @@ export async function getModuleCatalog(
         // Managers have no Main Account context — hide account-scope modules
         // that resolve to not_available rather than showing misleading "Contact support".
         !(ctx.role === 'manager' && r.def.scopeLevel === 'account' && r.status === 'not_available')
-      ),
+      )
+      .filter((r) => !(ctx.accountSegment === 'basic' && BUSINESS_PLUS_ONLY_MODULE_IDS.has(r.def.id))),
   })).filter((group) => group.modules.length > 0);
 }
 

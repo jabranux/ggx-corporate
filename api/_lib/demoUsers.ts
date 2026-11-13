@@ -28,6 +28,11 @@
  */
 import { timingSafeEqual } from 'node:crypto';
 
+/** Product tier — see `AccountSegment` in `src/app/contexts/AuthContext.tsx`
+ * (duplicated here for the same reason this whole file is duplicated: `api/`
+ * cannot import from `src/`). */
+export type AccountSegment = 'basic' | 'business_plus';
+
 export interface DemoUser {
   id: string;
   email: string;
@@ -36,6 +41,7 @@ export interface DemoUser {
   name: string;
   accountId: string;
   accountName: string;
+  accountSegment: AccountSegment;
   /**
    * The account's real GGX Merchant ID (`G-######`) — the authoritative
    * identifier for this Business+ account, assigned by GGX (not by QuadX
@@ -62,11 +68,12 @@ export interface BridgeIdentity {
 }
 
 const DEMO_USERS: readonly DemoUser[] = [
-  { id: 'user-admin-001', email: 'max@email.com', password: '!1234qwer', role: 'admin', name: 'Max Rodriguez', accountId: 'main', accountName: 'Main Account', merchantId: 'G-448219' },
-  { id: 'user-mgr-001', email: 'manager@email.com', password: '!1234qwer', role: 'manager', name: 'Rina Lopez', accountId: 'acme-luzon', accountName: 'Acme Luzon', merchantId: 'G-556042' },
+  { id: 'user-admin-001', email: 'max@email.com', password: '!1234qwer', role: 'admin', name: 'Max Rodriguez', accountId: 'main', accountName: 'Main Account', merchantId: 'G-448219', accountSegment: 'business_plus' },
+  { id: 'user-mgr-001', email: 'manager@email.com', password: '!1234qwer', role: 'manager', name: 'Rina Lopez', accountId: 'acme-luzon', accountName: 'Acme Luzon', merchantId: 'G-556042', accountSegment: 'business_plus' },
+  { id: 'user-basic-001', email: 'basic@email.com', password: '!1234qwer', role: 'admin', name: 'Jamie Cruz', accountId: 'basic-jamie-cruz', accountName: "Jamie's Store", merchantId: 'G-990214', accountSegment: 'basic' },
 ];
 
-export type QuickLoginScope = 'main' | 'subaccount';
+export type QuickLoginScope = 'main' | 'subaccount' | 'basic';
 
 /**
  * Opaque scope → demo user id, for the Login page's "Main Account" /
@@ -79,6 +86,7 @@ export type QuickLoginScope = 'main' | 'subaccount';
 const QUICK_LOGIN_SCOPES: Readonly<Record<QuickLoginScope, string>> = {
   main: 'user-admin-001',
   subaccount: 'user-mgr-001',
+  basic: 'user-basic-001',
 };
 
 function timingSafeStringEqual(a: string, b: string): boolean {

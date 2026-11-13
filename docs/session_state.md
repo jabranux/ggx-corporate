@@ -3,6 +3,123 @@
 > Lightweight resume/checkpoint file. Detailed June 2026 history was archived to
 > `docs/archive/session_log_2026-06.md`.
 
+## New GGX Basic Account experience, built on the Corporate shell (2026-11-14)
+
+Implemented a new, self-serve **Basic account** experience as a first-class
+account segment inside GGX Corporate — distinct from Business+ (Main/
+Subaccount) and from the existing `/basic`/`/basic-v2` modules, which are
+**untouched** (confirmed structurally isolated: bespoke glassmorphism layouts,
+own routes, no overlap). This phase covers account shell, navigation, and
+feature routing only — not the detailed booking workflow (per task scope).
+
+- **Account model**: new `AccountSegment = 'basic' | 'business_plus'` field
+  (`src/app/contexts/AuthContext.tsx`), deliberately separate from the
+  existing `AccountType = 'standard'|'main'|'subaccount'` hierarchy/scope
+  concept in `businessModulesService.ts`/`useModuleAccess.ts` — segment
+  (product tier) and hierarchy (account scope) are orthogonal, per the task's
+  own instruction. Threaded through the full session chain: `AuthUser` →
+  `MockAuthUser`/`PersistedSession` (`authService.ts`) → `SessionPayload`
+  (`api/_lib/session.ts`) → `api/auth/[action].ts`'s login/quick-login
+  responses → `DemoUser`/`api/_lib/demoUsers.ts` (new seed: `user-basic-001`,
+  `basic@email.com`, account id `basic-jamie-cruz`, "Jamie's Store").
+- **Quick Login**: `Login.tsx`'s `QUICK_LOGIN_ACCOUNTS` gained a third
+  `'basic'` option ("Basic Account" / "Access personal and small-business
+  shipping tools."); Main/Subaccount descriptions updated to the task's exact
+  copy. Same signed-session flow as the existing two options — no new auth
+  path.
+- **Shell routing**: `/dashboard/*` stays the single shared route tree (every
+  reused page — Transactions, Bulk Upload, Support Tickets, Address Book,
+  Account Add-ons, Notifications, Settings — hardcodes `/dashboard/...`
+  internal links, so a separate URL prefix would have broken them). New
+  `DashboardShell.tsx` picks `RootLayout` (Business+, unchanged) or the new
+  `BasicCorporateLayout.tsx` (dedicated desktop sidebar + mobile bottom nav +
+  Account drawer, spec §4/§5) by `accountSegment`. New
+  `BasicOnlyRoute`/`BusinessPlusOnlyRoute` guards (`RouteGuards.tsx`) prevent
+  cross-segment access via direct URL — every Business+-only route (Claims,
+  SLA Alerts, Ops Requests, Billing, Payment Settings, Subaccounts, Users &
+  Permissions, Analytics, Reports, API Access, Shopify, the Business+
+  `earnings`) is now wrapped; new Basic-only routes (`basic-earnings`,
+  `payout-settings`, `rewards`, `vouchers`, `referrals`, `sulit-bundles`) are
+  symmetrically guarded. New placeholder pages live in
+  `src/app/pages/basic-account/*` (lightweight "Coming soon" cards via shared
+  `BasicComingSoon.tsx`, per task scope — not full feature modules).
+- **Account Add-ons reused as-is** (`businessModulesService.ts`): Basic gets
+  the same status/CTA model (`available_to_activate`/`requires_approval`/
+  `requires_contract_revision`) already built for Business+ — no new model
+  needed. `getModuleCatalog` now excludes `subaccounts`/`consolidated_billing`
+  /`advanced_analytics`/`custom_reports` for `accountSegment: 'basic'`
+  (Business+-only hierarchy/contract concepts, per product spec).
+- **Codex CLI audit** (`codex exec -s read-only`, one pass): found 1 P1 + 3
+  P2, all addressed:
+  - P2s fixed directly (all frontend-only, zero backend risk): `useNotificationViewer`/
+    `isNotificationVisible` (`data/notifications.ts`) and `useScopedAccountId`
+    (`hooks/useAccountScope.ts`) were resolving a Basic account as Business+'s
+    "all accounts" sentinel (leftover/shared `SubAccountContext` global
+    state), leaking Acme Corp/Acme Luzon notifications and transactions into
+    a fresh Basic session — both now short-circuit to the Basic account's own
+    id. `useModuleAccess.ts`'s `accountType`/`effectiveScopeId` could also
+    inherit stale Business+ "main"/subaccount state from the same global
+    switcher, and was writing feature-enablement into the SAME shared
+    `STANDARD_SCOPE_ID` bucket any Business+ "standard" account uses (so
+    enabling Inventory as Basic would read as already-enabled for any
+    standard Business+ account in the same browser) — Basic is now pinned to
+    `accountType: 'standard'` unconditionally and keyed to its own real
+    account id, never the synthetic shared bucket. Catalog/route mismatch for
+    Advanced Analytics/Custom Reports fixed by the exclusion above.
+  - **P1, known limitation, NOT fixed this pass (user-decided mitigation
+    applied instead)**: the real Commerce Postgres backend's "consolidated"
+    Main Account view (`api/_lib/commerceProducts.ts`'s `scopeWhere`/inline
+    `${scope.mode === 'consolidated'} or p.account_id = ...` pattern, also
+    likely in `commerceStorefront.ts`/`commercePromotions.ts`) has **no
+    account-hierarchy filter** — it was written when every account in the
+    system was part of the one Business+ hierarchy, so "consolidated" meant
+    "every legitimate row." Introducing a standalone Basic account breaks
+    that assumption: if Basic ever creates real Inventory/Storefront data,
+    Business+'s Main Account consolidated view would read (and `resolveScope`
+    write-path reasoning suggests could also write to) it. A correct fix
+    requires editing the live Commerce SQL query layer across multiple files,
+    unverifiable in this sandbox (no Docker → the 24 commerce backend tests
+    in `tests/api-commerce-products.test.mjs`/`api-commerce-storefront-promotions.test.mjs`
+    cancel on `docker run` rather than running). Given the user's explicit
+    choice, the mitigation shipped instead: Inventory/Storefront are held to
+    `'coming_soon'` for `accountSegment: 'basic'`
+    (`businessModulesService.ts`'s `BASIC_COMMERCE_PENDING_IDS` — still
+    discoverable, not activatable) and their routes
+    (`inventory`/`storefront`/`promotions`/`storefront/orders/:id`) are
+    wrapped in `BusinessPlusOnlyRoute` for now. **Follow-up**: once
+    `scopeWhere` (and siblings) are made segment-aware — excluding
+    `accountSegment: 'basic'` account ids from any no-filter/consolidated
+    query — remove `BASIC_COMMERCE_PENDING_IDS`'s effect and the
+    `BusinessPlusOnlyRoute` wrap on these three routes/the order-detail route.
+- **Verified live in the browser** (desktop + 375px mobile, via a direct
+  localStorage session swap since this sandbox's plain Vite dev server has no
+  `/api/auth/*` runtime — same limitation Playwright tests here already work
+  around): Basic desktop sidebar, mobile bottom nav + Account drawer (focus-
+  trap/Escape/restore, mirrors `ReadyRowsDrawer.tsx`'s established pattern;
+  excludes Bulk Upload and Notifications per spec), Quick Login end-to-end via
+  the real Playwright test, route guards redirecting in both directions,
+  Account Add-ons segment-correct catalog, and Settings' "Enable Subaccounts"
+  card (a real bug found manually, fixed: `Settings.tsx` now hides it for
+  `accountSegment: 'basic'` — that card is a Business+-only hierarchy concept
+  that must never surface in Basic). A second real bug found manually:
+  `BasicCorporateLayout` needs its own `JourneyProvider`/`JourneyShell`
+  (several shared pages, and `AdminRoute` itself, call `useJourney()`
+  unconditionally) — without it, several guarded routes crashed with
+  "useJourney must be used within a JourneyProvider" the moment
+  `BusinessPlusOnlyRoute`'s `AdminRoute` wrapper rendered under the Basic
+  shell; now wraps the whole layout like `RootLayout` does.
+- `npm run typecheck` and `npm run build` clean. Full suite **251/251**
+  passing (`npm test`, up from 230 — tests updated:
+  `tests/api-auth-quick-login.test.mjs`, `tests/login-quick-login.test.mjs`,
+  `tests/helpers.mjs`'s shared auth stub); 27 pre-existing Docker-dependent
+  commerce-backend cancellations (unrelated, same cause as prior sessions'
+  entries — no Docker daemon reachable in this sandbox).
+- **Not done / deferred**: the P1 Commerce backend fix above (documented,
+  user-decided); the detailed Basic booking workflow (explicitly out of this
+  phase's scope — Book a Delivery is a "Coming soon" placeholder on
+  `BasicHome`); Basic Earnings/Payout Settings/Rewards/Vouchers/Referrals/
+  Sulit Bundles are lightweight placeholders, not full features (per scope).
+
 ## Basic responsive layout correction (2026-10-28)
 
 - Workflow: Codex investigated production, Claude implemented, Codex audited and

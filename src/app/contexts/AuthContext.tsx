@@ -17,6 +17,16 @@ import { SESSION_EXPIRED_EVENT } from '../services/heyqCustomerApi';
 
 export type UserRole = 'admin' | 'manager';
 
+/**
+ * Product tier the account is on — orthogonal to `UserRole` (who-can-do-what)
+ * and to the Main/Subaccount hierarchy (`businessModulesService`'s
+ * `AccountType`, which is about account SCOPE, not product tier). A Basic
+ * account is always its own standalone account (no subaccounts); Business+ is
+ * the existing Main Account / Subaccount product. Defaults to 'business_plus'
+ * for any session minted before this field existed.
+ */
+export type AccountSegment = 'basic' | 'business_plus';
+
 export interface AuthUser {
   name: string;
   email: string;
@@ -25,6 +35,8 @@ export interface AuthUser {
   accountId: string;
   /** Display name for the scoped account. */
   accountName: string;
+  /** Product tier — see `AccountSegment`. */
+  accountSegment: AccountSegment;
 }
 
 interface AuthContextType {

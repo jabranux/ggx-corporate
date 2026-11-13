@@ -255,6 +255,11 @@ export interface NotificationViewer {
   accountId: string;
   /** Display label for the active scope ('all' sentinel or a subaccount name). Display only. */
   accountName: string;
+  /** True for a Basic account — a standalone account outside the Business+
+   * Main/Subaccount hierarchy. A Basic viewer never inherits Business+'s
+   * `parent`-scope (Main Account billing/reports) or other-subaccount items,
+   * even though its role is 'admin' of its own account. */
+  isBasic?: boolean;
 }
 
 /**
@@ -273,14 +278,24 @@ export function useNotificationViewer(): NotificationViewer {
   const { user } = useAuth();
   const { subAccountsEnabled, currentAccount, getCurrentAccountId, getCurrentAccountName, isMainAccountView } = useSubAccounts();
 
+  // A Basic account is a standalone account, never part of the Business+
+  // Main/Subaccount hierarchy — it must never resolve to the 'all' sentinel
+  // (which means "every Business+ account") regardless of the (unrelated,
+  // global) subaccounts-enabled flag's state.
+  const isBasic = user?.accountSegment === 'basic';
+
   // Manager: scoped to their assigned subaccount id (from the auth session).
   // Admin: 'all' at parent/main view, otherwise the drilled-into subaccount id.
-  const isAll = !subAccountsEnabled || isMainAccountView() || currentAccount === 'main';
+  const isAll = !isBasic && (!subAccountsEnabled || isMainAccountView() || currentAccount === 'main');
   const role = user?.role === 'manager' ? 'manager' : 'admin';
   const accountId =
-    role === 'manager' ? (user?.accountId ?? '') : isAll ? 'all' : getCurrentAccountId();
+    isBasic ? (user?.accountId ?? '')
+    : role === 'manager' ? (user?.accountId ?? '')
+    : isAll ? 'all' : getCurrentAccountId();
   const accountName =
-    role === 'manager' ? (user?.accountName ?? '') : isAll ? 'all' : getCurrentAccountName();
+    isBasic ? (user?.accountName ?? '')
+    : role === 'manager' ? (user?.accountName ?? '')
+    : isAll ? 'all' : getCurrentAccountName();
 
   // Memoize on the primitive scope fields so the returned object keeps a stable
   // reference across renders. Consumers use this viewer as a useEffect dependency
@@ -288,8 +303,8 @@ export function useNotificationViewer(): NotificationViewer {
   // effects every render — and since the page's effect calls setState, that
   // produces an infinite render loop that freezes the app.
   return useMemo<NotificationViewer>(
-    () => ({ role, accountId, accountName }),
-    [role, accountId, accountName],
+    () => ({ role, accountId, accountName, isBasic }),
+    [role, accountId, accountName, isBasic],
   );
 }
 
@@ -300,6 +315,11 @@ export function useNotificationViewer(): NotificationViewer {
 export function isNotificationVisible(n: AppNotification, viewer: NotificationViewer): boolean {
   // Global advisories are visible to everyone.
   if (n.scope === 'global') return true;
+
+  // A Basic account only ever sees items explicitly scoped to its own account
+  // id — never Business+'s `parent` (Main Account billing/reports) or other
+  // subaccounts' items, even though its role is 'admin' of its own account.
+  if (viewer.isBasic) return n.accountId === viewer.accountId;
 
   if (viewer.role === 'admin') {
     // Parent Admin on All-Accounts view sees everything.

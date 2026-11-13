@@ -1,6 +1,6 @@
 import { lazy, Suspense } from 'react';
 import { createBrowserRouter, Navigate } from 'react-router';
-import { RootLayout } from './layouts/RootLayout';
+import { DashboardShell } from './layouts/DashboardShell';
 import { BasicLayout } from './layouts/BasicLayout';
 import { BasicSegmentProvider } from './contexts/BasicSegmentContext';
 import { BasicDashboard } from './pages/basic/BasicDashboard';
@@ -73,7 +73,13 @@ import { Promotions } from './pages/Promotions';
 import { StorefrontOrderDetail } from './pages/StorefrontOrderDetail';
 import { BasicAnalytics } from './pages/BasicAnalytics';
 import { CustomReports } from './pages/CustomReports';
-import { ProtectedRoute, AdminRoute } from './components/RouteGuards';
+import { ProtectedRoute, AdminRoute, BusinessPlusOnlyRoute, BasicOnlyRoute } from './components/RouteGuards';
+import { BasicEarningsPage } from './pages/basic-account/BasicEarningsPage';
+import { PayoutSettingsPage } from './pages/basic-account/PayoutSettingsPage';
+import { RewardsPage } from './pages/basic-account/RewardsPage';
+import { VouchersPage } from './pages/basic-account/VouchersPage';
+import { ReferralsPage } from './pages/basic-account/ReferralsPage';
+import { SulitBundlesPage } from './pages/basic-account/SulitBundlesPage';
 import { TrackingPage } from './pages/TrackingPage';
 import { StorefrontPreview } from './pages/StorefrontPreview';
 import { StorefrontProductDetail } from './pages/StorefrontProductDetail';
@@ -183,22 +189,22 @@ export const router = createBrowserRouter([
     path: '/dashboard',
     element: (
       <ProtectedRoute>
-        <RootLayout />
+        <DashboardShell />
       </ProtectedRoute>
     ),
     children: [
-      // Shared (Admin + Manager)
+      // Shared (Admin + Manager + Basic) — DashboardWrapper branches internally.
       { index: true, Component: DashboardWrapper },
       { path: 'transactions', Component: Transactions },
       // Dedicated Batch Details route (static segment) — never ambiguous with
       // `transactions/:id` below, which only ever matches a single segment.
       { path: 'transactions/batches/:batchId', Component: TransactionBatchDetails },
       { path: 'transactions/:id', Component: TransactionDetails },
-      { path: 'claims', Component: Claims },
-      { path: 'claims/:id', Component: ClaimDetail },
-      { path: 'sla-alerts', Component: SlaAlerts },
-      { path: 'operations-requests', Component: OperationsRequests },
-      { path: 'operations-requests/:id', Component: OpsRequestDetail },
+      { path: 'claims', element: <BusinessPlusOnlyRoute><Claims /></BusinessPlusOnlyRoute> },
+      { path: 'claims/:id', element: <BusinessPlusOnlyRoute><ClaimDetail /></BusinessPlusOnlyRoute> },
+      { path: 'sla-alerts', element: <BusinessPlusOnlyRoute><SlaAlerts /></BusinessPlusOnlyRoute> },
+      { path: 'operations-requests', element: <BusinessPlusOnlyRoute><OperationsRequests /></BusinessPlusOnlyRoute> },
+      { path: 'operations-requests/:id', element: <BusinessPlusOnlyRoute><OpsRequestDetail /></BusinessPlusOnlyRoute> },
       { path: 'bulk-uploader', Component: BulkUploader },
       // In-app spreadsheet entry — a focused step within Bulk Booking (no sidebar item).
       { path: 'bulk-uploader/spreadsheet', Component: BulkSpreadsheet },
@@ -210,51 +216,68 @@ export const router = createBrowserRouter([
       {
         path: 'analytics',
         element: (
-          <Suspense fallback={<div className="p-6 text-sm text-gray-500">Loading analytics…</div>}>
-            <DataAnalytics />
-          </Suspense>
+          <BusinessPlusOnlyRoute>
+            <Suspense fallback={<div className="p-6 text-sm text-gray-500">Loading analytics…</div>}>
+              <DataAnalytics />
+            </Suspense>
+          </BusinessPlusOnlyRoute>
         ),
       },
       { path: 'address-book', Component: AddressBookPage },
-      { path: 'api-access', Component: APIAccess },
-      { path: 'shopify', Component: Shopify },
+      { path: 'api-access', element: <BusinessPlusOnlyRoute><APIAccess /></BusinessPlusOnlyRoute> },
+      { path: 'shopify', element: <BusinessPlusOnlyRoute><Shopify /></BusinessPlusOnlyRoute> },
       { path: 'support-tickets', Component: SupportTickets },
       { path: 'support-tickets/:id', Component: SupportTicketDetail },
       { path: 'complaints', element: <Navigate to="/dashboard/support-tickets" replace /> },
       { path: 'notifications', Component: Notifications },
-      { path: 'advisories', Component: ServiceAdvisories },
+      { path: 'advisories', element: <BusinessPlusOnlyRoute><ServiceAdvisories /></BusinessPlusOnlyRoute> },
       { path: 'settings', Component: Settings },
 
-      // Account Add-ons — discovery surface (shared). Gated feature routes
-      // render an EnablementGate when not usable for the current scope.
+      // Account Add-ons — discovery surface (shared, incl. Basic). Gated feature
+      // routes render an EnablementGate when not usable for the current scope.
       { path: 'account-add-ons', Component: AccountAddOns },
-      { path: 'inventory', Component: Inventory },
-      { path: 'storefront', Component: Storefront },
-      { path: 'promotions', Component: Promotions },
+      // Inventory/Storefront/Promotions are Business+-only FOR NOW (not a
+      // permanent product boundary): the real Commerce backend's consolidated
+      // Main Account view isn't segment-aware yet, so a Basic account's own
+      // commerce data would be cross-tenant-visible to Business+ if it went
+      // live (see businessModulesService.ts's BASIC_COMMERCE_PENDING_IDS,
+      // which holds these to "Coming soon" in Account Add-ons for Basic).
+      // Remove this wrapping once that backend isolation gap is closed.
+      { path: 'inventory', element: <BusinessPlusOnlyRoute><Inventory /></BusinessPlusOnlyRoute> },
+      { path: 'storefront', element: <BusinessPlusOnlyRoute><Storefront /></BusinessPlusOnlyRoute> },
+      { path: 'promotions', element: <BusinessPlusOnlyRoute><Promotions /></BusinessPlusOnlyRoute> },
       // Store Orders list now lives as a tab under Transactions; the order detail
       // keeps its own route (linked from that tab).
-      { path: 'storefront/orders/:id', Component: StorefrontOrderDetail },
+      { path: 'storefront/orders/:id', element: <BusinessPlusOnlyRoute><StorefrontOrderDetail /></BusinessPlusOnlyRoute> },
 
-      // Shared: subaccount settings (Managers can view their own subaccount's settings)
-      { path: 'subaccounts/:id/settings', Component: SubAccountSettings },
+      // Business+-only: subaccount settings (Managers can view their own subaccount's settings)
+      { path: 'subaccounts/:id/settings', element: <BusinessPlusOnlyRoute><SubAccountSettings /></BusinessPlusOnlyRoute> },
 
-      // Shared: reports visible to Managers (scoped to operational types in subaccount view)
-      { path: 'reports', Component: Reports },
-      { path: 'reports/custom', Component: CustomReports },
-      // Basic Data Analytics — standalone demo page (the gated Advanced workspace
-      // is at /analytics). Both reachable so add-on/nav actions don't dead-end.
-      { path: 'analytics/basic', Component: BasicAnalytics },
+      // Business+-only: reports (visible to Managers too, scoped to subaccount view)
+      { path: 'reports', element: <BusinessPlusOnlyRoute><Reports /></BusinessPlusOnlyRoute> },
+      { path: 'reports/custom', element: <BusinessPlusOnlyRoute><CustomReports /></BusinessPlusOnlyRoute> },
+      // Basic Data Analytics — standalone demo page (unrelated to the Basic
+      // *account* segment; it's the non-Advanced analytics tier). Business+ only.
+      { path: 'analytics/basic', element: <BusinessPlusOnlyRoute><BasicAnalytics /></BusinessPlusOnlyRoute> },
 
-      // Admin-only (parent-level finance, subaccounts, users)
-      { path: 'earnings',                        element: <AdminRoute><Earnings /></AdminRoute> },
-      { path: 'earnings/:settlementId',          element: <AdminRoute><EarningsSettlementDetail /></AdminRoute> },
-      { path: 'billing',           element: <AdminRoute><BillingStatement /></AdminRoute> },
-      { path: 'payment-settings',  element: <AdminRoute allowJourneyOverride="cod-main-account-payout"><PaymentSettings /></AdminRoute> },
-      { path: 'subaccounts',       element: <AdminRoute><SubAccounts /></AdminRoute> },
-      { path: 'subaccounts/enable',       element: <AdminRoute><EnableSubAccountsIntro /></AdminRoute> },
-      { path: 'subaccounts/enable/setup', element: <AdminRoute><EnableSubAccountsSetup /></AdminRoute> },
-      { path: 'subaccounts/request',      element: <AdminRoute><RequestSubAccount /></AdminRoute> },
-      { path: 'users-permissions', element: <AdminRoute><UsersPermissions /></AdminRoute> },
+      // Admin-only (parent-level finance, subaccounts, users) — Business+ only.
+      { path: 'earnings',                        element: <AdminRoute><BusinessPlusOnlyRoute><Earnings /></BusinessPlusOnlyRoute></AdminRoute> },
+      { path: 'earnings/:settlementId',          element: <AdminRoute><BusinessPlusOnlyRoute><EarningsSettlementDetail /></BusinessPlusOnlyRoute></AdminRoute> },
+      { path: 'billing',           element: <AdminRoute><BusinessPlusOnlyRoute><BillingStatement /></BusinessPlusOnlyRoute></AdminRoute> },
+      { path: 'payment-settings',  element: <AdminRoute allowJourneyOverride="cod-main-account-payout"><BusinessPlusOnlyRoute><PaymentSettings /></BusinessPlusOnlyRoute></AdminRoute> },
+      { path: 'subaccounts',       element: <AdminRoute><BusinessPlusOnlyRoute><SubAccounts /></BusinessPlusOnlyRoute></AdminRoute> },
+      { path: 'subaccounts/enable',       element: <AdminRoute><BusinessPlusOnlyRoute><EnableSubAccountsIntro /></BusinessPlusOnlyRoute></AdminRoute> },
+      { path: 'subaccounts/enable/setup', element: <AdminRoute><BusinessPlusOnlyRoute><EnableSubAccountsSetup /></BusinessPlusOnlyRoute></AdminRoute> },
+      { path: 'subaccounts/request',      element: <AdminRoute><BusinessPlusOnlyRoute><RequestSubAccount /></BusinessPlusOnlyRoute></AdminRoute> },
+      { path: 'users-permissions', element: <AdminRoute><BusinessPlusOnlyRoute><UsersPermissions /></BusinessPlusOnlyRoute></AdminRoute> },
+
+      // Basic-only (new GGX Basic Account experience — spec §4/§6).
+      { path: 'basic-earnings',   element: <BasicOnlyRoute><BasicEarningsPage /></BasicOnlyRoute> },
+      { path: 'payout-settings',  element: <BasicOnlyRoute><PayoutSettingsPage /></BasicOnlyRoute> },
+      { path: 'rewards',          element: <BasicOnlyRoute><RewardsPage /></BasicOnlyRoute> },
+      { path: 'vouchers',         element: <BasicOnlyRoute><VouchersPage /></BasicOnlyRoute> },
+      { path: 'referrals',        element: <BasicOnlyRoute><ReferralsPage /></BasicOnlyRoute> },
+      { path: 'sulit-bundles',    element: <BasicOnlyRoute><SulitBundlesPage /></BasicOnlyRoute> },
     ],
   },
 ]);

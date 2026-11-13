@@ -19,6 +19,12 @@ export function useScopedAccountId(): string | undefined {
   const { user } = useAuth();
   const { subAccountsEnabled, getCurrentAccountId, isMainAccountView } = useSubAccounts();
 
+  // A Basic account is a standalone account outside the Business+
+  // Main/Subaccount hierarchy — it must always resolve to its own account id,
+  // never `undefined` (consolidated = "every Business+ account"), regardless
+  // of the (unrelated, global) subaccounts-enabled flag's state.
+  if (user?.accountSegment === 'basic') return user.accountId;
+
   // A manager is always locked to their own subaccount. AuthContext is the
   // source of truth here — the subaccount switcher is an Admin-only tool and a
   // manager's `currentAccount` is not guaranteed to reflect their scope.

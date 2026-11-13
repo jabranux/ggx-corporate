@@ -27,12 +27,17 @@ export const QUICK_LOGIN_ACCOUNTS = [
   {
     scope: 'main',
     label: 'Main Account',
-    description: 'Access to the main corporate account with broader administrative capabilities.',
+    description: 'Access your Business+ main account.',
   },
   {
     scope: 'subaccount',
     label: 'Subaccount',
-    description: 'Access scoped to a managed subaccount for day-to-day operations.',
+    description: 'Access your Business+ managed account.',
+  },
+  {
+    scope: 'basic',
+    label: 'Basic Account',
+    description: 'Access personal and small-business shipping tools.',
   },
 ] as const;
 
@@ -70,6 +75,7 @@ export function Login() {
         role: u.role,
         accountId: u.accountId,
         accountName: u.accountName,
+        accountSegment: u.accountSegment,
       });
       navigate('/dashboard');
     } else {
@@ -89,6 +95,7 @@ export function Login() {
         role: u.role,
         accountId: u.accountId,
         accountName: u.accountName,
+        accountSegment: u.accountSegment,
       });
       navigate('/dashboard');
     } else {
@@ -200,7 +207,7 @@ export function Login() {
                     </div>
                   </div>
 
-                  <div className="grid grid-cols-2 gap-2">
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
                     {QUICK_LOGIN_ACCOUNTS.map((account) => (
                       <button
                         key={account.scope}

@@ -37,3 +37,26 @@ export function AdminRoute({ children, allowJourneyOverride }: AdminRouteProps) 
   if (user?.role !== 'admin' && !journeyGrants) return <AccessDenied />;
   return <>{children}</>;
 }
+
+/**
+ * Renders children only for a `business_plus` account; redirects a `basic`
+ * account straight to `/dashboard` (its own home) instead of showing
+ * Business+-only surfaces (billing, subaccounts, claims, ops requests, etc.)
+ * that a Basic account should never reach, including via direct URL.
+ */
+export function BusinessPlusOnlyRoute({ children }: { children: ReactNode }) {
+  const { user } = useAuth();
+  if (user?.accountSegment === 'basic') return <Navigate to="/dashboard" replace />;
+  return <>{children}</>;
+}
+
+/**
+ * Renders children only for a `basic` account; redirects a `business_plus`
+ * account to `/dashboard` instead of showing Basic-only surfaces (Rewards,
+ * Vouchers, Referrals, Sulit Bundles, Basic Earnings, Payout Settings).
+ */
+export function BasicOnlyRoute({ children }: { children: ReactNode }) {
+  const { user } = useAuth();
+  if (user?.accountSegment !== 'basic') return <Navigate to="/dashboard" replace />;
+  return <>{children}</>;
+}

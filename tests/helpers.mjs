@@ -51,6 +51,7 @@ export function stopDevServer(server) {
 export const CREDENTIALS = {
   admin: { email: 'max@email.com', password: '!1234qwer' },
   manager: { email: 'manager@email.com', password: '!1234qwer' },
+  basic: { email: 'basic@email.com', password: '!1234qwer' },
 };
 
 /**
@@ -61,8 +62,9 @@ export const CREDENTIALS = {
  * already is (see `addHeyQApiStubScript`).
  */
 const DEMO_ACCOUNTS = {
-  'max@email.com':     { password: '!1234qwer', id: 'user-admin-001', name: 'Max Rodriguez', email: 'max@email.com',     role: 'admin',   accountId: 'main',        accountName: 'Main Account' },
-  'manager@email.com': { password: '!1234qwer', id: 'user-mgr-001',   name: 'Rina Lopez',    email: 'manager@email.com', role: 'manager', accountId: 'acme-luzon',  accountName: 'Acme Luzon' },
+  'max@email.com':     { password: '!1234qwer', id: 'user-admin-001', name: 'Max Rodriguez', email: 'max@email.com',     role: 'admin',   accountId: 'main',        accountName: 'Main Account',   accountSegment: 'business_plus' },
+  'manager@email.com': { password: '!1234qwer', id: 'user-mgr-001',   name: 'Rina Lopez',    email: 'manager@email.com', role: 'manager', accountId: 'acme-luzon',  accountName: 'Acme Luzon',     accountSegment: 'business_plus' },
+  'basic@email.com':   { password: '!1234qwer', id: 'user-basic-001', name: 'Jamie Cruz',    email: 'basic@email.com',   role: 'admin',   accountId: 'basic-jamie-cruz', accountName: "Jamie's Store", accountSegment: 'basic' },
 };
 
 /** Opaque Quick Login scope → demo account email, mirroring
@@ -70,6 +72,7 @@ const DEMO_ACCOUNTS = {
 const QUICK_LOGIN_SCOPES = {
   main: 'max@email.com',
   subaccount: 'manager@email.com',
+  basic: 'basic@email.com',
 };
 
 /** Stub `/api/auth/login`, `/api/auth/quick-login`, and `/api/auth/logout` so
