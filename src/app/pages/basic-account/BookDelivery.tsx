@@ -44,6 +44,7 @@
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router';
+import { IconChevronLeft } from '@tabler/icons-react';
 import { Button } from '../../components/ui/Button';
 import { ConfirmDialog } from '../../components/ui/Dialog';
 import { useAuth } from '../../contexts/AuthContext';
@@ -61,6 +62,7 @@ import { BookingItemDetailsSection } from '../../components/BookingItemDetailsSe
 import { BookingReviewPaymentPanel } from '../../components/BookingReviewPaymentPanel';
 import { BookingPaymentSummaryBar } from '../../components/BookingPaymentSummaryBar';
 import { BookingReviewSummary } from '../../components/BookingReviewSummary';
+import { BookingFeeBreakdownContent } from '../../components/BookingFeeBreakdownContent';
 import { BookingHeader } from '../../components/BookingHeader';
 
 const REVIEW_STEP = 2;
@@ -390,7 +392,24 @@ export function BookDelivery() {
         variant="destructive"
       />
 
-      <BookingHeader step={step} onBack={handleHeaderBack} isDesktop={isDesktop} />
+      {/* Desktop: the standard GGX Corporate desktop page-title pattern
+          (consistent with Bulk Upload etc.) — not the mobile compact
+          header. `BookingHeader`'s sticky compact bar + step progress is
+          mobile-only now (see its own docblock). */}
+      {isDesktop && (
+        <div className="mb-6 flex items-center gap-3">
+          <button
+            type="button"
+            onClick={handleHeaderBack}
+            aria-label="Back"
+            className="flex-shrink-0 -ml-1.5 flex h-10 w-10 items-center justify-center rounded-md text-gray-500 hover:bg-gray-100 hover:text-gray-700"
+          >
+            <IconChevronLeft className="h-6 w-6" />
+          </button>
+          <h1 className="text-3xl font-bold text-gray-900">Book a delivery</h1>
+        </div>
+      )}
+      {!isDesktop && <BookingHeader step={step} onBack={handleHeaderBack} />}
 
       {/* Switched on the same `isDesktop` JS flag the header's Back/Exit
           action already uses (not a CSS `lg:`/`hidden` pair) — deliberately
@@ -412,20 +431,32 @@ export function BookDelivery() {
         // no Continue buttons. Addresses, Delivery, and Item Details all
         // render together on the left; the live-updating Review & Payment
         // panel (Confirm Booking included) stays sticky on the right.
-        <div className="grid grid-cols-[7fr_3fr] gap-6 items-start pt-4">
-          <div className="space-y-4 min-w-0">
-            {addressSection}
-            {deliverySection}
-            {itemSection}
-          </div>
-          <div className="sticky top-20">
-            <BookingReviewPaymentPanel
-              draft={draft}
-              onChange={(patch) => updateDraft(patch)}
-              onConfirm={handleConfirm}
-              confirmDisabled={!canConfirm}
-              blockingReason={confirmBlockReason}
-            />
+        // Constrained to a centered 1280px-max container so the ~70/30
+        // columns stay scannable on ultrawide monitors — this wrapper is
+        // local to the booking content only (the sidebar/app header live
+        // outside this page entirely).
+        <div className="mx-auto w-full max-w-[1280px]">
+          <div className="grid grid-cols-[7fr_3fr] gap-6 items-start">
+            <div className="space-y-4 min-w-0">
+              {addressSection}
+              {deliverySection}
+              {itemSection}
+            </div>
+            {/* `top-6` (not the header-clearing offset the old sticky
+                compact header needed) — small enough that it never exceeds
+                this column's natural top position, so the sticky panel
+                never jumps down from the left column's starting line on
+                initial render; it only starts sticking once the page is
+                scrolled, 24px below the content edge. */}
+            <div className="sticky top-6">
+              <BookingReviewPaymentPanel
+                draft={draft}
+                onChange={(patch) => updateDraft(patch)}
+                onConfirm={handleConfirm}
+                confirmDisabled={!canConfirm}
+                blockingReason={confirmBlockReason}
+              />
+            </div>
           </div>
         </div>
       ) : (
@@ -447,20 +478,34 @@ export function BookDelivery() {
             )}
             {step === 1 && itemSection}
             {step === REVIEW_STEP && (
-              <BookingReviewSummary
-                draft={draft}
-                onEditAddresses={() => goToStepFromReview(0)}
-                onEditDelivery={() => goToStepFromReview(0)}
-                onEditItem={() => goToStepFromReview(1)}
-                deliveryEstimateLabel={deliveryEstimateLabel}
-              />
+              <div className="space-y-4">
+                <BookingReviewSummary
+                  draft={draft}
+                  onEditAddresses={() => goToStepFromReview(0)}
+                  onEditDelivery={() => goToStepFromReview(0)}
+                  onEditItem={() => goToStepFromReview(1)}
+                  deliveryEstimateLabel={deliveryEstimateLabel}
+                />
+                {/* Fee breakdown, vouchers, and payment method are always
+                    visible here now — no "View breakdown" tap required
+                    (the sticky bottom bar below keeps its existing total +
+                    Confirm Booking placement). */}
+                <div className="rounded-lg border border-gray-200 bg-white p-4">
+                  <h2 className="mb-3 text-sm font-semibold text-gray-900">Review &amp; Payment</h2>
+                  <BookingFeeBreakdownContent
+                    draft={draft}
+                    onChange={(patch) => updateDraft(patch)}
+                    totals={computeBookingTotals(draft)}
+                    showFinalTotal
+                  />
+                </div>
+              </div>
             )}
           </div>
 
           {step === REVIEW_STEP && (
             <BookingPaymentSummaryBar
               draft={draft}
-              onChange={(patch) => updateDraft(patch)}
               onConfirm={handleConfirm}
               confirmDisabled={!canConfirm}
               blockingReason={confirmBlockReason}

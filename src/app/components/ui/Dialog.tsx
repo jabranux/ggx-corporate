@@ -235,7 +235,7 @@ export function Drawer({ open, onClose, title, onBack, children, dismissible = t
       <div
         ref={panelRef}
         className={cn(
-          'flex w-full flex-col bg-white shadow-xl lg:max-w-md lg:max-h-[85vh] lg:rounded-xl lg:m-4',
+          'flex w-full flex-col bg-white shadow-xl lg:max-w-md lg:max-h-[85vh] lg:h-auto lg:rounded-xl lg:m-4',
           fullScreen ? 'h-[100dvh] rounded-none' : 'max-h-[85vh] rounded-t-2xl',
         )}
         onClick={(e) => e.stopPropagation()}
