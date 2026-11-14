@@ -1,14 +1,41 @@
 /**
  * GGX Basic single-booking flow — /dashboard/book-delivery.
  *
- * A single 4-step guided wizard (Addresses → Delivery → Item Details →
- * Review) shared verbatim between mobile and desktop — both render the
- * same step content from the same `BookingDraft` state; only the Review
- * step's payment surface differs (a sticky side panel on desktop, a sticky
- * bottom bar on mobile — see `BookingReviewPaymentPanel.tsx` /
- * `BookingPaymentSummaryBar.tsx`). The default app header/bottom nav are
- * hidden for this route (`BasicCorporateLayout.tsx`) in favor of the
- * compact `BookingHeader` rendered here.
+ * Two genuinely different layouts share one `BookingDraft` state and the
+ * same section/panel components, switched by the `isDesktop` media-query
+ * flag below — deliberately JS-driven, not a `lg:`/`hidden` CSS pair, and
+ * deliberately only ONE layout mounted at a time (not both, CSS-hidden):
+ * an earlier version of this screen kept both permanently mounted, and two
+ * live `BookingAddressSection` instances (one per layout) fell out of sync
+ * with each other's saved-address list and open-drawer/unsaved-edit state
+ * the moment the user resized mid-edit — silently blocking Continue/Confirm
+ * with no visible cause. Switching the mounted tree instead only resets
+ * that kind of transient, component-local UI state (an open address
+ * drawer, in-progress unsaved new-address text) — the booking DATA itself
+ * lives in `draft` (sessionStorage-backed, independent of any component's
+ * mount lifecycle), so no entered information is ever lost on resize.
+ *
+ * - **Desktop (≥1024px)**: the ORIGINAL continuous two-column layout — no
+ *   steps, no Continue buttons. Addresses, Delivery, and Item Details all
+ *   render together in the ~70% left column; a sticky ~30% right column
+ *   holds the live-updating Review & Payment panel
+ *   (`BookingReviewPaymentPanel.tsx`), Confirm Booking included.
+ * - **Mobile (<1024px)**: a guided 4-step wizard (Addresses → Delivery →
+ *   Item Details → Review), one section at a time with a Continue button
+ *   between them; Review is its own step with compact summary cards
+ *   (`BookingReviewSummary.tsx`) and a sticky bottom payment bar
+ *   (`BookingPaymentSummaryBar.tsx`).
+ *
+ * `BookingHeader` (compact back/exit + title) is shared by both — it's
+ * also given `isDesktop` directly (not a `lg:` class of its own) so its
+ * segmented step-progress indicator (mobile-only) can never disagree with
+ * which layout is actually mounted. The back/exit action itself also
+ * differs: on desktop there is no "previous step" to return to, so Back
+ * always asks to exit; on mobile it steps backward (or returns to Review
+ * when reached via Edit) until step 0, where it also asks to exit. The
+ * default app header/bottom nav are hidden for this route
+ * (`BasicCorporateLayout.tsx`) in favor of this compact header on both
+ * layouts.
  *
  * Phase 1 scope: saved-address prefill only (pickup + recipient). No
  * shortened journey and no remembered item details — deferred.
@@ -53,6 +80,25 @@ export function BookDelivery() {
   // dialog below — same pattern as `BulkUploader.tsx`'s `exitGuardDialog`.
   const touchedRef = useRef(false);
   const exitGuard = useUploadExitGuard(touchedRef);
+
+  // Drives which layout mounts AND the header's Back/Exit behavior (see
+  // module docblock) — must be a live media-query listener, not a
+  // one-time check, so resizing across the breakpoint mid-session
+  // (explicitly required to preserve state, never to reset it) switches
+  // immediately without a reload. `64rem`, not a hardcoded `1024px` — this
+  // must mirror Tailwind's own `lg:` breakpoint EXACTLY (Tailwind defines
+  // it in rem), so a non-default root font-size can never make this flag
+  // disagree with which layout the `lg:` classes elsewhere on the page
+  // (e.g. `BasicCorporateLayout.tsx`'s sidebar) are actually showing.
+  const [isDesktop, setIsDesktop] = useState(
+    () => typeof window !== 'undefined' && window.matchMedia('(min-width: 64rem)').matches,
+  );
+  useEffect(() => {
+    const mql = window.matchMedia('(min-width: 64rem)');
+    const handler = () => setIsDesktop(mql.matches);
+    mql.addEventListener('change', handler);
+    return () => mql.removeEventListener('change', handler);
+  }, []);
 
   // Reported by BookingAddressSection: whether a pickup/recipient drawer is
   // open on its editable "add" view with unsaved edits. The wizard's
@@ -208,6 +254,12 @@ export function BookDelivery() {
   };
 
   const handleHeaderBack = () => {
+    // Desktop has no step wizard to step back through — the whole form is
+    // always on one page, so Back is purely an exit action.
+    if (isDesktop) {
+      setShowExitConfirm(true);
+      return;
+    }
     // Check editReturn first — reached via "Edit" from Review (including
     // step 0), Back must return to Review, never trigger the exit
     // confirmation meant for a first-time pass through step 0.
@@ -293,11 +345,12 @@ export function BookDelivery() {
     />
   );
 
+  // Mobile wizard only — desktop has no Continue button (see module docblock).
   const continueBlockReason = !stepValid[step] ? stepBlockReason[step] : undefined;
   const continueButton = (
-    <div className="w-full lg:w-auto lg:text-right">
-      {continueBlockReason && <p className="mb-2 text-xs text-red-600 text-center lg:mb-1.5 lg:text-right">{continueBlockReason}</p>}
-      <Button className="w-full lg:w-auto lg:px-8" onClick={handleContinue} disabled={!stepValid[step]}>
+    <div className="w-full">
+      {continueBlockReason && <p className="mb-2 text-xs text-red-600 text-center">{continueBlockReason}</p>}
+      <Button className="w-full" onClick={handleContinue} disabled={!stepValid[step]}>
         {editReturn ? 'Save and return to review' : 'Continue'}
       </Button>
     </div>
@@ -328,57 +381,80 @@ export function BookDelivery() {
         variant="destructive"
       />
 
-      <BookingHeader step={step} onBack={handleHeaderBack} />
+      <BookingHeader step={step} onBack={handleHeaderBack} isDesktop={isDesktop} />
 
-      <div className="pt-3 pb-32 lg:pb-4">
-        {step === 0 && addressSection}
-        {step === 1 && deliverySection}
-        {step === 2 && itemSection}
-        {step === REVIEW_STEP && (
-          <div className="lg:grid lg:grid-cols-[1fr_360px] lg:gap-6 lg:items-start">
-            <BookingReviewSummary
+      {/* Switched on the same `isDesktop` JS flag the header's Back/Exit
+          action already uses (not a CSS `lg:`/`hidden` pair) — deliberately
+          only ONE layout is ever mounted. Addresses/Delivery/Item Details
+          each render as a single `addressSection`/`deliverySection`/
+          `itemSection` element reused across both branches below, so
+          switching layouts does remount that one instance (clearing its
+          own transient UI state — an open address drawer, in-progress
+          unsaved new-address text), but the booking DATA itself lives in
+          `draft` (sessionStorage-backed), never in these components, so no
+          entered information is lost. The alternative — keeping both
+          layouts permanently mounted via CSS — was tried and reverted: two
+          live `BookingAddressSection` instances fell out of sync with each
+          other's saved-address list and open/unsaved-edit state once the
+          user resized mid-edit, silently blocking Continue/Confirm with no
+          visible cause. */}
+      {isDesktop ? (
+        // Desktop: the original continuous two-column layout — no steps,
+        // no Continue buttons. Addresses, Delivery, and Item Details all
+        // render together on the left; the live-updating Review & Payment
+        // panel (Confirm Booking included) stays sticky on the right.
+        <div className="grid grid-cols-[7fr_3fr] gap-6 items-start pt-4">
+          <div className="space-y-4 min-w-0">
+            {addressSection}
+            {deliverySection}
+            {itemSection}
+          </div>
+          <div className="sticky top-20">
+            <BookingReviewPaymentPanel
               draft={draft}
-              onEditAddresses={() => goToStepFromReview(0)}
-              onEditDelivery={() => goToStepFromReview(1)}
-              onEditItem={() => goToStepFromReview(2)}
-              deliveryEstimateLabel={deliveryEstimateLabel}
+              onChange={(patch) => updateDraft(patch)}
+              onConfirm={handleConfirm}
+              confirmDisabled={!canConfirm}
+              blockingReason={confirmBlockReason}
             />
-            <div className="hidden lg:block lg:sticky lg:top-20">
-              <BookingReviewPaymentPanel
-                draft={draft}
-                onChange={(patch) => updateDraft(patch)}
-                onConfirm={handleConfirm}
-                confirmDisabled={!canConfirm}
-                blockingReason={confirmBlockReason}
-              />
-            </div>
           </div>
-        )}
-      </div>
-
-      {step === REVIEW_STEP && (
-        <div className="lg:hidden">
-          <BookingPaymentSummaryBar
-            draft={draft}
-            onChange={(patch) => updateDraft(patch)}
-            onConfirm={handleConfirm}
-            confirmDisabled={!canConfirm}
-            blockingReason={confirmBlockReason}
-          />
         </div>
-      )}
-
-      {step !== REVIEW_STEP && (
+      ) : (
+        // Mobile: guided 4-step wizard, one section at a time.
         <>
-          <div
-            className="lg:hidden fixed inset-x-0 bottom-0 bg-white border-t border-gray-200 px-4 pt-3 z-40"
-            style={{ paddingBottom: 'calc(0.75rem + env(safe-area-inset-bottom))' }}
-          >
-            {continueButton}
+          <div className="pt-3 pb-32">
+            {step === 0 && addressSection}
+            {step === 1 && deliverySection}
+            {step === 2 && itemSection}
+            {step === REVIEW_STEP && (
+              <BookingReviewSummary
+                draft={draft}
+                onEditAddresses={() => goToStepFromReview(0)}
+                onEditDelivery={() => goToStepFromReview(1)}
+                onEditItem={() => goToStepFromReview(2)}
+                deliveryEstimateLabel={deliveryEstimateLabel}
+              />
+            )}
           </div>
-          <div className="hidden lg:flex lg:justify-end lg:mt-4">
-            {continueButton}
-          </div>
+
+          {step === REVIEW_STEP && (
+            <BookingPaymentSummaryBar
+              draft={draft}
+              onChange={(patch) => updateDraft(patch)}
+              onConfirm={handleConfirm}
+              confirmDisabled={!canConfirm}
+              blockingReason={confirmBlockReason}
+            />
+          )}
+
+          {step !== REVIEW_STEP && (
+            <div
+              className="fixed inset-x-0 bottom-0 bg-white border-t border-gray-200 px-4 pt-3 z-40"
+              style={{ paddingBottom: 'calc(0.75rem + env(safe-area-inset-bottom))' }}
+            >
+              {continueButton}
+            </div>
+          )}
         </>
       )}
     </div>
