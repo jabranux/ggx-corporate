@@ -13,13 +13,20 @@
  *
  * Pickup keeps a picker-first flow (it's typically one fixed saved
  * location): the drawer opens straight to "choose a saved address," with
- * "Add new address" as a secondary action. Recipient opens to a chooser
- * (Recent Addresses, then a fuller searchable Address Book, then Add new
- * recipient) when nothing is set yet, or straight to an editable form when
- * editing an already-set recipient.
+ * "Add new address" as a secondary action.
+ *
+ * Recipient is form-first instead, on a full-screen sheet (`Drawer`'s
+ * `fullScreen` prop) — most single bookings are to a new or occasional
+ * recipient, so there is no intermediate "choose how to add a recipient"
+ * screen. Tapping the Recipient card always opens straight into the
+ * Recipient Details form (prefilled when editing an already-set
+ * recipient), with "Recent Addresses" and "Address Book" as shortcuts at
+ * the top that populate the SAME form (via nested, non-full-screen
+ * Drawers stacked on top) rather than committing immediately — the user
+ * can still review or edit before saving.
  */
 import { useEffect, useState } from 'react';
-import { IconMapPin, IconUserCircle, IconPencil, IconPlus, IconSearch, IconX } from '@tabler/icons-react';
+import { IconMapPin, IconUserCircle, IconPencil, IconPlus, IconSearch, IconX, IconClock, IconBook2 } from '@tabler/icons-react';
 import type { ComponentType } from 'react';
 import { Card, CardContent } from './ui/Card';
 import { Button } from './ui/Button';
@@ -93,14 +100,26 @@ export function BookingAddressSection({
   const [pickupForm, setPickupForm] = useState<NewAddressFields>(EMPTY_NEW_ADDRESS);
   const [pickupSaving, setPickupSaving] = useState(false);
 
-  // Recipient: chooser-first when unset, straight-to-edit when already set.
+  // Recipient: form-first, always — the full-screen sheet IS the form, with
+  // "Recent Addresses"/"Address Book" as nested overlay shortcuts on top of
+  // it (never a separate browse-only screen in front of the form).
   const [recipientDrawerOpen, setRecipientDrawerOpen] = useState(false);
-  const [recipientView, setRecipientView] = useState<'home' | 'book' | 'add'>('home');
-  const [recipientEntryMode, setRecipientEntryMode] = useState<'edit' | 'chooser'>('chooser');
+  const [recipientRecentOpen, setRecipientRecentOpen] = useState(false);
+  const [recipientBookOpen, setRecipientBookOpen] = useState(false);
   const [recipientSearch, setRecipientSearch] = useState('');
   const [recipientForm, setRecipientForm] = useState<NewAddressFields>(EMPTY_NEW_ADDRESS);
   const [recipientExistingMatch, setRecipientExistingMatch] = useState<Address | null>(null);
   const [recipientSaving, setRecipientSaving] = useState(false);
+  // Forces `AddressForm`'s `LocationCascadeFields` to remount whenever a
+  // shortcut swaps in a DIFFERENT address while the sheet stays open (the
+  // main Drawer never closes between picks — only the nested Recent/Book
+  // drawer does). Without this, `LocationCascadeFields` only re-syncs its
+  // internal province/city ids from props on its own first mount; picking
+  // a second address with a different city (same or different province)
+  // would otherwise leave Barangay showing the FIRST address's stale
+  // option list, even though the underlying `recipientForm`/save value is
+  // already correct.
+  const [recipientFormKey, setRecipientFormKey] = useState(0);
 
   useEffect(() => {
     let active = true;
@@ -116,8 +135,8 @@ export function BookingAddressSection({
   }, [pickupDrawerOpen, pickupView, onPickupFormOpenChange]);
 
   useEffect(() => {
-    onRecipientFormOpenChange?.(recipientDrawerOpen && recipientView === 'add');
-  }, [recipientDrawerOpen, recipientView, onRecipientFormOpenChange]);
+    onRecipientFormOpenChange?.(recipientDrawerOpen);
+  }, [recipientDrawerOpen, onRecipientFormOpenChange]);
 
   const closePickupDrawer = () => {
     setPickupDrawerOpen(false);
@@ -151,12 +170,18 @@ export function BookingAddressSection({
 
   const closeRecipientDrawer = () => {
     setRecipientDrawerOpen(false);
-    setRecipientView('home');
+    setRecipientRecentOpen(false);
+    setRecipientBookOpen(false);
     setRecipientSearch('');
     setRecipientForm(EMPTY_NEW_ADDRESS);
     setRecipientExistingMatch(null);
+    setRecipientFormKey(0);
   };
 
+  // Always opens straight into the form — prefilled when a recipient is
+  // already set (so the user can review/adjust it), blank otherwise (the
+  // common case: a new or occasional recipient). Never a separate chooser
+  // screen first.
   const openRecipientDrawer = () => {
     if (recipientAddress) {
       setRecipientForm({
@@ -168,17 +193,17 @@ export function BookingAddressSection({
         otherDetails: recipientAddress.otherDetails,
       });
       setRecipientExistingMatch(recipientAddress);
-      setRecipientEntryMode('edit');
-      setRecipientView('add');
     } else {
       setRecipientForm(EMPTY_NEW_ADDRESS);
       setRecipientExistingMatch(null);
-      setRecipientEntryMode('chooser');
-      setRecipientView('home');
     }
     setRecipientDrawerOpen(true);
   };
 
+  // Populates the form from a Recent/Address Book pick — never commits
+  // immediately, so the user can still review or edit before saving. Only
+  // closes the nested picker it was called from (callers do that), not
+  // the main form sheet.
   const fillRecipientFormFrom = (address: Address) => {
     setRecipientForm({
       name: address.name,
@@ -189,8 +214,7 @@ export function BookingAddressSection({
       otherDetails: address.otherDetails,
     });
     setRecipientExistingMatch(address);
-    setRecipientEntryMode('chooser');
-    setRecipientView('add');
+    setRecipientFormKey((k) => k + 1);
     onDirty?.();
   };
 
@@ -279,70 +303,66 @@ export function BookingAddressSection({
         <Drawer
           open={recipientDrawerOpen}
           onClose={closeRecipientDrawer}
-          title={recipientView === 'home' ? 'Select recipient' : recipientView === 'book' ? 'Address Book' : recipientAddress && recipientEntryMode === 'edit' ? 'Edit recipient' : 'Add new recipient'}
-          onBack={
-            // Always reachable from "add"/"book", including when the
-            // drawer opened straight into editing an already-set recipient
-            // — otherwise there is no way back to pick a DIFFERENT saved
-            // address once one is already set.
-            recipientView === 'book' || recipientView === 'add' ? () => setRecipientView('home') : undefined
+          title="Recipient Details"
+          fullScreen
+          footer={
+            <Button
+              className="w-full"
+              disabled={recipientSaving || !isCompleteAddress(recipientForm)}
+              onClick={handleSaveRecipient}
+            >
+              {recipientSaving ? 'Saving…' : recipientExistingMatch ? 'Use this address' : 'Save and use this address'}
+            </Button>
           }
         >
-          {recipientView === 'home' && (
-            <div className="space-y-4">
-              {recentAddresses.length > 0 && (
-                <div>
-                  <p className="mb-1.5 text-xs font-semibold text-gray-500 uppercase tracking-wide">Recent Addresses</p>
-                  <div className="space-y-1.5">
-                    {recentAddresses.map((addr) => (
-                      <button
-                        key={addr.id}
-                        type="button"
-                        onClick={() => fillRecipientFormFrom(addr)}
-                        className="w-full text-left rounded-lg border border-gray-200 p-2.5 hover:border-blue-400 transition-colors"
-                      >
-                        <p className="text-sm font-medium text-gray-900 truncate">{addr.name} · {addr.mobileNumber}</p>
-                        <p className="text-xs text-gray-500 truncate">{abbreviatedLocation(addr)}</p>
-                      </button>
-                    ))}
-                  </div>
-                </div>
-              )}
-              <div className="space-y-2">
-                <Button type="button" variant="outline" className="w-full" onClick={() => setRecipientView('book')}>
-                  View Address Book
-                </Button>
-                <Button
-                  type="button"
-                  variant="outline"
-                  className="w-full"
-                  onClick={() => { setRecipientForm(EMPTY_NEW_ADDRESS); setRecipientExistingMatch(null); setRecipientEntryMode('chooser'); setRecipientView('add'); }}
-                >
-                  <IconPlus className="w-3.5 h-3.5 mr-1" /> Add new recipient
-                </Button>
-              </div>
+          <div className="space-y-4">
+            <div className="grid grid-cols-2 gap-2">
+              <Button type="button" variant="outline" className="w-full" onClick={() => setRecipientRecentOpen(true)}>
+                <IconClock className="w-3.5 h-3.5 mr-1.5" /> Recent Addresses
+              </Button>
+              <Button type="button" variant="outline" className="w-full" onClick={() => setRecipientBookOpen(true)}>
+                <IconBook2 className="w-3.5 h-3.5 mr-1.5" /> Address Book
+              </Button>
             </div>
-          )}
-
-          {recipientView === 'book' && (
-            <AddressBookList
-              addresses={addresses}
-              search={recipientSearch}
-              onSearchChange={setRecipientSearch}
-              onSelect={fillRecipientFormFrom}
-              onAddNew={() => { setRecipientForm(EMPTY_NEW_ADDRESS); setRecipientExistingMatch(null); setRecipientEntryMode('chooser'); setRecipientView('add'); }}
-            />
-          )}
-
-          {recipientView === 'add' && (
             <AddressForm
+              key={recipientFormKey}
               form={recipientForm}
               onChange={(f) => { setRecipientForm(f); setRecipientExistingMatch(null); onDirty?.(); }}
               onSave={handleSaveRecipient}
               saving={recipientSaving}
-              saveLabel={recipientExistingMatch ? 'Use this address' : 'Save and use this address'}
+              showSaveButton={false}
             />
-          )}
+          </div>
+
+          <Drawer open={recipientRecentOpen} onClose={() => setRecipientRecentOpen(false)} title="Recent Addresses">
+            {recentAddresses.length === 0 ? (
+              <p className="text-sm text-gray-500">No saved addresses yet.</p>
+            ) : (
+              <div className="space-y-1.5">
+                {recentAddresses.map((addr) => (
+                  <button
+                    key={addr.id}
+                    type="button"
+                    onClick={() => { fillRecipientFormFrom(addr); setRecipientRecentOpen(false); }}
+                    className="w-full text-left rounded-lg border border-gray-200 p-2.5 hover:border-blue-400 transition-colors"
+                  >
+                    <p className="text-sm font-medium text-gray-900 truncate">{addr.name} · {addr.mobileNumber}</p>
+                    <p className="text-xs text-gray-500 truncate">{abbreviatedLocation(addr)}</p>
+                  </button>
+                ))}
+              </div>
+            )}
+          </Drawer>
+
+          <Drawer open={recipientBookOpen} onClose={() => setRecipientBookOpen(false)} title="Address Book">
+            <AddressBookList
+              addresses={addresses}
+              search={recipientSearch}
+              onSearchChange={setRecipientSearch}
+              onSelect={(addr) => { fillRecipientFormFrom(addr); setRecipientBookOpen(false); }}
+              onAddNew={() => { setRecipientForm(EMPTY_NEW_ADDRESS); setRecipientExistingMatch(null); setRecipientBookOpen(false); }}
+            />
+          </Drawer>
         </Drawer>
       </CardContent>
     </Card>
@@ -475,12 +495,15 @@ function AddressForm({
   onSave,
   saving,
   saveLabel = 'Save and use this address',
+  /** False when the caller renders its own CTA elsewhere (e.g. a `Drawer` `footer`) — the recipient full-screen sheet does this so the button stays reachable regardless of scroll position. */
+  showSaveButton = true,
 }: {
   form: NewAddressFields;
   onChange: (f: NewAddressFields) => void;
   onSave: () => void;
   saving: boolean;
   saveLabel?: string;
+  showSaveButton?: boolean;
 }) {
   return (
     <div className="space-y-3">
@@ -504,9 +527,11 @@ function AddressForm({
           <Input value={form.otherDetails} onChange={(e) => onChange({ ...form, otherDetails: e.target.value })} placeholder="Street, unit, landmark" />
         </div>
       </div>
-      <Button size="sm" className="w-full" disabled={saving || !isCompleteAddress(form)} onClick={onSave}>
-        {saving ? 'Saving…' : saveLabel}
-      </Button>
+      {showSaveButton && (
+        <Button size="sm" className="w-full" disabled={saving || !isCompleteAddress(form)} onClick={onSave}>
+          {saving ? 'Saving…' : saveLabel}
+        </Button>
+      )}
     </div>
   );
 }

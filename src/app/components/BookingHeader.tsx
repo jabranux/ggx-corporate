@@ -20,7 +20,7 @@
 import { IconChevronLeft } from '@tabler/icons-react';
 import { cn } from '../lib/utils';
 
-export const BOOKING_STEP_LABELS = ['Addresses', 'Delivery', 'Item Details', 'Review'] as const;
+export const BOOKING_STEP_LABELS = ['Pickup & Delivery', 'Item Details', 'Review & Payment'] as const;
 
 export interface BookingHeaderProps {
   step: number;

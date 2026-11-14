@@ -20,11 +20,13 @@
  *   render together in the ~70% left column; a sticky ~30% right column
  *   holds the live-updating Review & Payment panel
  *   (`BookingReviewPaymentPanel.tsx`), Confirm Booking included.
- * - **Mobile (<1024px)**: a guided 4-step wizard (Addresses → Delivery →
- *   Item Details → Review), one section at a time with a Continue button
- *   between them; Review is its own step with compact summary cards
- *   (`BookingReviewSummary.tsx`) and a sticky bottom payment bar
- *   (`BookingPaymentSummaryBar.tsx`).
+ * - **Mobile (<1024px)**: a guided 3-step wizard (Pickup & Delivery → Item
+ *   Details → Review), one step at a time with a Continue button between
+ *   them. Step 0 combines Addresses and Delivery as two sections on one
+ *   page (both must be valid — complete addresses AND, for Standard, a
+ *   selected pickup date — before Continue enables); Review is its own
+ *   step with compact summary cards (`BookingReviewSummary.tsx`) and a
+ *   sticky bottom payment bar (`BookingPaymentSummaryBar.tsx`).
  *
  * `BookingHeader` (compact back/exit + title) is shared by both — it's
  * also given `isDesktop` directly (not a `lg:` class of its own) so its
@@ -61,7 +63,7 @@ import { BookingPaymentSummaryBar } from '../../components/BookingPaymentSummary
 import { BookingReviewSummary } from '../../components/BookingReviewSummary';
 import { BookingHeader } from '../../components/BookingHeader';
 
-const REVIEW_STEP = 3;
+const REVIEW_STEP = 2;
 
 export function BookDelivery() {
   const navigate = useNavigate();
@@ -189,13 +191,20 @@ export function BookDelivery() {
     ? 'Enter a valid Cash on Delivery amount (0 or greater).'
     : undefined;
 
-  // Per-step validity/reason for the Continue button between steps 0–2 —
+  // Per-step validity/reason for the Continue button between steps 0–1 —
   // each step must be individually valid before advancing, not only at
-  // final Confirm.
-  const stepValid = [addressesComplete && !addressFormOpen, pickupDateComplete, itemDetailsValid];
+  // final Confirm. Step 0 (Pickup & Delivery) now combines both the
+  // address-completeness and pickup-date checks, since Addresses and
+  // Delivery share one step.
+  const stepValid = [addressesComplete && !addressFormOpen && pickupDateComplete, itemDetailsValid];
   const stepBlockReason = [
-    addressFormOpen ? 'Save the address you’re editing to continue.' : 'Choose a complete pickup address and recipient to continue.',
-    pickupDateStale ? 'Your selected pickup date is no longer available — choose another.' : 'Choose a pickup date to continue.',
+    addressFormOpen
+      ? 'Save the address you’re editing to continue.'
+      : !addressesComplete
+      ? 'Choose a complete pickup address and recipient to continue.'
+      : pickupDateStale
+      ? 'Your selected pickup date is no longer available — choose another.'
+      : 'Choose a pickup date to continue.',
     !draft.itemDescription.trim()
       ? 'Add an item description to continue.'
       : !declaredValueValid
@@ -420,18 +429,29 @@ export function BookDelivery() {
           </div>
         </div>
       ) : (
-        // Mobile: guided 4-step wizard, one section at a time.
+        // Mobile: guided 3-step wizard, one step at a time. Step 0
+        // combines Addresses and Delivery as two sections on one page.
         <>
           <div className="pt-3 pb-32">
-            {step === 0 && addressSection}
-            {step === 1 && deliverySection}
-            {step === 2 && itemSection}
+            {step === 0 && (
+              <div className="space-y-4">
+                <div>
+                  <p className="mb-1.5 text-xs font-semibold text-gray-400 uppercase tracking-wide">Addresses</p>
+                  {addressSection}
+                </div>
+                <div>
+                  <p className="mb-1.5 text-xs font-semibold text-gray-400 uppercase tracking-wide">Delivery</p>
+                  {deliverySection}
+                </div>
+              </div>
+            )}
+            {step === 1 && itemSection}
             {step === REVIEW_STEP && (
               <BookingReviewSummary
                 draft={draft}
                 onEditAddresses={() => goToStepFromReview(0)}
-                onEditDelivery={() => goToStepFromReview(1)}
-                onEditItem={() => goToStepFromReview(2)}
+                onEditDelivery={() => goToStepFromReview(0)}
+                onEditItem={() => goToStepFromReview(1)}
                 deliveryEstimateLabel={deliveryEstimateLabel}
               />
             )}
