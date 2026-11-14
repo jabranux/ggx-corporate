@@ -28,23 +28,23 @@
  *   step with compact summary cards (`BookingReviewSummary.tsx`) and a
  *   sticky bottom payment bar (`BookingPaymentSummaryBar.tsx`).
  *
- * `BookingHeader` (compact back/exit + title) is shared by both — it's
- * also given `isDesktop` directly (not a `lg:` class of its own) so its
- * segmented step-progress indicator (mobile-only) can never disagree with
- * which layout is actually mounted. The back/exit action itself also
- * differs: on desktop there is no "previous step" to return to, so Back
- * always asks to exit; on mobile it steps backward (or returns to Review
- * when reached via Edit) until step 0, where it also asks to exit. The
- * default app header/bottom nav are hidden for this route
- * (`BasicCorporateLayout.tsx`) in favor of this compact header on both
- * layouts.
+ * `BookingHeader` (compact back/exit + title + step progress) is
+ * MOBILE-ONLY — it steps backward (or returns to Review when reached via
+ * Edit) until step 0, where it asks to exit. Desktop has no step wizard to
+ * step back through, so its page header is the plain GGX Corporate page-
+ * title pattern (`text-3xl font-bold` + `text-gray-600 mt-1` subtitle, no
+ * back control — same as Bulk Upload, Support Tickets, Address Book),
+ * rendered directly below; leaving mid-booking on desktop goes through
+ * `exitGuard` (real navigation, e.g. a sidebar link) instead of an in-page
+ * Back button. `BasicCorporateLayout.tsx` hides its own header/bottom nav
+ * for this route only below `lg:` — desktop keeps the standard app header
+ * above this page's own title.
  *
  * Phase 1 scope: saved-address prefill only (pickup + recipient). No
  * shortened journey and no remembered item details — deferred.
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router';
-import { IconChevronLeft } from '@tabler/icons-react';
 import { Button } from '../../components/ui/Button';
 import { ConfirmDialog } from '../../components/ui/Dialog';
 import { useAuth } from '../../contexts/AuthContext';
@@ -272,13 +272,12 @@ export function BookDelivery() {
     setStep((s) => Math.min(REVIEW_STEP, s + 1));
   };
 
+  // Mobile wizard only now — desktop's page header has no back control
+  // (matches the rest of GGX Corporate: Bulk Upload, Support Tickets, and
+  // Address Book have none either). Desktop still asks before leaving an
+  // in-progress booking via `exitGuard`, which intercepts real navigation
+  // (a sidebar link, browser back) regardless of this handler.
   const handleHeaderBack = () => {
-    // Desktop has no step wizard to step back through — the whole form is
-    // always on one page, so Back is purely an exit action.
-    if (isDesktop) {
-      setShowExitConfirm(true);
-      return;
-    }
     // Check editReturn first — reached via "Edit" from Review (including
     // step 0), Back must return to Review, never trigger the exit
     // confirmation meant for a first-time pass through step 0.
@@ -403,23 +402,10 @@ export function BookDelivery() {
         variant="destructive"
       />
 
-      {/* Desktop: the standard GGX Corporate desktop page-title pattern
-          (consistent with Bulk Upload etc.) — not the mobile compact
-          header. `BookingHeader`'s sticky compact bar + step progress is
-          mobile-only now (see its own docblock). */}
-      {isDesktop && (
-        <div className="mb-6 flex items-center gap-3">
-          <button
-            type="button"
-            onClick={handleHeaderBack}
-            aria-label="Back"
-            className="flex-shrink-0 -ml-1.5 flex h-10 w-10 items-center justify-center rounded-md text-gray-500 hover:bg-gray-100 hover:text-gray-700"
-          >
-            <IconChevronLeft className="h-6 w-6" />
-          </button>
-          <h1 className="text-3xl font-bold text-gray-900">Book a delivery</h1>
-        </div>
-      )}
+      {/* `BookingHeader`'s sticky compact bar + step progress is mobile-only
+          (see its own docblock). Desktop's title/subtitle render below,
+          inside the same max-width container as the booking content — see
+          that block's own comment. */}
       {!isDesktop && <BookingHeader step={step} onBack={handleHeaderBack} />}
 
       {/* Switched on the same `isDesktop` JS flag the header's Back/Exit
@@ -445,8 +431,17 @@ export function BookDelivery() {
         // Constrained to a centered 1280px-max container so the ~70/30
         // columns stay scannable on ultrawide monitors — this wrapper is
         // local to the booking content only (the sidebar/app header live
-        // outside this page entirely).
+        // outside this page entirely). The page title/subtitle live in
+        // this same container (not a separate full-width block above it)
+        // so they share its left edge at every viewport width — exactly
+        // the existing GGX Corporate desktop page-header pattern (Bulk
+        // Upload, Support Tickets, Address Book: `text-3xl font-bold` title
+        // + `text-gray-600 mt-1` subtitle in one `<div>`, no back control).
         <div className="mx-auto w-full max-w-[1280px]">
+          <div className="mb-6">
+            <h1 className="text-3xl font-bold text-gray-900">Book a delivery</h1>
+            <p className="text-gray-600 mt-1">Enter your delivery details to book a shipment.</p>
+          </div>
           <div className="grid grid-cols-[7fr_3fr] gap-6 items-start">
             <div className="space-y-4 min-w-0">
               {addressSection}
