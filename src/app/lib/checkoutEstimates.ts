@@ -40,10 +40,18 @@ export function classifyRegion(province: string): DeliveryRegion {
   return 'luzon';
 }
 
+/** Single source of truth for Standard delivery day-counts by region — `STANDARD_LABEL` and `basicPickupScheduling.ts`'s `estimateDeliveryDateRange` both derive from this instead of each hardcoding their own numbers. */
+export const STANDARD_DAY_RANGE: Record<DeliveryRegion, [number, number]> = {
+  metro: [1, 2],
+  luzon: [3, 5],
+  vismin: [5, 7],
+  unknown: [3, 7],
+};
+
 const STANDARD_LABEL: Record<DeliveryRegion, string> = {
-  metro: 'Estimated 1–2 days',
-  luzon: 'Estimated 3–5 days',
-  vismin: 'Estimated 5–7 days',
+  metro: `Estimated ${STANDARD_DAY_RANGE.metro[0]}–${STANDARD_DAY_RANGE.metro[1]} days`,
+  luzon: `Estimated ${STANDARD_DAY_RANGE.luzon[0]}–${STANDARD_DAY_RANGE.luzon[1]} days`,
+  vismin: `Estimated ${STANDARD_DAY_RANGE.vismin[0]}–${STANDARD_DAY_RANGE.vismin[1]} days`,
   unknown: 'Estimated delivery depends on location',
 };
 

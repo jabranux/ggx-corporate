@@ -10,9 +10,10 @@ import { useAuth } from '../../contexts/AuthContext';
  * Basic account home/dashboard — minimal by design (spec §9): a booking
  * entry point, a track-shipment shortcut, an empty "recent transactions"
  * state, and a few feature shortcuts. No Business+ operational dashboards,
- * advanced analytics, or business metrics. The full Basic booking +
- * personalized dashboard experience is a separate, later phase — the "Book a
- * delivery" CTA below is intentionally a placeholder, not a real flow.
+ * advanced analytics, or business metrics. "Book a delivery" now opens the
+ * real single-booking flow at `/dashboard/book-delivery`
+ * (`pages/basic-account/BookDelivery.tsx`); the full personalized dashboard
+ * experience (recent transactions, etc.) remains a separate, later phase.
  */
 export function BasicHome() {
   const navigate = useNavigate();
@@ -42,9 +43,9 @@ export function BasicHome() {
             </div>
             <h3 className="text-base font-semibold text-gray-900">Book a delivery</h3>
             <p className="text-sm text-gray-500 mt-1">
-              Standard delivery booking is coming soon to the Basic account experience.
+              Send a parcel with rider pickup or drop-off, and track its fee and status as you go.
             </p>
-            <Button className="mt-4" disabled>Coming soon</Button>
+            <Button className="mt-4" onClick={() => navigate('/dashboard/book-delivery')}>Book a delivery</Button>
           </CardContent>
         </Card>
 

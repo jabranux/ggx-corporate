@@ -71,6 +71,26 @@ export function LocationCascadeFields({
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  // Keeps `provinceId` (and, by cascade, the loaded city/district lists) in
+  // sync when `province` changes from OUTSIDE this component's own
+  // handleProvince — e.g. a caller prefilling the whole address at once
+  // (BookingAddressSection's "Recent Addresses"/"Address Book" shortcuts).
+  // Without this, only the display value of the Province select updates
+  // (it's a controlled `value={province}` prop) while City/Barangay stay
+  // stuck on "Select province first" because their option lists are keyed
+  // off internal `provinceId`/`cityId` state that only handleProvince/
+  // handleCity update — city/barangay are correct in the parent's state
+  // and still save fine, but the dropdowns visually look unfilled.
+  useEffect(() => {
+    if (!provinces.length) return;
+    const match = provinces.find((p) => p.name === province);
+    setProvinceId((prev) => {
+      const next = match?.id ?? null;
+      return prev === next ? prev : next;
+    });
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [province, provinces]);
+
   const prevProvinceIdRef = useRef<number | null>(null);
   useEffect(() => {
     if (!provinceId) { setCities([]); setCityId(null); return; }

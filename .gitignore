@@ -9,3 +9,5 @@ dist-ssr
 # QA scripts and artifacts (local only)
 _qa_*.mjs
 _qa_*/
+
+.vercel

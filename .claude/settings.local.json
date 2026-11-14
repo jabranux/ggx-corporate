@@ -134,7 +134,12 @@
       "Bash(node _qa_verify.mjs)",
       "Read(//tmp/**)",
       "WebFetch(domain:app.staging.gogoxpress.com)",
-      "Bash(python _build_feature_doc.py)"
+      "Bash(python _build_feature_doc.py)",
+      "WebSearch",
+      "Bash(npx --yes tsc --noEmit --target ES2022 --module ESNext --moduleResolution bundler --allowImportingTsExtensions --skipLibCheck --strict server/seed.ts)",
+      "Bash(npx --yes tsc --noEmit --target ES2022 --module ESNext --moduleResolution bundler --allowImportingTsExtensions --skipLibCheck --strict server/notifications.ts server/orderProvider.ts)",
+      "Bash(npm test *)",
+      "Bash(node --test --test-concurrency=1 tests/heyq-adapter.test.mjs)"
     ]
   }
 }

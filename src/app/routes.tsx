@@ -80,6 +80,8 @@ import { RewardsPage } from './pages/basic-account/RewardsPage';
 import { VouchersPage } from './pages/basic-account/VouchersPage';
 import { ReferralsPage } from './pages/basic-account/ReferralsPage';
 import { SulitBundlesPage } from './pages/basic-account/SulitBundlesPage';
+import { BookDelivery } from './pages/basic-account/BookDelivery';
+import { BookDeliverySuccess } from './pages/basic-account/BookDeliverySuccess';
 import { TrackingPage } from './pages/TrackingPage';
 import { StorefrontPreview } from './pages/StorefrontPreview';
 import { StorefrontProductDetail } from './pages/StorefrontProductDetail';
@@ -272,6 +274,8 @@ export const router = createBrowserRouter([
       { path: 'users-permissions', element: <AdminRoute><BusinessPlusOnlyRoute><UsersPermissions /></BusinessPlusOnlyRoute></AdminRoute> },
 
       // Basic-only (new GGX Basic Account experience — spec §4/§6).
+      { path: 'book-delivery',         element: <BasicOnlyRoute><BookDelivery /></BasicOnlyRoute> },
+      { path: 'book-delivery/success', element: <BasicOnlyRoute><BookDeliverySuccess /></BasicOnlyRoute> },
       { path: 'basic-earnings',   element: <BasicOnlyRoute><BasicEarningsPage /></BasicOnlyRoute> },
       { path: 'payout-settings',  element: <BasicOnlyRoute><PayoutSettingsPage /></BasicOnlyRoute> },
       { path: 'rewards',          element: <BasicOnlyRoute><RewardsPage /></BasicOnlyRoute> },

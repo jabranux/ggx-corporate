@@ -96,6 +96,7 @@ export const DS_NAV_GROUPS: DSNavGroup[] = [
       { label: 'Module Card', path: 'ggx-components/module-card' },
       { label: 'OTP Dialog', path: 'ggx-components/otp-dialog' },
       { label: 'Payment Options', path: 'patterns/payment-options' },
+      { label: 'Shipping Fee Payer', path: 'ggx-components/shipping-fee-payer' },
       { label: 'Stat Card', path: 'ggx-components/stat-card' },
     ],
   },

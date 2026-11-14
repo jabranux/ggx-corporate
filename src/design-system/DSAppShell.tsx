@@ -65,6 +65,7 @@ import { LocationCascadePage } from './pages/ggx-components/LocationCascadePage'
 import { ModuleCardPage } from './pages/ggx-components/ModuleCardPage';
 import { OtpDialogPage } from './pages/ggx-components/OtpDialogPage';
 import { StatCardPage } from './pages/ggx-components/StatCardPage';
+import { ShippingFeePayerPage } from './pages/ggx-components/ShippingFeePayerPage';
 
 // Patterns
 import { PatternsOverviewPage } from './pages/patterns/PatternsOverviewPage';
@@ -154,6 +155,7 @@ export function DSAppShell() {
         <Route path="ggx-components/module-card" element={<ModuleCardPage />} />
         <Route path="ggx-components/otp-dialog" element={<OtpDialogPage />} />
         <Route path="ggx-components/stat-card" element={<StatCardPage />} />
+        <Route path="ggx-components/shipping-fee-payer" element={<ShippingFeePayerPage />} />
 
         {/* Patterns */}
         <Route path="patterns/overview" element={<PatternsOverviewPage />} />
