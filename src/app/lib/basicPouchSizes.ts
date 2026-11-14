@@ -27,8 +27,8 @@ export interface BasicPouchSizeDef {
   /**
    * Official GGX parcel illustration for this size, loaded directly from
    * gogoxpress.com (same convention as the GGX logo in `BasicLayout.tsx`) —
-   * no local asset download. `xl` and `xxl` share the one official box
-   * asset; there is no distinct XL/XXL illustration.
+   * no local asset download. Box and Oversized each have their own distinct
+   * illustration (verified live on gogoxpress.com) — no shared placeholder.
    */
   iconUrl: string;
 }
@@ -41,15 +41,18 @@ export const BASIC_POUCH_ICON_FILENAME: Record<BasicPouchSizeKey, string> = {
   medium: 'parcel-medium.svg',
   large: 'parcel-large.svg',
   xl: 'parcel-box.svg',
-  xxl: 'parcel-box.svg',
+  xxl: 'parcel-oversized.svg',
 };
 
+// `xl`/`xxl` keys are kept as-is (unchanged internal identifiers — see
+// `bookingFees.ts`'s `BASIC_POUCH_FEE` and every `BasicPouchSizeKey` consumer)
+// even though their customer-facing labels are now "Box" and "Oversized".
 export const BASIC_POUCH_SIZES: BasicPouchSizeDef[] = [
-  { key: 'small',  label: 'Small Pouch',  dims: '24 × 36 cm',      maxWeight: '3 kg',  price: 80,  iconUrl: GGX_PARCEL_ICON_BASE + BASIC_POUCH_ICON_FILENAME.small },
-  { key: 'medium', label: 'Medium Pouch', dims: '30.5 × 46 cm',    maxWeight: '5 kg',  price: 100, iconUrl: GGX_PARCEL_ICON_BASE + BASIC_POUCH_ICON_FILENAME.medium },
-  { key: 'large',  label: 'Large Pouch',  dims: '40 × 60 cm',      maxWeight: '10 kg', price: 130, iconUrl: GGX_PARCEL_ICON_BASE + BASIC_POUCH_ICON_FILENAME.large },
-  { key: 'xl',     label: 'XL Box',       dims: '50 × 40 × 30 cm', maxWeight: '20 kg', price: 180, iconUrl: GGX_PARCEL_ICON_BASE + BASIC_POUCH_ICON_FILENAME.xl },
-  { key: 'xxl',    label: 'XXL Box',      dims: '60 × 50 × 40 cm', maxWeight: '30 kg', price: 250, iconUrl: GGX_PARCEL_ICON_BASE + BASIC_POUCH_ICON_FILENAME.xxl },
+  { key: 'small',  label: 'Small Pouch',  dims: '24 × 36 cm',       maxWeight: '3 kg',        price: 80,  iconUrl: GGX_PARCEL_ICON_BASE + BASIC_POUCH_ICON_FILENAME.small },
+  { key: 'medium', label: 'Medium Pouch', dims: '30.5 × 46 cm',     maxWeight: '5 kg',        price: 100, iconUrl: GGX_PARCEL_ICON_BASE + BASIC_POUCH_ICON_FILENAME.medium },
+  { key: 'large',  label: 'Large Pouch',  dims: '39 × 51 × 10 cm',  maxWeight: '10 kg',       price: 130, iconUrl: GGX_PARCEL_ICON_BASE + BASIC_POUCH_ICON_FILENAME.large },
+  { key: 'xl',     label: 'Box',          dims: '46 × 30 × 23 cm',  maxWeight: '6 kg',        price: 180, iconUrl: GGX_PARCEL_ICON_BASE + BASIC_POUCH_ICON_FILENAME.xl },
+  { key: 'xxl',    label: 'Oversized',    dims: '40 × 40 × 40 cm limit', maxWeight: '20 kg',  price: 250, iconUrl: GGX_PARCEL_ICON_BASE + BASIC_POUCH_ICON_FILENAME.xxl },
 ];
 
 export function getBasicPouchSize(key: BasicPouchSizeKey): BasicPouchSizeDef {

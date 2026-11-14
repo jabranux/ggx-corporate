@@ -193,8 +193,15 @@ export function BasicCorporateLayout() {
       </aside>
 
       <div className="flex-1 flex flex-col min-w-0 overflow-hidden">
-        {!isBookingFlow && (
-        <header className="h-14 bg-white border-b border-gray-200 flex items-center gap-3 px-4 lg:px-6 flex-shrink-0">
+        {/* The booking flow's mobile compact header (`BookingHeader.tsx`)
+            replaces this entirely below `lg:` — this standard app header
+            (notifications + account menu) stays for booking on desktop,
+            where there's no step wizard and the page needs the same global
+            header every other desktop page has. */}
+        <header className={cn(
+          'h-14 bg-white border-b border-gray-200 items-center gap-3 px-4 lg:px-6 flex-shrink-0',
+          isBookingFlow ? 'hidden lg:flex' : 'flex',
+        )}>
           {/* Mobile-only brand (desktop sidebar already shows it). */}
           <div className="flex items-center gap-2 lg:hidden">
             <img
@@ -268,7 +275,6 @@ export function BasicCorporateLayout() {
             </div>
           </div>
         </header>
-        )}
 
         <main className={cn('flex-1 overflow-auto', !isBookingFlow && 'pb-16 lg:pb-0')}>
           <Outlet />

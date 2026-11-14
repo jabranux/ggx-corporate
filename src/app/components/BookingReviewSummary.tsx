@@ -89,7 +89,7 @@ export function BookingReviewSummary({ draft, onEditAddresses, onEditDelivery, o
       <ReviewSection label="Delivery" onEdit={onEditDelivery}>
         <p className="text-sm text-gray-900">
           {draft.firstMile === 'pickup' ? 'Rider Pickup' : 'Drop-off'}
-          {draft.serviceType === 'standard' && draft.pickupDate && (
+          {draft.firstMile === 'pickup' && draft.serviceType === 'standard' && draft.pickupDate && (
             <> · {new Date(draft.pickupDate).toLocaleDateString('en-PH', { month: 'short', day: 'numeric' })}</>
           )}
         </p>

@@ -1,10 +1,9 @@
 /**
- * Shared fee-breakdown + voucher + payment-method content for the GGX Basic
- * single-booking Review step — embedded inside the desktop sticky Review &
- * Payment panel (`BookingReviewPaymentPanel.tsx`, behind its own collapsible
- * toggle) and inside the mobile "View breakdown" drawer
- * (`BookingPaymentSummaryBar.tsx`'s drawer) so the two surfaces never
- * duplicate this logic.
+ * Shared fee-breakdown + promos/discounts + payment-method content for the
+ * GGX Basic single-booking Review step — always rendered in full (no
+ * collapsible toggle) inside both the desktop sticky Review & Payment panel
+ * (`BookingReviewPaymentPanel.tsx`) and the mobile Review step's inline card
+ * (`BookDelivery.tsx`), so the two surfaces never duplicate this logic.
  *
  * Distinguishes merchandise COD (collected separately from the receiver)
  * from the shipping charge — COD must never be added into `totals.total`
@@ -12,14 +11,20 @@
  * own line, never blended into the fee lines above it.
  */
 import { useState } from 'react';
-import { IconTag, IconX, IconLoader2, IconChevronDown, IconCash, IconQrcode, IconWallet } from '@tabler/icons-react';
+import { IconTag, IconX, IconLoader2, IconChevronDown, IconCash, IconQrcode, IconWallet, IconCheck } from '@tabler/icons-react';
 import { Button } from './ui/Button';
 import { Drawer } from './ui/Dialog';
 import { Input } from './ui/Input';
 import { ShippingFeePayerSelector } from './ShippingFeePayerSelector';
-import { validateBookingVoucher, computeVoucherDiscount } from '../services/bookingVoucherService';
+import { validateBookingVoucher, computeVoucherDiscount, listAvailableBookingVouchers } from '../services/bookingVoucherService';
 import type { BookingDraft, SenderPaymentMethod } from '../lib/basicBookingDraft';
 import type { BookingTotals } from '../lib/basicBookingTotals';
+import { cn } from '../lib/utils';
+
+function fmtExpiry(iso: string): string {
+  const [y, m, d] = iso.split('-').map(Number);
+  return new Date(y, m - 1, d).toLocaleDateString('en-PH', { month: 'short', day: 'numeric', year: 'numeric' });
+}
 
 const SENDER_METHOD_LABEL: Record<SenderPaymentMethod, { label: string; icon: typeof IconCash }> = {
   cash_pickup: { label: 'Cash', icon: IconCash },
@@ -46,9 +51,9 @@ export function BookingFeeBreakdownContent({ draft, onChange, totals, showFinalT
   const [voucherOpen, setVoucherOpen] = useState(false);
   const [paymentOpen, setPaymentOpen] = useState(false);
 
-  const handleApplyVoucher = async () => {
-    const code = voucherInput.trim();
-    if (!code) return;
+  const availablePromos = listAvailableBookingVouchers();
+
+  const applyCode = async (code: string) => {
     setValidating(true);
     setVoucherError(null);
     const result = await validateBookingVoucher(code);
@@ -59,7 +64,13 @@ export function BookingFeeBreakdownContent({ draft, onChange, totals, showFinalT
       return;
     }
     onChange({ voucherCode: result.code, voucherDiscount: computeVoucherDiscount(result, totals.shipping) });
-    setVoucherOpen(false);
+    setVoucherInput('');
+  };
+
+  const handleApplyVoucher = async () => {
+    const code = voucherInput.trim();
+    if (!code) return;
+    await applyCode(code);
   };
 
   const handleRemoveVoucher = () => {
@@ -94,7 +105,7 @@ export function BookingFeeBreakdownContent({ draft, onChange, totals, showFinalT
         )}
         {totals.discount > 0 && (
           <div className="flex justify-between text-green-700">
-            <span>Voucher ({draft.voucherCode})</span>
+            <span>Promo ({draft.voucherCode})</span>
             <span className="font-medium">−{fmtPHP(totals.discount)}</span>
           </div>
         )}
@@ -107,7 +118,7 @@ export function BookingFeeBreakdownContent({ draft, onChange, totals, showFinalT
         </div>
       )}
 
-      {/* Voucher — demo only, never a real transaction. */}
+      {/* Promo/discount — demo only, never a real transaction. */}
       <div>
         {draft.voucherCode ? (
           <div className="flex items-center justify-between gap-2 rounded-lg border border-green-200 bg-green-50 px-3 py-2">
@@ -116,34 +127,76 @@ export function BookingFeeBreakdownContent({ draft, onChange, totals, showFinalT
               <span className="font-medium truncate">{draft.voucherCode}</span>
               <span className="text-xs text-green-700 flex-shrink-0">applied</span>
             </div>
-            <button type="button" onClick={handleRemoveVoucher} className="text-green-700 hover:text-green-900 flex-shrink-0" aria-label="Remove voucher">
+            <button type="button" onClick={handleRemoveVoucher} className="text-green-700 hover:text-green-900 flex-shrink-0" aria-label="Remove promo">
               <IconX className="w-4 h-4" />
             </button>
           </div>
         ) : (
           <button type="button" onClick={() => setVoucherOpen(true)} className="flex items-center gap-1.5 text-sm font-semibold text-blue-600">
-            <IconTag className="w-3.5 h-3.5" /> View vouchers
+            <IconTag className="w-3.5 h-3.5" /> View promos &amp; discounts
           </button>
         )}
       </div>
 
-      <Drawer open={voucherOpen} onClose={() => setVoucherOpen(false)} title="Vouchers">
-        <div className="space-y-1.5">
-          <div className="flex items-center gap-2">
-            <Input
-              autoFocus
-              value={voucherInput}
-              onChange={(e) => setVoucherInput(e.target.value.toUpperCase())}
-              onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); handleApplyVoucher(); } }}
-              placeholder="Voucher code"
-              className="uppercase"
-            />
-            <Button size="sm" variant="outline" disabled={!voucherInput.trim() || validating} onClick={handleApplyVoucher}>
-              {validating ? <IconLoader2 className="w-4 h-4 animate-spin" /> : 'Apply'}
-            </Button>
+      <Drawer open={voucherOpen} onClose={() => setVoucherOpen(false)} title="Promos and Discounts">
+        <div className="space-y-4">
+          <div className="space-y-1.5">
+            <label className="block text-xs font-medium text-gray-600">Have a promo code?</label>
+            <div className="flex items-center gap-2">
+              <Input
+                autoFocus
+                value={voucherInput}
+                onChange={(e) => setVoucherInput(e.target.value.toUpperCase())}
+                onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); handleApplyVoucher(); } }}
+                placeholder="Enter promo code"
+                className="uppercase"
+              />
+              <Button size="sm" variant="outline" disabled={!voucherInput.trim() || validating} onClick={handleApplyVoucher}>
+                {validating ? <IconLoader2 className="w-4 h-4 animate-spin" /> : 'Apply'}
+              </Button>
+            </div>
+            {voucherError && <p className="text-xs text-red-600">{voucherError}</p>}
           </div>
-          {voucherError && <p className="text-xs text-red-600">{voucherError}</p>}
-          <p className="text-[11px] text-gray-400">Demo voucher only — not a real discount or transaction.</p>
+
+          <div className="space-y-2">
+            <p className="text-xs font-semibold text-gray-400 uppercase tracking-wide">Available promos</p>
+            {availablePromos.length === 0 ? (
+              <p className="rounded-lg border border-dashed border-gray-200 px-3 py-4 text-center text-sm text-gray-500">
+                No available promos right now. Have a promo code? Enter it above.
+              </p>
+            ) : (
+              <div className="space-y-2">
+                {availablePromos.map((promo) => {
+                  const applied = draft.voucherCode === promo.code;
+                  return (
+                    <div
+                      key={promo.code}
+                      className={cn(
+                        'flex items-start justify-between gap-3 rounded-lg border p-3',
+                        applied ? 'border-green-200 bg-green-50' : 'border-gray-200',
+                      )}
+                    >
+                      <div className="min-w-0">
+                        <p className="text-sm font-semibold text-gray-900">{promo.name}</p>
+                        <p className="mt-0.5 text-xs text-gray-600">{promo.description}</p>
+                        {promo.expiresAt && <p className="mt-0.5 text-[11px] text-gray-400">Valid until {fmtExpiry(promo.expiresAt)}</p>}
+                      </div>
+                      {applied ? (
+                        <span className="flex flex-shrink-0 items-center gap-1 text-xs font-semibold text-green-700">
+                          <IconCheck className="w-3.5 h-3.5" /> Applied
+                        </span>
+                      ) : (
+                        <Button size="sm" variant="outline" disabled={validating} onClick={() => applyCode(promo.code)} className="flex-shrink-0">
+                          Apply
+                        </Button>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+          <p className="text-[11px] text-gray-400">Demo promos only — not a real discount or transaction.</p>
         </div>
       </Drawer>
 

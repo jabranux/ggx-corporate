@@ -26,11 +26,28 @@ export interface BookingVoucherResult {
   message?: string;
 }
 
-const MOCK_BOOKING_VOUCHERS: Record<string, { discountType: VoucherDiscountType; discountValue: number }> = {
-  SULIT10: { discountType: 'fixed', discountValue: 10 },
-  GOGO20: { discountType: 'fixed', discountValue: 20 },
-  FIRST15: { discountType: 'fixed', discountValue: 15 },
+/** A voucher as shown in the "Available promos" list — the same mock catalog
+ * entries `validateBookingVoucher` matches against, with the display copy
+ * the list needs. `expiresAt` is optional (ISO date) — not every promo has one. */
+export interface BookingVoucherCatalogEntry {
+  code: string;
+  name: string;
+  description: string;
+  discountType: VoucherDiscountType;
+  discountValue: number;
+  expiresAt?: string;
+}
+
+const MOCK_BOOKING_VOUCHERS: Record<string, BookingVoucherCatalogEntry> = {
+  SULIT10: { code: 'SULIT10', name: 'Sulit Shipping Discount', description: '₱10 off your shipping fee', discountType: 'fixed', discountValue: 10, expiresAt: '2026-12-31' },
+  GOGO20: { code: 'GOGO20', name: 'GoGo Welcome Discount', description: '₱20 off your shipping fee', discountType: 'fixed', discountValue: 20, expiresAt: '2026-12-31' },
+  FIRST15: { code: 'FIRST15', name: 'First Booking Discount', description: '₱15 off your shipping fee', discountType: 'fixed', discountValue: 15 },
 };
+
+/** The current "Available promos" list — demo-only, same catalog `validateBookingVoucher` checks against. */
+export function listAvailableBookingVouchers(): BookingVoucherCatalogEntry[] {
+  return Object.values(MOCK_BOOKING_VOUCHERS);
+}
 
 /** DEMO ONLY — never wired to real redemption or any backend call. */
 export async function validateBookingVoucher(code: string): Promise<BookingVoucherResult> {
@@ -42,10 +59,10 @@ export async function validateBookingVoucher(code: string): Promise<BookingVouch
       code: normalized,
       discountType: 'fixed',
       discountValue: 0,
-      message: 'Invalid or expired voucher code.',
+      message: 'Invalid or expired promo code.',
     };
   }
-  return { valid: true, code: normalized, ...match };
+  return { valid: true, code: normalized, discountType: match.discountType, discountValue: match.discountValue };
 }
 
 /** Discount is always capped at the shipping fee it applies to — never negative, never over 100% of it. */

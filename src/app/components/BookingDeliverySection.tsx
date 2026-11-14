@@ -6,13 +6,15 @@
  * from the mock `serviceabilityService` (NOT production validation).
  */
 import { useEffect, useMemo, useState } from 'react';
-import { IconTruckDelivery, IconBuildingStore, IconBolt } from '@tabler/icons-react';
+import { IconTruckDelivery, IconBuildingStore, IconBolt, IconMapPin } from '@tabler/icons-react';
 import { Card, CardContent } from './ui/Card';
+import { Drawer } from './ui/Dialog';
 import { CheckoutDeliveryOptions } from './CheckoutDeliveryOptions';
 import { checkServiceability } from '../services/serviceabilityService';
 import { getFeatureStateSync } from '../services/featureEnablementService';
 import { classifyRegion } from '../lib/checkoutEstimates';
 import { getEligiblePickupDates, estimateDeliveryDateRange } from '../lib/basicPickupScheduling';
+import { DROPOFF_LOCATIONS } from '../data/dropoffLocations';
 import type { Address } from './AddressBook';
 import type { FirstMile } from '../lib/basicBookingDraft';
 import type { DeliveryServiceType } from '../services/transactionService';
@@ -48,6 +50,7 @@ export function BookingDeliverySection({
 }: BookingDeliverySectionProps) {
   const [metroOnly, setMetroOnly] = useState(false);
   const [note, setNote] = useState<string | undefined>(undefined);
+  const [dropoffLocationsOpen, setDropoffLocationsOpen] = useState(false);
 
   // On-Demand is an enabled-only capability for Basic (same gate
   // `BulkSpreadsheet.tsx` checks via `getFeatureStateSync('on_demand', ...)`
@@ -138,7 +141,45 @@ export function BookingDeliverySection({
         )}
         {note && <p className="text-xs text-gray-500">{note}</p>}
 
-        {serviceType === 'standard' ? (
+        {/* Drop-off has no rider and no pickup date to choose — scheduling
+            info above is pickup-specific, so it's replaced entirely by
+            access to drop-off locations, regardless of service type. */}
+        {firstMile === 'dropoff' ? (
+          <div className="pt-1">
+            <button
+              type="button"
+              onClick={() => setDropoffLocationsOpen(true)}
+              className="flex items-center gap-2 rounded-lg border border-gray-200 px-3 py-2 text-sm font-medium text-blue-600 hover:bg-blue-50 transition-colors"
+            >
+              <IconMapPin className="w-4 h-4 flex-shrink-0" />
+              View drop-off locations
+            </button>
+
+            <Drawer
+              open={dropoffLocationsOpen}
+              onClose={() => setDropoffLocationsOpen(false)}
+              title="Drop-off locations"
+            >
+              {DROPOFF_LOCATIONS.length === 0 ? (
+                <p className="py-6 text-center text-sm text-gray-500">No drop-off locations are available right now.</p>
+              ) : (
+                <div className="space-y-3">
+                  {DROPOFF_LOCATIONS.map((loc) => (
+                    <div key={loc.id} className="rounded-lg border border-gray-200 p-3">
+                      <p className="text-sm font-semibold text-gray-900">{loc.name}</p>
+                      <p className="mt-1 flex items-start gap-1.5 text-xs text-gray-600">
+                        <IconMapPin className="w-3.5 h-3.5 flex-shrink-0 mt-0.5 text-gray-400" />
+                        <span>{loc.address}</span>
+                      </p>
+                      {loc.contact && <p className="mt-1 text-xs text-gray-500">{loc.contact}</p>}
+                      {loc.hours && <p className="mt-0.5 text-xs text-gray-500">{loc.hours}</p>}
+                    </div>
+                  ))}
+                </div>
+              )}
+            </Drawer>
+          </div>
+        ) : serviceType === 'standard' ? (
           <div className="pt-1">
             <p className="text-sm font-medium text-gray-700 mb-1.5">Pickup date</p>
             <div className="flex gap-2 overflow-x-auto pb-1">

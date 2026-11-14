@@ -121,9 +121,9 @@ export function BookDelivery() {
   // A drop-off booking has no rider to hand cash to at pickup — reconcile an
   // already-selected Cash on Pickup instead of leaving a contradictory
   // selection confirmable. Owned here (always mounted) rather than inside
-  // `ShippingFeePayerSelector`, which only mounts while the Review step's
-  // payment section is expanded and would otherwise miss reconciling the
-  // draft while it's collapsed.
+  // `ShippingFeePayerSelector`, which only mounts while its own payment
+  // drawer is open and would otherwise miss reconciling the draft the rest
+  // of the time.
   useEffect(() => {
     if (draft.firstMile === 'dropoff' && draft.senderPaymentMethod === 'cash_pickup') {
       updateDraft({ senderPaymentMethod: 'gcash_wallet' });
@@ -159,6 +159,10 @@ export function BookDelivery() {
   // `getProtectionCoveredValue`.
   const declaredValueNum = Number(draft.declaredValue);
   const declaredValueValid = draft.merchandiseCod.enabled
+    // Free tier hides the declared-value input entirely — a leftover invalid
+    // string typed while Increase was selected must never keep blocking
+    // Continue/Confirm once the user switches away from it.
+    || draft.itemProtectionTier === 'free'
     || draft.declaredValue.trim() === ''
     || (Number.isFinite(declaredValueNum) && declaredValueNum >= 0);
   const codAmountNum = Number(draft.merchandiseCod.amount);
@@ -166,13 +170,17 @@ export function BookDelivery() {
     || (draft.merchandiseCod.amount.trim() !== '' && Number.isFinite(codAmountNum) && codAmountNum >= 0);
 
   const addressesComplete = isCompleteAddress(draft.pickupAddress) && isCompleteAddress(draft.recipientAddress);
-  // On-Demand is immediate — no pickup date to choose. Standard requires one,
-  // and it must still be eligible right now — a date chosen earlier in the
-  // session (or restored from a saved draft) can go stale if left open past
-  // midnight or the pickup cutoff, so this isn't just a non-empty check.
+  // A pickup date is only ever needed for a Rider Pickup under Standard
+  // service — On-Demand is immediate, and Drop-off has no rider to schedule
+  // at all (the user picks a drop-off location instead, with no date to
+  // choose). When required, it must still be eligible right now — a date
+  // chosen earlier in the session (or restored from a saved draft) can go
+  // stale if left open past midnight or the pickup cutoff, so this isn't
+  // just a non-empty check.
+  const pickupDateRequired = draft.firstMile === 'pickup' && draft.serviceType === 'standard';
   const pickupDateSet = Boolean(draft.pickupDate);
-  const pickupDateStale = pickupDateSet && !isPickupDateSelectable(draft.pickupDate!);
-  const pickupDateComplete = draft.serviceType !== 'standard' || (pickupDateSet && !pickupDateStale);
+  const pickupDateStale = pickupDateRequired && pickupDateSet && !isPickupDateSelectable(draft.pickupDate!);
+  const pickupDateComplete = !pickupDateRequired || (pickupDateSet && !pickupDateStale);
   const itemDetailsValid = Boolean(draft.itemDescription.trim()) && declaredValueValid && codValid;
 
   const canConfirm = Boolean(addressesComplete && pickupDateComplete && !addressFormOpen && itemDetailsValid);
@@ -222,7 +230,7 @@ export function BookDelivery() {
     // between. If it just went stale, force a render so the blocking
     // reason/disabled state catch up immediately instead of silently
     // no-op'ing with no feedback.
-    const stillPickupDateEligible = draft.serviceType !== 'standard'
+    const stillPickupDateEligible = draft.firstMile !== 'pickup' || draft.serviceType !== 'standard'
       || (Boolean(draft.pickupDate) && isPickupDateSelectable(draft.pickupDate!));
     if (!canConfirm || !stillPickupDateEligible) {
       if (!stillPickupDateEligible) {
@@ -297,12 +305,15 @@ export function BookDelivery() {
   };
 
   const deliveryEstimateLabel = useMemo(() => {
+    // Drop-off has no rider pickup to estimate from — this label is
+    // pickup-specific scheduling info, same as the date selector itself.
+    if (draft.firstMile === 'dropoff') return undefined;
     if (draft.serviceType === 'on_demand') return 'Within 40 minutes of pickup';
     if (draft.serviceType !== 'standard' || !draft.pickupDate) return undefined;
     const region = draft.recipientAddress?.province ? classifyRegion(draft.recipientAddress.province) : 'unknown';
     const [y, m, d] = draft.pickupDate.split('-').map(Number);
     return estimateDeliveryDateRange(new Date(y, m - 1, d), draft.serviceType, region).label;
-  }, [draft.serviceType, draft.pickupDate, draft.recipientAddress]);
+  }, [draft.firstMile, draft.serviceType, draft.pickupDate, draft.recipientAddress]);
 
   const addressSection = (
     <BookingAddressSection

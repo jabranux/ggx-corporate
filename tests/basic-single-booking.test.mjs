@@ -125,12 +125,24 @@ describe('estimateBasicBookingFee — GGX Basic pouch sizes', () => {
     }
   });
 
-  it('xl and xxl share the one official box illustration; small/medium/large each get their own', () => {
-    assert.equal(pouchSizes.BASIC_POUCH_ICON_FILENAME.xl, 'parcel-box.svg');
-    assert.equal(pouchSizes.BASIC_POUCH_ICON_FILENAME.xxl, 'parcel-box.svg');
+  it('every size has its own distinct official GGX parcel illustration, including Box vs Oversized', () => {
     assert.equal(pouchSizes.BASIC_POUCH_ICON_FILENAME.small, 'parcel-small.svg');
     assert.equal(pouchSizes.BASIC_POUCH_ICON_FILENAME.medium, 'parcel-medium.svg');
     assert.equal(pouchSizes.BASIC_POUCH_ICON_FILENAME.large, 'parcel-large.svg');
+    assert.equal(pouchSizes.BASIC_POUCH_ICON_FILENAME.xl, 'parcel-box.svg');
+    assert.equal(pouchSizes.BASIC_POUCH_ICON_FILENAME.xxl, 'parcel-oversized.svg');
+  });
+
+  it('xl/xxl are relabeled Box/Oversized with corrected dimensions and weight limits, keeping their internal keys', () => {
+    const box = pouchSizes.getBasicPouchSize('xl');
+    assert.equal(box.label, 'Box');
+    assert.equal(box.dims, '46 × 30 × 23 cm');
+    assert.equal(box.maxWeight, '6 kg');
+
+    const oversized = pouchSizes.getBasicPouchSize('xxl');
+    assert.equal(oversized.label, 'Oversized');
+    assert.equal(oversized.dims, '40 × 40 × 40 cm limit');
+    assert.equal(oversized.maxWeight, '20 kg');
   });
 });
 

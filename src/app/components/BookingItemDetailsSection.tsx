@@ -7,12 +7,15 @@
  * not real product photography of the user's actual item.
  *
  * Item protection always offers two explicit, user-chosen tiers (Free vs
- * Increase) — the covered value automatically follows the merchandise COD
- * amount when COD is enabled, or the declared item value when it isn't (see
- * `basicItemProtection.ts`'s `getProtectionCoveredValue`), but the TIER
- * itself is never inferred from that value. A high covered value never
- * silently switches the selection away from Free — the user must tap
- * "Increase Protection" themselves.
+ * Increase item protection) — the covered value automatically follows the
+ * merchandise COD amount when COD is enabled, or the declared item value
+ * when it isn't (see `basicItemProtection.ts`'s `getProtectionCoveredValue`),
+ * but the TIER itself is never inferred from that value. A high covered
+ * value never silently switches the selection away from Free — the user
+ * must tap "Increase item protection" themselves. The declared item value
+ * field only renders while that tier is selected (and COD is off) — Free
+ * never needs it (flat ₱500 coverage), so showing it there would just be a
+ * dead, confusing input.
  */
 import { useState } from 'react';
 import { IconShieldCheck, IconShieldPlus } from '@tabler/icons-react';
@@ -163,16 +166,16 @@ export function BookingItemDetailsSection({
               <IconShieldPlus className={cn('w-4 h-4 flex-shrink-0 mt-0.5', itemProtectionTier === 'paid' ? 'text-blue-600' : 'text-gray-400')} />
               <span className="min-w-0">
                 <span className={cn('block text-sm font-medium', itemProtectionTier === 'paid' ? 'text-blue-900' : 'text-gray-800')}>
-                  {coveredValue > 0 ? fmtPHP(protectionFee) : 'Increase'}
+                  Increase item protection
                 </span>
                 <span className="block text-xs text-gray-500">
-                  {coveredValue > 0 ? `Protect up to ${fmtPHP(coveredValue)}` : 'Add an item value to calculate'}
+                  {coveredValue > 0 ? `Protect up to ${fmtPHP(coveredValue)} · ${fmtPHP(protectionFee)} fee` : 'Protect a higher declared value'}
                 </span>
               </span>
             </button>
           </div>
 
-          {!codEnabled && (
+          {!codEnabled && itemProtectionTier === 'paid' && (
             <div className="pt-1">
               <label className="block text-xs font-medium text-gray-600 mb-1">Declared item value</label>
               <Input
@@ -187,7 +190,7 @@ export function BookingItemDetailsSection({
               {declaredValueInvalid && <p className="mt-1 text-xs text-red-600">Declared value must be 0 or greater.</p>}
             </div>
           )}
-          {codEnabled && (
+          {codEnabled && itemProtectionTier === 'paid' && (
             <p className="text-xs text-gray-500">
               Using your Cash on Delivery amount ({fmtPHP(codAmountNum || 0)}) as the covered value.
             </p>
