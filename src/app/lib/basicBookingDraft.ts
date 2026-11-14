@@ -16,6 +16,7 @@ import type { BasicPouchSizeKey } from './basicPouchSizes';
 export type FirstMile = 'pickup' | 'dropoff';
 export type FeePayer = 'sender' | 'receiver';
 export type SenderPaymentMethod = 'cash_pickup' | 'gcash_qr' | 'gcash_wallet';
+export type ItemProtectionTier = 'free' | 'paid';
 
 export interface MerchandiseCod {
   enabled: boolean;
@@ -34,8 +35,10 @@ export interface BookingDraft {
   pickupDate: string | null;
   pouchSize: BasicPouchSizeKey;
   itemDescription: string;
-  /** String while editing — parse with Number() before use. Drives item protection only. */
+  /** String while editing — parse with Number() before use. Drives item protection only, and only while merchandiseCod is disabled (see `basicItemProtection.ts`'s `getProtectionCoveredValue`). */
   declaredValue: string;
+  /** Explicit user choice between the two item-protection tiers — never inferred from the covered value. Defaults to 'free'. */
+  itemProtectionTier: ItemProtectionTier;
   merchandiseCod: MerchandiseCod;
   feePayer: FeePayer;
   senderPaymentMethod: SenderPaymentMethod;
@@ -56,6 +59,7 @@ export const INITIAL_BOOKING_DRAFT: BookingDraft = {
   pouchSize: 'small',
   itemDescription: '',
   declaredValue: '',
+  itemProtectionTier: 'free',
   merchandiseCod: EMPTY_MERCHANDISE_COD,
   feePayer: 'sender',
   senderPaymentMethod: 'cash_pickup',

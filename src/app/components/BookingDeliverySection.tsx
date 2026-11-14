@@ -124,13 +124,18 @@ export function BookingDeliverySection({
           })}
         </div>
 
-        <CheckoutDeliveryOptions
-          options={allowedOptions}
-          value={serviceType}
-          onChange={onServiceTypeChange}
-          region={region}
-          metroOnly={metroOnly}
-        />
+        {/* Only shown when there's a real choice to make — with a single
+            allowed option (the common case: On-Demand gated off), a
+            selectable "Standard Delivery" card is just noise. */}
+        {allowedOptions.length > 1 && (
+          <CheckoutDeliveryOptions
+            options={allowedOptions}
+            value={serviceType}
+            onChange={onServiceTypeChange}
+            region={region}
+            metroOnly={metroOnly}
+          />
+        )}
         {note && <p className="text-xs text-gray-500">{note}</p>}
 
         {serviceType === 'standard' ? (

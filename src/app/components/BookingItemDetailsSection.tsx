@@ -1,26 +1,28 @@
 /**
  * Item Details step for the GGX Basic single-booking flow: description,
- * pouch size, merchandise Cash on Delivery, and declared value (drives item
- * protection only). Deliberately independent of shipping-fee-payer state —
- * see `ShippingFeePayerSelector.tsx`'s header comment.
+ * pouch size, merchandise Cash on Delivery, and item protection.
  *
  * Pouch-size cards use the official GGX parcel illustrations (loaded
  * directly from gogoxpress.com — see `basicPouchSizes.ts`'s `iconUrl`),
  * not real product photography of the user's actual item.
  *
- * "Protect full COD amount" is a one-time copy of the current COD amount
- * into declaredValue, fired only on click — it does not bind the two fields
- * together. Changing either field afterward never affects the other; the
- * fields stay independent exactly as before this button existed.
+ * Item protection always offers two explicit, user-chosen tiers (Free vs
+ * Increase) — the covered value automatically follows the merchandise COD
+ * amount when COD is enabled, or the declared item value when it isn't (see
+ * `basicItemProtection.ts`'s `getProtectionCoveredValue`), but the TIER
+ * itself is never inferred from that value. A high covered value never
+ * silently switches the selection away from Free — the user must tap
+ * "Increase Protection" themselves.
  */
-import { useEffect, useRef, useState } from 'react';
+import { useState } from 'react';
 import { IconShieldCheck, IconShieldPlus } from '@tabler/icons-react';
 import { Card, CardContent } from './ui/Card';
 import { Input } from './ui/Input';
 import { Switch } from './ui/Switch';
-import { Button } from './ui/Button';
 import { BASIC_POUCH_SIZES, type BasicPouchSizeKey } from '../lib/basicPouchSizes';
-import { isFreeProtectionSelected } from '../lib/basicItemProtection';
+import { computeItemProtectionFee } from '../lib/bookingFees';
+import { getProtectionCoveredValue } from '../lib/basicItemProtection';
+import type { ItemProtectionTier } from '../lib/basicBookingDraft';
 import { cn } from '../lib/utils';
 
 export interface BookingItemDetailsSectionProps {
@@ -33,6 +35,8 @@ export interface BookingItemDetailsSectionProps {
   codEnabled: boolean;
   codAmount: string;
   onCodChange: (enabled: boolean, amount: string) => void;
+  itemProtectionTier: ItemProtectionTier;
+  onItemProtectionTierChange: (v: ItemProtectionTier) => void;
 }
 
 function fmtPHP(n: number): string {
@@ -49,52 +53,35 @@ export function BookingItemDetailsSection({
   codEnabled,
   codAmount,
   onCodChange,
+  itemProtectionTier,
+  onItemProtectionTierChange,
 }: BookingItemDetailsSectionProps) {
-  const [protectionExpanded, setProtectionExpanded] = useState(!isFreeProtectionSelected(declaredValue));
-  const declaredValueInputRef = useRef<HTMLInputElement>(null);
+  const [descriptionTouched, setDescriptionTouched] = useState(false);
+  const descriptionInvalid = descriptionTouched && !itemDescription.trim();
 
-  // This section mounts twice simultaneously (desktop + mobile dual-tree —
-  // same pattern as `BookingAddressSection.tsx`'s header comment), each with
-  // its own local `protectionExpanded`. If a sibling instance pushes
-  // declaredValue above ₱500 (e.g. via "Protect full COD amount"), this
-  // instance's own state would otherwise stay on Free Protection while the
-  // shared draft is actually being charged the fee — silently contradicting
-  // what the UI claims. Only forces the Increase view open when the value
-  // genuinely requires it; never forces a collapse (which would fight a
-  // user mid-typing a small value while Increase is deliberately selected).
-  useEffect(() => {
-    if (protectionExpanded) return;
-    if (!isFreeProtectionSelected(declaredValue)) setProtectionExpanded(true);
-  }, [declaredValue, protectionExpanded]);
+  const codAmountNum = Number(codAmount);
+  const codInvalid = codEnabled && (codAmount.trim() === '' || !Number.isFinite(codAmountNum) || codAmountNum < 0);
 
-  const handleIncreaseProtection = () => {
-    setProtectionExpanded(true);
-    declaredValueInputRef.current?.focus();
-  };
+  const declaredValueNum = Number(declaredValue);
+  const declaredValueInvalid = !codEnabled && declaredValue.trim() !== '' && (!Number.isFinite(declaredValueNum) || declaredValueNum < 0);
 
-  const handleSelectFreeProtection = () => {
-    // Declining the paid tier — a >500 value left in place would silently
-    // keep charging the fee while the UI claims "free". A value already
-    // <=500 (including empty) is left untouched.
-    if (!isFreeProtectionSelected(declaredValue)) {
-      onDeclaredValueChange('');
-    }
-    setProtectionExpanded(false);
-  };
-
-  const handleProtectFullCod = () => {
-    // One-time copy — fires once, on click. No subscription/binding is
-    // created, so a later edit to codAmount will never touch declaredValue.
-    onDeclaredValueChange(codAmount);
-    setProtectionExpanded(true);
-  };
+  const coveredValue = getProtectionCoveredValue({ merchandiseCod: { enabled: codEnabled, amount: codAmount }, declaredValue });
+  const protectionFee = computeItemProtectionFee(coveredValue);
 
   return (
     <Card>
       <CardContent className="p-4 space-y-3">
         <div>
           <label className="block text-sm font-medium text-gray-700 mb-1.5">Item description</label>
-          <Input value={itemDescription} onChange={(e) => onItemDescriptionChange(e.target.value)} placeholder="e.g. Clothing" />
+          <Input
+            value={itemDescription}
+            onChange={(e) => onItemDescriptionChange(e.target.value)}
+            onBlur={() => setDescriptionTouched(true)}
+            placeholder="e.g. Clothing"
+            className={descriptionInvalid ? 'border-red-500' : undefined}
+            aria-invalid={descriptionInvalid}
+          />
+          {descriptionInvalid && <p className="mt-1 text-xs text-red-600">Item description is required.</p>}
         </div>
 
         <div>
@@ -135,7 +122,16 @@ export function BookingItemDetailsSection({
         {codEnabled && (
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-1.5">Amount to collect from receiver</label>
-            <Input type="number" min={0} value={codAmount} onChange={(e) => onCodChange(true, e.target.value)} placeholder="0.00" />
+            <Input
+              type="number"
+              min={0}
+              value={codAmount}
+              onChange={(e) => onCodChange(true, e.target.value)}
+              placeholder="0.00"
+              className={codInvalid ? 'border-red-500' : undefined}
+              aria-invalid={codInvalid}
+            />
+            {codInvalid && <p className="mt-1 text-xs text-red-600">Enter a valid Cash on Delivery amount (0 or greater).</p>}
           </div>
         )}
 
@@ -144,55 +140,61 @@ export function BookingItemDetailsSection({
           <div className="grid grid-cols-2 gap-2">
             <button
               type="button"
-              onClick={handleSelectFreeProtection}
+              onClick={() => onItemProtectionTierChange('free')}
               className={cn(
                 'flex items-start gap-2 rounded-lg border px-3 py-2.5 text-left transition-colors',
-                !protectionExpanded ? 'border-blue-500 bg-blue-50' : 'border-gray-200 hover:bg-gray-50',
+                itemProtectionTier === 'free' ? 'border-blue-500 bg-blue-50' : 'border-gray-200 hover:bg-gray-50',
               )}
             >
-              <IconShieldCheck className={cn('w-4 h-4 flex-shrink-0 mt-0.5', !protectionExpanded ? 'text-blue-600' : 'text-gray-400')} />
+              <IconShieldCheck className={cn('w-4 h-4 flex-shrink-0 mt-0.5', itemProtectionTier === 'free' ? 'text-blue-600' : 'text-gray-400')} />
               <span className="min-w-0">
-                <span className={cn('block text-sm font-medium', !protectionExpanded ? 'text-blue-900' : 'text-gray-800')}>Free Protection</span>
-                <span className="block text-xs text-gray-500">Up to ₱500 coverage</span>
+                <span className={cn('block text-sm font-medium', itemProtectionTier === 'free' ? 'text-blue-900' : 'text-gray-800')}>Free</span>
+                <span className="block text-xs text-gray-500">Coverage up to ₱500</span>
               </span>
             </button>
             <button
               type="button"
-              onClick={handleIncreaseProtection}
+              onClick={() => onItemProtectionTierChange('paid')}
               className={cn(
                 'flex items-start gap-2 rounded-lg border px-3 py-2.5 text-left transition-colors',
-                protectionExpanded ? 'border-blue-500 bg-blue-50' : 'border-gray-200 hover:bg-gray-50',
+                itemProtectionTier === 'paid' ? 'border-blue-500 bg-blue-50' : 'border-gray-200 hover:bg-gray-50',
               )}
             >
-              <IconShieldPlus className={cn('w-4 h-4 flex-shrink-0 mt-0.5', protectionExpanded ? 'text-blue-600' : 'text-gray-400')} />
+              <IconShieldPlus className={cn('w-4 h-4 flex-shrink-0 mt-0.5', itemProtectionTier === 'paid' ? 'text-blue-600' : 'text-gray-400')} />
               <span className="min-w-0">
-                <span className={cn('block text-sm font-medium', protectionExpanded ? 'text-blue-900' : 'text-gray-800')}>Increase Protection</span>
-                <span className="block text-xs text-gray-500">Protect a higher declared value</span>
+                <span className={cn('block text-sm font-medium', itemProtectionTier === 'paid' ? 'text-blue-900' : 'text-gray-800')}>
+                  {coveredValue > 0 ? fmtPHP(protectionFee) : 'Increase'}
+                </span>
+                <span className="block text-xs text-gray-500">
+                  {coveredValue > 0 ? `Protect up to ${fmtPHP(coveredValue)}` : 'Add an item value to calculate'}
+                </span>
               </span>
             </button>
           </div>
 
-          {protectionExpanded && (
-            <div className="space-y-1.5 pt-1">
+          {!codEnabled && (
+            <div className="pt-1">
+              <label className="block text-xs font-medium text-gray-600 mb-1">Declared item value</label>
               <Input
-                ref={declaredValueInputRef}
                 type="number"
                 min={0}
                 value={declaredValue}
                 onChange={(e) => onDeclaredValueChange(e.target.value)}
                 placeholder="0.00"
+                className={declaredValueInvalid ? 'border-red-500' : undefined}
+                aria-invalid={declaredValueInvalid}
               />
-              <p className="text-xs text-gray-500">
-                Items valued up to ₱500 are protected for free. A small fee applies above that — see the fee breakdown.
-              </p>
+              {declaredValueInvalid && <p className="mt-1 text-xs text-red-600">Declared value must be 0 or greater.</p>}
             </div>
           )}
-
-          {codEnabled && Number(codAmount) > 0 && (
-            <Button variant="outline" size="sm" onClick={handleProtectFullCod}>
-              Protect full COD amount
-            </Button>
+          {codEnabled && (
+            <p className="text-xs text-gray-500">
+              Using your Cash on Delivery amount ({fmtPHP(codAmountNum || 0)}) as the covered value.
+            </p>
           )}
+          <p className="text-xs text-gray-500">
+            Items valued up to ₱500 are protected for free. A small fee applies above that — see the fee breakdown.
+          </p>
         </div>
       </CardContent>
     </Card>

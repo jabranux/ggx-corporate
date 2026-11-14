@@ -111,15 +111,22 @@ export interface FeeEstimate {
  * taxonomy (`BASIC_POUCH_FEE`) instead of the Business+ bulk `SIZE_FEE`
  * table, reusing the same service surcharge and item-protection formula so
  * the calculation stays centralized.
+ *
+ * `coveredValue`/`protectionTier` (not a raw `declaredValue`) — the caller
+ * (see `basicItemProtection.ts`'s `getProtectionCoveredValue`) already
+ * resolved which amount protection applies to (COD vs declared value) and
+ * which tier the user explicitly chose; this function only ever applies the
+ * fee formula when `protectionTier` is `'paid'`.
  */
 export function estimateBasicBookingFee(input: {
   pouchSize: BasicPouchSizeKey;
   serviceType: ServiceTypeKey;
-  declaredValue: number;
+  coveredValue: number;
+  protectionTier: 'free' | 'paid';
 }): RowFeeBreakdown {
   const baseFee = BASIC_POUCH_FEE[input.pouchSize] ?? BASIC_POUCH_FEE.small;
   const serviceSurcharge = SERVICE_SURCHARGE[input.serviceType] ?? 0;
-  const itemProtection = computeItemProtectionFee(input.declaredValue);
+  const itemProtection = input.protectionTier === 'paid' ? computeItemProtectionFee(input.coveredValue) : 0;
   return { baseFee, serviceSurcharge, itemProtection, total: baseFee + serviceSurcharge + itemProtection };
 }
 

@@ -1,36 +1,32 @@
 /**
  * Address step for the GGX Basic single-booking flow — pickup + recipient.
- * Reuses the shared Address Book model (`components/AddressBook.tsx`'s
- * `Address`) and `AddressDisplayCard` for summaries.
+ * Both addresses render as compact display-only cards; tapping either one
+ * opens an address selection/entry overlay (a bottom sheet on mobile, a
+ * centered dialog on desktop — `ui/Dialog.tsx`'s `Drawer`), never an
+ * inline, permanently-expanded form on the page itself.
  *
- * Address CRUD for the shared /dashboard/address-book page keeps its own
- * component-local state (a pre-existing gap — see `addressBookService.ts`'s
- * header comment), so this section cannot point users there for a *working*
- * add-address path. Instead it includes its own minimal inline form, writing
- * through the same `addressBookService` this flow already reads from, so
- * there's always a real, working way to add an address rather than a promise
- * that leads nowhere.
+ * Reuses the shared Address Book model (`components/AddressBook.tsx`'s
+ * `Address`) and the `addressBookService` facade (NOT `AddressBook.tsx`'s
+ * own page, which keeps its CRUD list in disconnected component-local state
+ * — see that service's header comment). Address CRUD for the shared
+ * /dashboard/address-book page is unaffected by this file.
  *
  * Pickup keeps a picker-first flow (it's typically one fixed saved
- * location). Recipient defaults to an open inline form instead — most
- * single bookings are to a new or occasional recipient, so starting on an
- * empty form is fewer taps than picker-then-maybe-add. "Recent Addresses"
- * and "Address Book" are secondary shortcuts that prefill the form from an
- * existing address without committing it immediately, so the user can still
- * review or edit before it's used.
- *
- * "Recent Addresses" reuses `listAddresses`' plain list capped to 3 entries —
- * `addressBookService` has no recency/last-used ordering today, so this is a
- * simplification, not true recency, until that service tracks it.
+ * location): the drawer opens straight to "choose a saved address," with
+ * "Add new address" as a secondary action. Recipient opens to a chooser
+ * (Recent Addresses, then a fuller searchable Address Book, then Add new
+ * recipient) when nothing is set yet, or straight to an editable form when
+ * editing an already-set recipient.
  */
 import { useEffect, useState } from 'react';
-import { IconMapPin, IconUserCircle, IconPencil, IconPlus, IconClock, IconBook2 } from '@tabler/icons-react';
+import { IconMapPin, IconUserCircle, IconPencil, IconPlus, IconSearch, IconX } from '@tabler/icons-react';
 import type { ComponentType } from 'react';
 import { Card, CardContent } from './ui/Card';
 import { Button } from './ui/Button';
+import { Badge } from './ui/Badge';
 import { Drawer } from './ui/Dialog';
 import { Input } from './ui/Input';
-import { AddressDisplayCard } from './AddressDisplayCard';
+import { labelColors, getDisplayLabel } from './AddressDisplayCard';
 import { LocationCascadeFields } from './LocationCascadeFields';
 import type { Address } from './AddressBook';
 import { listAddresses, createAddress } from '../services/addressBookService';
@@ -42,17 +38,16 @@ export interface BookingAddressSectionProps {
   onPickupChange: (a: Address) => void;
   onRecipientChange: (a: Address) => void;
   /**
-   * Reports whether the recipient form is open with unsaved edits, so the
-   * mobile wizard's page-level Continue button (which lives outside this
-   * component and has no visibility into this local form state) can block
-   * advancing until the edits are saved or discarded, instead of silently
-   * losing them.
+   * Reports whether a drawer is open on its editable "add/edit" view with
+   * unsaved input, so the page-level wizard's Continue button (which lives
+   * outside this component and has no visibility into this local state) can
+   * block advancing instead of silently losing those edits.
    */
   onRecipientFormOpenChange?: (open: boolean) => void;
-  /** Same purpose as `onRecipientFormOpenChange`, for the pickup "Add new address" sub-form. */
+  /** Same purpose as `onRecipientFormOpenChange`, for the pickup drawer's "add" view. */
   onPickupFormOpenChange?: (open: boolean) => void;
   /**
-   * Fires on every keystroke/selection in either form (including filling
+   * Fires on every keystroke/selection in either drawer (including filling
    * from a Recent/Address Book shortcut) — lets the page arm its
    * leave-without-saving exit guard as soon as there's something to lose,
    * not only once a save actually commits.
@@ -75,6 +70,10 @@ export function isCompleteAddress(address: Pick<Address, 'name' | 'mobileNumber'
   );
 }
 
+function abbreviatedLocation(address: Address): string {
+  return [address.barangay, address.city].filter(Boolean).join(', ');
+}
+
 export function BookingAddressSection({
   accountId,
   pickupAddress,
@@ -87,16 +86,19 @@ export function BookingAddressSection({
 }: BookingAddressSectionProps) {
   const [addresses, setAddresses] = useState<Address[]>([]);
 
-  // Pickup: picker-first (unchanged flow, just the compact icon-button trigger).
-  const [pickupPickerOpen, setPickupPickerOpen] = useState(false);
-  const [pickupAdding, setPickupAdding] = useState(false);
+  // Pickup: picker-first.
+  const [pickupDrawerOpen, setPickupDrawerOpen] = useState(false);
+  const [pickupView, setPickupView] = useState<'list' | 'add'>('list');
+  const [pickupSearch, setPickupSearch] = useState('');
   const [pickupForm, setPickupForm] = useState<NewAddressFields>(EMPTY_NEW_ADDRESS);
   const [pickupSaving, setPickupSaving] = useState(false);
 
-  // Recipient: open-form-first.
-  const [recipientFormOpen, setRecipientFormOpen] = useState(!recipientAddress);
+  // Recipient: chooser-first when unset, straight-to-edit when already set.
+  const [recipientDrawerOpen, setRecipientDrawerOpen] = useState(false);
+  const [recipientView, setRecipientView] = useState<'home' | 'book' | 'add'>('home');
+  const [recipientEntryMode, setRecipientEntryMode] = useState<'edit' | 'chooser'>('chooser');
+  const [recipientSearch, setRecipientSearch] = useState('');
   const [recipientForm, setRecipientForm] = useState<NewAddressFields>(EMPTY_NEW_ADDRESS);
-  const [recipientShortcut, setRecipientShortcut] = useState<'recent' | 'book' | null>(null);
   const [recipientExistingMatch, setRecipientExistingMatch] = useState<Address | null>(null);
   const [recipientSaving, setRecipientSaving] = useState(false);
 
@@ -107,32 +109,20 @@ export function BookingAddressSection({
   }, [accountId]);
 
   // Report open/unsaved state up so the page-level wizard Continue button
-  // (outside this component) can block advancing instead of discarding edits.
+  // (outside this component) can block advancing instead of discarding
+  // edits — only the editable "add" view has anything unsaved to lose.
   useEffect(() => {
-    onRecipientFormOpenChange?.(recipientFormOpen);
-  }, [recipientFormOpen, onRecipientFormOpenChange]);
+    onPickupFormOpenChange?.(pickupDrawerOpen && pickupView === 'add');
+  }, [pickupDrawerOpen, pickupView, onPickupFormOpenChange]);
 
   useEffect(() => {
-    onPickupFormOpenChange?.(pickupAdding);
-  }, [pickupAdding, onPickupFormOpenChange]);
+    onRecipientFormOpenChange?.(recipientDrawerOpen && recipientView === 'add');
+  }, [recipientDrawerOpen, recipientView, onRecipientFormOpenChange]);
 
-  // Both Address and Delivery/Item Details sections mount simultaneously on
-  // desktop and mobile (CSS-toggled visibility, not a JS-conditional
-  // unmount — same dual-tree pattern as `CartReview.tsx`), so a sibling
-  // instance can save/clear the recipient while THIS instance's own
-  // `recipientFormOpen` state (seeded once at mount from the initial prop)
-  // never gets told to close. Re-deriving it whenever the `recipientAddress`
-  // prop reference actually changes keeps a currently-inert instance in
-  // sync with whichever instance the user is actually looking at, without
-  // clobbering an open edit this same instance's own pencil/shortcut clicks
-  // started (those don't change the prop, so this effect won't re-fire).
-  useEffect(() => {
-    setRecipientFormOpen(!recipientAddress);
-  }, [recipientAddress]);
-
-  const closePickupPicker = () => {
-    setPickupPickerOpen(false);
-    setPickupAdding(false);
+  const closePickupDrawer = () => {
+    setPickupDrawerOpen(false);
+    setPickupView('list');
+    setPickupSearch('');
     setPickupForm(EMPTY_NEW_ADDRESS);
   };
 
@@ -153,10 +143,40 @@ export function BookingAddressSection({
       });
       setAddresses((prev) => [...prev, created]);
       onPickupChange(created);
-      closePickupPicker();
+      closePickupDrawer();
     } finally {
       setPickupSaving(false);
     }
+  };
+
+  const closeRecipientDrawer = () => {
+    setRecipientDrawerOpen(false);
+    setRecipientView('home');
+    setRecipientSearch('');
+    setRecipientForm(EMPTY_NEW_ADDRESS);
+    setRecipientExistingMatch(null);
+  };
+
+  const openRecipientDrawer = () => {
+    if (recipientAddress) {
+      setRecipientForm({
+        name: recipientAddress.name,
+        mobileNumber: recipientAddress.mobileNumber,
+        province: recipientAddress.province,
+        city: recipientAddress.city,
+        barangay: recipientAddress.barangay,
+        otherDetails: recipientAddress.otherDetails,
+      });
+      setRecipientExistingMatch(recipientAddress);
+      setRecipientEntryMode('edit');
+      setRecipientView('add');
+    } else {
+      setRecipientForm(EMPTY_NEW_ADDRESS);
+      setRecipientExistingMatch(null);
+      setRecipientEntryMode('chooser');
+      setRecipientView('home');
+    }
+    setRecipientDrawerOpen(true);
   };
 
   const fillRecipientFormFrom = (address: Address) => {
@@ -169,7 +189,8 @@ export function BookingAddressSection({
       otherDetails: address.otherDetails,
     });
     setRecipientExistingMatch(address);
-    setRecipientShortcut(null);
+    setRecipientEntryMode('chooser');
+    setRecipientView('add');
     onDirty?.();
   };
 
@@ -188,7 +209,7 @@ export function BookingAddressSection({
     // address as-is rather than creating a duplicate record.
     if (recipientFieldsMatchExisting(recipientExistingMatch, recipientForm)) {
       onRecipientChange(recipientExistingMatch!);
-      setRecipientFormOpen(false);
+      closeRecipientDrawer();
       return;
     }
     setRecipientSaving(true);
@@ -206,25 +227,10 @@ export function BookingAddressSection({
       });
       setAddresses((prev) => [...prev, created]);
       onRecipientChange(created);
-      setRecipientFormOpen(false);
+      closeRecipientDrawer();
     } finally {
       setRecipientSaving(false);
     }
-  };
-
-  const openRecipientEdit = () => {
-    if (recipientAddress) {
-      setRecipientForm({
-        name: recipientAddress.name,
-        mobileNumber: recipientAddress.mobileNumber,
-        province: recipientAddress.province,
-        city: recipientAddress.city,
-        barangay: recipientAddress.barangay,
-        otherDetails: recipientAddress.otherDetails,
-      });
-      setRecipientExistingMatch(recipientAddress);
-    }
-    setRecipientFormOpen(true);
   };
 
   const recentAddresses = addresses.slice(0, 3);
@@ -236,37 +242,23 @@ export function BookingAddressSection({
           icon={IconMapPin}
           label="Pickup address"
           address={pickupAddress}
-          onAction={() => setPickupPickerOpen(true)}
+          onAction={() => setPickupDrawerOpen(true)}
         />
 
         <Drawer
-          open={pickupPickerOpen}
-          onClose={closePickupPicker}
-          title={pickupAdding ? 'Add a new pickup address' : 'Choose a saved address'}
-          onBack={pickupAdding ? () => setPickupAdding(false) : undefined}
+          open={pickupDrawerOpen}
+          onClose={closePickupDrawer}
+          title={pickupView === 'add' ? 'Add a new pickup address' : 'Choose a saved address'}
+          onBack={pickupView === 'add' ? () => setPickupView('list') : undefined}
         >
-          {!pickupAdding ? (
-            <div className="space-y-2">
-              {addresses.length === 0 ? (
-                <p className="text-sm text-gray-500">No saved addresses yet.</p>
-              ) : (
-                addresses.map((addr) => (
-                  <button
-                    key={addr.id}
-                    type="button"
-                    onClick={() => { onPickupChange(addr); closePickupPicker(); }}
-                    className="w-full text-left rounded-lg border border-gray-200 p-3 hover:border-blue-400 transition-colors"
-                  >
-                    <AddressDisplayCard address={addr} />
-                  </button>
-                ))
-              )}
-              <div className="pt-1">
-                <Button variant="outline" size="sm" onClick={() => setPickupAdding(true)}>
-                  <IconPlus className="w-3.5 h-3.5 mr-1" /> Add new address
-                </Button>
-              </div>
-            </div>
+          {pickupView === 'list' ? (
+            <AddressBookList
+              addresses={addresses}
+              search={pickupSearch}
+              onSearchChange={setPickupSearch}
+              onSelect={(addr) => { onPickupChange(addr); closePickupDrawer(); }}
+              onAddNew={() => setPickupView('add')}
+            />
           ) : (
             <AddressForm
               form={pickupForm}
@@ -281,50 +273,77 @@ export function BookingAddressSection({
           icon={IconUserCircle}
           label="Recipient"
           address={recipientAddress}
-          onAction={openRecipientEdit}
+          onAction={openRecipientDrawer}
         />
 
-        {recipientFormOpen && (
-          <div className="rounded-lg border border-gray-200 p-3 space-y-3">
-            <div className="flex items-center gap-2">
-              <Button
-                type="button"
-                variant={recipientShortcut === 'recent' ? 'secondary' : 'outline'}
-                size="sm"
-                className="text-xs px-2.5 gap-1"
-                onClick={() => setRecipientShortcut('recent')}
-              >
-                <IconClock className="w-3.5 h-3.5" /> Recent Addresses
-              </Button>
-              <Button
-                type="button"
-                variant={recipientShortcut === 'book' ? 'secondary' : 'outline'}
-                size="sm"
-                className="text-xs px-2.5 gap-1"
-                onClick={() => setRecipientShortcut('book')}
-              >
-                <IconBook2 className="w-3.5 h-3.5" /> Address Book
-              </Button>
+        <Drawer
+          open={recipientDrawerOpen}
+          onClose={closeRecipientDrawer}
+          title={recipientView === 'home' ? 'Select recipient' : recipientView === 'book' ? 'Address Book' : recipientAddress && recipientEntryMode === 'edit' ? 'Edit recipient' : 'Add new recipient'}
+          onBack={
+            // Always reachable from "add"/"book", including when the
+            // drawer opened straight into editing an already-set recipient
+            // — otherwise there is no way back to pick a DIFFERENT saved
+            // address once one is already set.
+            recipientView === 'book' || recipientView === 'add' ? () => setRecipientView('home') : undefined
+          }
+        >
+          {recipientView === 'home' && (
+            <div className="space-y-4">
+              {recentAddresses.length > 0 && (
+                <div>
+                  <p className="mb-1.5 text-xs font-semibold text-gray-500 uppercase tracking-wide">Recent Addresses</p>
+                  <div className="space-y-1.5">
+                    {recentAddresses.map((addr) => (
+                      <button
+                        key={addr.id}
+                        type="button"
+                        onClick={() => fillRecipientFormFrom(addr)}
+                        className="w-full text-left rounded-lg border border-gray-200 p-2.5 hover:border-blue-400 transition-colors"
+                      >
+                        <p className="text-sm font-medium text-gray-900 truncate">{addr.name} · {addr.mobileNumber}</p>
+                        <p className="text-xs text-gray-500 truncate">{abbreviatedLocation(addr)}</p>
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
+              <div className="space-y-2">
+                <Button type="button" variant="outline" className="w-full" onClick={() => setRecipientView('book')}>
+                  View Address Book
+                </Button>
+                <Button
+                  type="button"
+                  variant="outline"
+                  className="w-full"
+                  onClick={() => { setRecipientForm(EMPTY_NEW_ADDRESS); setRecipientExistingMatch(null); setRecipientEntryMode('chooser'); setRecipientView('add'); }}
+                >
+                  <IconPlus className="w-3.5 h-3.5 mr-1" /> Add new recipient
+                </Button>
+              </div>
             </div>
+          )}
 
-            <Drawer open={recipientShortcut === 'recent'} onClose={() => setRecipientShortcut(null)} title="Recent Addresses">
-              <AddressShortcutList addresses={recentAddresses} onSelect={fillRecipientFormFrom} />
-            </Drawer>
-            <Drawer open={recipientShortcut === 'book'} onClose={() => setRecipientShortcut(null)} title="Address Book">
-              <AddressShortcutList addresses={addresses} onSelect={fillRecipientFormFrom} />
-            </Drawer>
+          {recipientView === 'book' && (
+            <AddressBookList
+              addresses={addresses}
+              search={recipientSearch}
+              onSearchChange={setRecipientSearch}
+              onSelect={fillRecipientFormFrom}
+              onAddNew={() => { setRecipientForm(EMPTY_NEW_ADDRESS); setRecipientExistingMatch(null); setRecipientEntryMode('chooser'); setRecipientView('add'); }}
+            />
+          )}
 
+          {recipientView === 'add' && (
             <AddressForm
-              title="Recipient details"
               form={recipientForm}
               onChange={(f) => { setRecipientForm(f); setRecipientExistingMatch(null); onDirty?.(); }}
               onSave={handleSaveRecipient}
-              onBack={recipientAddress ? () => setRecipientFormOpen(false) : undefined}
               saving={recipientSaving}
               saveLabel={recipientExistingMatch ? 'Use this address' : 'Save and use this address'}
             />
-          </div>
-        )}
+          )}
+        </Drawer>
       </CardContent>
     </Card>
   );
@@ -342,7 +361,11 @@ function AddressSlot({
   onAction: () => void;
 }) {
   return (
-    <div className="flex items-center justify-between gap-3 rounded-lg border border-gray-200 px-3 py-2">
+    <button
+      type="button"
+      onClick={onAction}
+      className="flex w-full items-center justify-between gap-3 rounded-lg border border-gray-200 px-3 py-2 text-left hover:border-blue-300 hover:bg-gray-50 transition-colors"
+    >
       <div className="flex items-start gap-2.5 min-w-0">
         <Icon className="w-4 h-4 text-gray-400 flex-shrink-0 mt-0.5" />
         <div className="min-w-0">
@@ -359,60 +382,108 @@ function AddressSlot({
           )}
         </div>
       </div>
-      <button
-        type="button"
-        onClick={onAction}
-        aria-label={address ? `Edit ${label.toLowerCase()}` : `Add ${label.toLowerCase()}`}
-        className="flex-shrink-0 flex items-center justify-center w-8 h-8 rounded-md border border-gray-200 text-gray-500 hover:bg-gray-50 hover:text-gray-700 transition-colors"
+      <span
+        aria-hidden
+        className="flex-shrink-0 flex items-center justify-center w-8 h-8 rounded-md border border-gray-200 text-gray-500"
       >
         {address ? <IconPencil className="w-4 h-4" /> : <IconPlus className="w-4 h-4" />}
-      </button>
-    </div>
+      </span>
+    </button>
   );
 }
 
-function AddressShortcutList({ addresses, onSelect }: { addresses: Address[]; onSelect: (a: Address) => void }) {
-  if (addresses.length === 0) {
-    return <p className="text-sm text-gray-500">No saved addresses yet.</p>;
-  }
+/**
+ * Complete, searchable address-selection list: search, label chip,
+ * name/mobile, abbreviated location preview, and an "Add new address"
+ * action — used as both the pickup drawer's main view and the recipient
+ * drawer's "Address Book" sub-view, so there's exactly one such list
+ * implementation.
+ */
+function AddressBookList({
+  addresses,
+  search,
+  onSearchChange,
+  onSelect,
+  onAddNew,
+}: {
+  addresses: Address[];
+  search: string;
+  onSearchChange: (v: string) => void;
+  onSelect: (a: Address) => void;
+  onAddNew: () => void;
+}) {
+  const filtered = addresses.filter((addr) => {
+    const q = search.trim().toLowerCase();
+    if (!q) return true;
+    return (
+      addr.name.toLowerCase().includes(q)
+      || addr.city.toLowerCase().includes(q)
+      || addr.province.toLowerCase().includes(q)
+      || addr.barangay.toLowerCase().includes(q)
+    );
+  });
+
   return (
-    <div className="space-y-1.5">
-      {addresses.map((addr) => (
-        <button
-          key={addr.id}
-          type="button"
-          onClick={() => onSelect(addr)}
-          className="w-full text-left rounded-lg border border-gray-200 p-2.5 hover:border-blue-400 transition-colors text-sm"
-        >
-          <span className="font-medium text-gray-900">{addr.name}</span>
-          <span className="text-gray-500"> · {[addr.barangay, addr.city].filter(Boolean).join(', ')}</span>
-        </button>
-      ))}
+    <div className="space-y-3">
+      <div className="relative">
+        <IconSearch className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400 pointer-events-none" />
+        <input
+          type="text"
+          value={search}
+          onChange={(e) => onSearchChange(e.target.value)}
+          placeholder="Search by name or location…"
+          className="w-full h-9 pl-9 pr-8 rounded-lg border border-gray-200 bg-white text-sm placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-primary focus:border-primary"
+        />
+        {search && (
+          <button type="button" onClick={() => onSearchChange('')} aria-label="Clear search" className="absolute right-2.5 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600">
+            <IconX className="w-3.5 h-3.5" />
+          </button>
+        )}
+      </div>
+
+      {filtered.length === 0 ? (
+        <p className="text-sm text-gray-500">No saved addresses found.</p>
+      ) : (
+        <div className="space-y-2">
+          {filtered.map((addr) => (
+            <button
+              key={addr.id}
+              type="button"
+              onClick={() => onSelect(addr)}
+              className="w-full text-left rounded-lg border border-gray-200 p-3 hover:border-blue-400 transition-colors"
+            >
+              <Badge variant={labelColors[addr.label] || 'default'} className="text-[10px] px-1.5 py-0 mb-1.5 capitalize">
+                {getDisplayLabel(addr)}
+              </Badge>
+              <p className="text-sm font-medium text-gray-900 truncate">{addr.name} · {addr.mobileNumber}</p>
+              <p className="text-xs text-gray-500 truncate">{abbreviatedLocation(addr)}</p>
+            </button>
+          ))}
+        </div>
+      )}
+
+      <Button type="button" variant="outline" size="sm" className="w-full" onClick={onAddNew}>
+        <IconPlus className="w-3.5 h-3.5 mr-1" /> Add new address
+      </Button>
     </div>
   );
 }
 
 function AddressForm({
-  title,
   form,
   onChange,
   onSave,
-  onBack,
   saving,
   saveLabel = 'Save and use this address',
 }: {
-  /** Omit when an ancestor (e.g. a `Drawer`'s own header) already shows this title. */
-  title?: string;
   form: NewAddressFields;
   onChange: (f: NewAddressFields) => void;
   onSave: () => void;
-  onBack?: () => void;
   saving: boolean;
   saveLabel?: string;
 }) {
   return (
     <div className="space-y-3">
-      {title && <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide">{title}</p>}
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
         <div>
           <label className="block text-xs font-medium text-gray-600 mb-1">Name</label>
@@ -433,12 +504,9 @@ function AddressForm({
           <Input value={form.otherDetails} onChange={(e) => onChange({ ...form, otherDetails: e.target.value })} placeholder="Street, unit, landmark" />
         </div>
       </div>
-      <div className="flex items-center gap-2">
-        <Button size="sm" disabled={saving || !isCompleteAddress(form)} onClick={onSave}>
-          {saving ? 'Saving…' : saveLabel}
-        </Button>
-        {onBack && <Button variant="ghost" size="sm" onClick={onBack}>Cancel</Button>}
-      </div>
+      <Button size="sm" className="w-full" disabled={saving || !isCompleteAddress(form)} onClick={onSave}>
+        {saving ? 'Saving…' : saveLabel}
+      </Button>
     </div>
   );
 }

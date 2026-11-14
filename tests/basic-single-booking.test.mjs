@@ -78,14 +78,14 @@ describe('computeItemProtectionFee — shared formula', () => {
 
 describe('estimateBasicBookingFee — GGX Basic pouch sizes', () => {
   it('uses the Basic pouch-size reference prices, not the Business+ bulk SIZE_FEE table', () => {
-    const small = bookingFees.estimateBasicBookingFee({ pouchSize: 'small', serviceType: 'standard', declaredValue: 0 });
+    const small = bookingFees.estimateBasicBookingFee({ pouchSize: 'small', serviceType: 'standard', coveredValue: 0, protectionTier: 'free' });
     assert.equal(small.baseFee, 80);
 
-    const medium = bookingFees.estimateBasicBookingFee({ pouchSize: 'medium', serviceType: 'standard', declaredValue: 0 });
+    const medium = bookingFees.estimateBasicBookingFee({ pouchSize: 'medium', serviceType: 'standard', coveredValue: 0, protectionTier: 'free' });
     // Documented mismatch: Basic medium is ₱100, Business+ bulk MEDIUM is ₱120.
     assert.equal(medium.baseFee, 100);
 
-    const large = bookingFees.estimateBasicBookingFee({ pouchSize: 'large', serviceType: 'standard', declaredValue: 0 });
+    const large = bookingFees.estimateBasicBookingFee({ pouchSize: 'large', serviceType: 'standard', coveredValue: 0, protectionTier: 'free' });
     // Documented mismatch: Basic large is ₱130, Business+ bulk LARGE is ₱180.
     assert.equal(large.baseFee, 130);
   });
@@ -97,27 +97,23 @@ describe('estimateBasicBookingFee — GGX Basic pouch sizes', () => {
   });
 
   it('applies the service-type surcharge on top of the pouch base fee', () => {
-    const sameDay = bookingFees.estimateBasicBookingFee({ pouchSize: 'small', serviceType: 'same_day', declaredValue: 0 });
+    const sameDay = bookingFees.estimateBasicBookingFee({ pouchSize: 'small', serviceType: 'same_day', coveredValue: 0, protectionTier: 'free' });
     assert.equal(sameDay.serviceSurcharge, 70);
     assert.equal(sameDay.total, 80 + 70);
   });
 
-  it('item protection is driven by declaredValue only, independent of any COD amount or fee payer', () => {
-    // Simulates a booking draft where merchandise COD is a large amount and
-    // the receiver pays shipping — neither should ever reach this formula.
-    const draftLikeInput = { pouchSize: 'small', serviceType: 'standard', declaredValue: 1500 };
-    const fee = bookingFees.estimateBasicBookingFee(draftLikeInput);
-    assert.equal(fee.itemProtection, 10, 'protection must derive only from declaredValue (1500), never from a COD amount');
+  it('item protection fee only applies when protectionTier is "paid", computed from coveredValue alone', () => {
+    const paid = bookingFees.estimateBasicBookingFee({ pouchSize: 'small', serviceType: 'standard', coveredValue: 1500, protectionTier: 'paid' });
+    assert.equal(paid.itemProtection, 10);
 
-    // Same declaredValue, wildly different (irrelevant) codAmount-shaped number
-    // passed nowhere near the function — confirms there is no field in the
-    // function's input that could leak COD into the formula.
-    const feeAgain = bookingFees.estimateBasicBookingFee({ pouchSize: 'small', serviceType: 'standard', declaredValue: 1500 });
-    assert.equal(feeAgain.itemProtection, fee.itemProtection);
+    // Same coveredValue, Free tier explicitly chosen — no fee, even though
+    // the value itself would otherwise price out above ₱500.
+    const free = bookingFees.estimateBasicBookingFee({ pouchSize: 'small', serviceType: 'standard', coveredValue: 1500, protectionTier: 'free' });
+    assert.equal(free.itemProtection, 0);
   });
 
   it('falls back to the small pouch fee for an unrecognized size key', () => {
-    const fallback = bookingFees.estimateBasicBookingFee({ pouchSize: 'not-a-real-size', serviceType: 'standard', declaredValue: 0 });
+    const fallback = bookingFees.estimateBasicBookingFee({ pouchSize: 'not-a-real-size', serviceType: 'standard', coveredValue: 0, protectionTier: 'free' });
     assert.equal(fallback.baseFee, 80);
   });
 
@@ -138,20 +134,27 @@ describe('estimateBasicBookingFee — GGX Basic pouch sizes', () => {
   });
 });
 
-describe('isFreeProtectionSelected — Free vs Increase Protection tier derivation', () => {
-  it('treats empty, zero, and <=500 declared values as Free Protection', () => {
-    assert.equal(itemProtection.isFreeProtectionSelected(''), true);
-    assert.equal(itemProtection.isFreeProtectionSelected('0'), true);
-    assert.equal(itemProtection.isFreeProtectionSelected('500'), true);
+describe('getProtectionCoveredValue — COD amount vs declared value, mutually exclusive', () => {
+  it('uses the declared value when COD is disabled', () => {
+    const value = itemProtection.getProtectionCoveredValue({
+      merchandiseCod: { enabled: false, amount: '9999' },
+      declaredValue: '1500',
+    });
+    assert.equal(value, 1500);
   });
 
-  it('treats any value over 500 as Increase Protection (not Free)', () => {
-    assert.equal(itemProtection.isFreeProtectionSelected('501'), false);
-    assert.equal(itemProtection.isFreeProtectionSelected('1500'), false);
+  it('uses the COD amount when COD is enabled, ignoring declaredValue entirely', () => {
+    const value = itemProtection.getProtectionCoveredValue({
+      merchandiseCod: { enabled: true, amount: '1000' },
+      declaredValue: '9999',
+    });
+    assert.equal(value, 1000);
   });
 
-  it('treats a non-numeric declared value as Free Protection rather than throwing', () => {
-    assert.equal(itemProtection.isFreeProtectionSelected('not-a-number'), true);
+  it('treats empty/non-numeric/negative input as 0 rather than throwing or going negative', () => {
+    assert.equal(itemProtection.getProtectionCoveredValue({ merchandiseCod: { enabled: false, amount: '' }, declaredValue: '' }), 0);
+    assert.equal(itemProtection.getProtectionCoveredValue({ merchandiseCod: { enabled: false, amount: '' }, declaredValue: 'not-a-number' }), 0);
+    assert.equal(itemProtection.getProtectionCoveredValue({ merchandiseCod: { enabled: true, amount: '-50' }, declaredValue: '' }), 0);
   });
 });
 

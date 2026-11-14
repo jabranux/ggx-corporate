@@ -72,6 +72,13 @@ export function BasicCorporateLayout() {
   const navigate = useNavigate();
   const { user, logout } = useAuth();
 
+  // The booking flow (`BookDelivery.tsx`) replaces the default header
+  // (logo/notifications) and bottom nav with its own compact
+  // `BookingHeader` — a dedicated, focused layout for a multi-step flow,
+  // per the product spec. The desktop sidebar is left in place (not asked
+  // for, and it sits beside the content rather than competing with it).
+  const isBookingFlow = location.pathname.startsWith('/dashboard/book-delivery');
+
   const [accountDrawerOpen, setAccountDrawerOpen] = useState(false);
   const [accountMenuOpen, setAccountMenuOpen] = useState(false);
   const [showLogoutConfirm, setShowLogoutConfirm] = useState(false);
@@ -186,6 +193,7 @@ export function BasicCorporateLayout() {
       </aside>
 
       <div className="flex-1 flex flex-col min-w-0 overflow-hidden">
+        {!isBookingFlow && (
         <header className="h-14 bg-white border-b border-gray-200 flex items-center gap-3 px-4 lg:px-6 flex-shrink-0">
           {/* Mobile-only brand (desktop sidebar already shows it). */}
           <div className="flex items-center gap-2 lg:hidden">
@@ -260,16 +268,19 @@ export function BasicCorporateLayout() {
             </div>
           </div>
         </header>
+        )}
 
-        <main className="flex-1 overflow-auto pb-16 lg:pb-0">
+        <main className={cn('flex-1 overflow-auto', !isBookingFlow && 'pb-16 lg:pb-0')}>
           <Outlet />
         </main>
       </div>
 
-      <BasicBottomNav
-        accountActive={accountDrawerOpen}
-        onAccountClick={() => setAccountDrawerOpen(true)}
-      />
+      {!isBookingFlow && (
+        <BasicBottomNav
+          accountActive={accountDrawerOpen}
+          onAccountClick={() => setAccountDrawerOpen(true)}
+        />
+      )}
 
       <BasicAccountDrawer
         open={accountDrawerOpen}
