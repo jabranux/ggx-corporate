@@ -3,6 +3,55 @@
 > Lightweight resume/checkpoint file. Detailed June 2026 history was archived to
 > `docs/archive/session_log_2026-06.md`.
 
+## Basic Account home — mobile hierarchy/layout correction pass (2026-11-16)
+
+Follow-up to the home redesign below: the mobile content order and shortcut
+layouts didn't match the intended GGX app experience (2×2 wrapping grid for
+primary services, multi-row wrapping grid for secondary, announcements
+placed too high, KYC after announcements instead of between the shortcut
+tiers). Desktop composition was explicitly out of scope and is unchanged.
+
+- **`components/basic-account/BasicServiceShortcuts.tsx`** split into two
+  exports — `BasicPrimaryShortcuts`/`BasicSecondaryShortcuts` — so each can
+  be placed independently in the mobile tree (KYC now sits between them).
+  Both render as a single horizontal row (`flex overflow-x-auto`, fixed-
+  width flex-shrink-0 children) below `lg`, scrolling instead of wrapping if
+  content overflows; at `lg`+ the same element becomes a non-scrolling
+  `grid-cols-4`/`grid-cols-6` (verified live: 4 primary items measured at
+  identical widths/`top` — a true single row — with `scrollWidth ===
+  containerWidth` at 360/390px; secondary's 6 items also share one `top`
+  with `scrollWidth > containerWidth`, confirming scroll-not-wrap). The
+  primary tile's bordered/shadowed card wrapper was dropped in favor of a
+  plain icon-circle + label, matching "compact icon containers, not large
+  dashboard-style cards."
+- **`components/basic-account/BasicAnnouncements.tsx`** split into
+  `BasicCriticalAlerts` (critical advisories only) and `BasicAnnouncementsPanel`
+  (regular list + "View all" drawer, which still repeats critical items for
+  a complete record). This lets critical alerts stay near the top of the
+  mobile page while regular announcements move to the very bottom, so they
+  no longer push primary services below the fold.
+- **`BasicHome.tsx`** mobile order is now: Welcome → critical alerts (if
+  any) → compact promo carousel → primary shortcuts → KYC invite (if
+  profiling incomplete) → secondary shortcuts → activity → recent
+  transactions → regular announcements. Desktop keeps its prior composition
+  exactly (main column: welcome/carousel/primary grid/secondary grid/
+  activity/transactions; sidebar: KYC invite/featured promo/critical alerts/
+  announcements) — confirmed unchanged live (same content, same order).
+- **`components/basic-account/BasicPromotions.tsx`**: carousel cards made
+  more compact (smaller icon, dropped the body line, title + CTA only) so
+  the carousel takes less vertical space ahead of primary services, per
+  spec ("keep the carousel near the top, but compact").
+- `npm run typecheck` and `npm run build` clean. Full suite **276/276**
+  passing (`npm test`); same 27 pre-existing Docker-dependent cancellations.
+- **Verified live in the browser** at 360px, 390px, and 1440px (same
+  `ggx.auth` localStorage session-swap workaround as before, port 18020):
+  DOM measurements confirmed single-row behavior for both shortcut tiers at
+  mobile widths, no horizontal page overflow at either width, and the
+  desktop grid/sidebar composition rendering exactly as it did before this
+  pass.
+- Committed and pushed to both `origin`/jabranux and `james`/jamesabran at
+  the user's request.
+
 ## Basic Account home redesign — mobile-first, desktop-adaptive, KYC-driven (2026-11-16)
 
 Rebuilt `src/app/pages/basic-account/BasicHome.tsx` (previously a minimal

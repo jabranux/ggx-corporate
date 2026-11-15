@@ -3,8 +3,8 @@ import { useAuth } from '../../contexts/AuthContext';
 import { BasicKycModal } from '../../components/basic-account/BasicKycModal';
 import { BasicKycInviteCard } from '../../components/basic-account/BasicKycInviteCard';
 import { BasicPromoCarousel, BasicFeaturedPromo } from '../../components/basic-account/BasicPromotions';
-import { BasicAnnouncementsPanel } from '../../components/basic-account/BasicAnnouncements';
-import { BasicServiceShortcuts } from '../../components/basic-account/BasicServiceShortcuts';
+import { BasicCriticalAlerts, BasicAnnouncementsPanel } from '../../components/basic-account/BasicAnnouncements';
+import { BasicPrimaryShortcuts, BasicSecondaryShortcuts } from '../../components/basic-account/BasicServiceShortcuts';
 import { BasicActivityOverview, BasicRecentTransactions } from '../../components/basic-account/BasicActivitySection';
 import { dismissKycInvitation, getKycProfile, hasCompletedKyc, type BasicKycProfile } from '../../lib/basicKycProfile';
 import { getRecommendedServices } from '../../lib/basicServiceCatalog';
@@ -17,10 +17,19 @@ import { getRecentBookings } from '../../lib/basicBookingHistory';
  *
  * Mobile and desktop render genuinely different information architectures
  * (two distinct trees swapped by breakpoint via `lg:hidden`/`hidden lg:*`)
- * rather than one stretched layout, per spec §1 ("Design an intentional
- * desktop composition, not a stretched mobile layout"). Both trees are
- * driven by the same state computed once above, so behavior (KYC, dismiss,
- * recommendations) stays identical regardless of which is visible.
+ * rather than one stretched layout. Both trees are driven by the same state
+ * computed once above, so behavior (KYC, dismiss, recommendations) stays
+ * identical regardless of which is visible.
+ *
+ * Mobile content order mirrors the original GGX app's home hierarchy:
+ * Welcome → (critical alerts, only when there are any) → compact promo
+ * carousel → primary shortcuts (single row) → KYC invite (only while
+ * profiling is incomplete) → secondary shortcuts (single scrollable row) →
+ * activity → recent transactions → regular announcements. Regular
+ * announcements deliberately sit at the BOTTOM on mobile so they never push
+ * the primary services below the fold; only critical advisories get a
+ * near-top placement. Desktop keeps its own composition (KYC/featured
+ * promo/announcements in a supporting column) rather than reusing this order.
  */
 export function BasicHome() {
   const { user } = useAuth();
@@ -49,22 +58,24 @@ export function BasicHome() {
     </div>
   );
 
-  const servicesSection = <BasicServiceShortcuts primary={primary} secondary={secondary} />;
+  const primarySection = <BasicPrimaryShortcuts items={primary} />;
+  const secondarySection = <BasicSecondaryShortcuts items={secondary} />;
   const activitySection = <BasicActivityOverview bookings={bookings} />;
   const transactionsSection = <BasicRecentTransactions bookings={bookings} />;
-  const announcementsPanel = <BasicAnnouncementsPanel />;
 
   return (
     <div className="p-4 lg:p-6">
       {/* ── Mobile / tablet: single-column, action-oriented stack (<lg) ── */}
       <div className="lg:hidden space-y-5">
         {welcome}
-        {kycInviteCard}
-        {announcementsPanel}
+        <BasicCriticalAlerts />
         <BasicPromoCarousel />
-        {servicesSection}
+        {primarySection}
+        {kycInviteCard}
+        {secondarySection}
         {activitySection}
         {transactionsSection}
+        <BasicAnnouncementsPanel />
       </div>
 
       {/* ── Desktop: main content + supporting column (spec §1) ── */}
@@ -72,7 +83,10 @@ export function BasicHome() {
         <div className="lg:col-span-2 space-y-6">
           {welcome}
           <BasicPromoCarousel />
-          {servicesSection}
+          <div className="space-y-5">
+            {primarySection}
+            {secondarySection}
+          </div>
           {activitySection}
           {transactionsSection}
         </div>
@@ -80,7 +94,8 @@ export function BasicHome() {
         <div className="lg:col-span-1 space-y-5">
           {kycInviteCard}
           <BasicFeaturedPromo />
-          {announcementsPanel}
+          <BasicCriticalAlerts />
+          <BasicAnnouncementsPanel />
         </div>
       </div>
 

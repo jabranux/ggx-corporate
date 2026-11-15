@@ -38,16 +38,15 @@ export function BasicPromoCarousel() {
             <div key={slide.id} className="w-full flex-shrink-0 snap-start px-0.5">
               <button
                 onClick={() => navigate(slide.href)}
-                className="flex w-full items-center gap-3.5 rounded-xl border border-gray-200 bg-white px-4 py-3.5 text-left cursor-pointer hover:border-gray-300 hover:shadow-sm transition-colors"
+                className="flex w-full items-center gap-3 rounded-xl border border-gray-200 bg-white px-3.5 py-2.5 text-left cursor-pointer hover:border-gray-300 hover:shadow-sm transition-colors"
               >
-                <div className={cn('w-12 h-12 rounded-full flex items-center justify-center flex-shrink-0', slide.iconClassName)}>
-                  <Icon className="w-6 h-6" />
+                <div className={cn('w-9 h-9 rounded-full flex items-center justify-center flex-shrink-0', slide.iconClassName)}>
+                  <Icon className="w-4.5 h-4.5" />
                 </div>
                 <div className="min-w-0 flex-1">
-                  <p className="text-sm font-semibold text-gray-900 leading-snug">{slide.title}</p>
-                  <p className="text-xs text-gray-500 leading-snug mt-0.5">{slide.body}</p>
-                  <span className="mt-1 inline-flex items-center gap-1 text-xs font-medium text-blue-600">
-                    {slide.cta} <IconArrowRight className="w-3 h-3" />
+                  <p className="text-sm font-semibold text-gray-900 leading-snug truncate">{slide.title}</p>
+                  <span className="mt-0.5 flex items-center gap-1 text-xs font-medium text-blue-600 truncate">
+                    {slide.cta} <IconArrowRight className="w-3 h-3 flex-shrink-0" />
                   </span>
                 </div>
               </button>
