@@ -16,7 +16,7 @@
  * Transactions page.
  */
 import { loadState, saveState } from './storage';
-import { getBasicPouchSize } from './basicPouchSizes';
+import { getBasicPouchSize, type BasicPouchSizeKey } from './basicPouchSizes';
 import type { BookingDraft, FirstMile, FeePayer, SenderPaymentMethod } from './basicBookingDraft';
 import type { DeliveryServiceType } from '../services/transactionService';
 
@@ -34,6 +34,8 @@ export interface BasicBookingHistoryEntry {
   pickupDate: string | null;
   deliveryEstimateLabel: string | undefined;
   pouchLabel: string;
+  /** The selected pouch's key, so the Confirmation screen can render its real illustration (`basicPouchSizes.ts`'s `iconUrl`) instead of a generic icon. */
+  pouchSize: BasicPouchSizeKey;
   feePayer: FeePayer;
   senderPaymentMethod: SenderPaymentMethod;
   /** Merchandise COD amount, separate from `total` (the shipping charge) — see `basicBookingTotals.ts`'s `codAmount`. 0 when COD is off. */
@@ -72,6 +74,7 @@ export function recordBookingConfirmation(
     pickupDate: draft.pickupDate,
     deliveryEstimateLabel,
     pouchLabel: getBasicPouchSize(draft.pouchSize).label,
+    pouchSize: draft.pouchSize,
     feePayer: draft.feePayer,
     senderPaymentMethod: draft.senderPaymentMethod,
     codAmount,

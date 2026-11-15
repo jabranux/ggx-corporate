@@ -19,13 +19,18 @@
  * already-computed `deliveryEstimateLabel` (from `BookDelivery.tsx`'s own
  * `estimateDeliveryDateRange` memo) — never recomputes or invents a date
  * estimate itself, so pickup/delivery info always matches what Pickup &
- * Delivery already showed.
+ * Delivery already showed. `draft` is deliberately typed as just those three
+ * fields (not the full `BookingDraft`) so the Confirmation screen
+ * (`BookDeliverySuccess.tsx`) can reuse this same banner from its already-
+ * saved `BasicBookingHistoryEntry`, which carries the same three fields but
+ * is a different shape (the draft itself is cleared by the time Confirmation
+ * mounts).
  */
 import { IconCalendarEvent, IconTruckDelivery } from '@tabler/icons-react';
 import type { BookingDraft } from '../lib/basicBookingDraft';
 
 export interface BookingScheduleSummaryProps {
-  draft: BookingDraft;
+  draft: Pick<BookingDraft, 'firstMile' | 'serviceType' | 'pickupDate'>;
   /** Already-computed estimate label, or undefined when none applies yet (e.g. no pickup date chosen). */
   deliveryEstimateLabel?: string;
 }
