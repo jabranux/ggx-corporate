@@ -15,7 +15,7 @@
  * Step 2's pouch illustration (`basicPouchSizes.ts`'s `iconUrl`) so the
  * parcel size reads the same way it did when the user picked it.
  */
-import { IconMapPin, IconTruckDelivery, IconBuildingStore } from '@tabler/icons-react';
+import { IconTruckDelivery, IconBuildingStore } from '@tabler/icons-react';
 import { Badge } from './ui/Badge';
 import { BookingScheduleSummary } from './BookingScheduleSummary';
 import { AddressRouteRail } from './BookingAddressSection';
@@ -60,12 +60,9 @@ function CompactAddressRow({ sectionLabel, address }: { sectionLabel: string; ad
         <span className="text-gray-300">|</span>
         <span>{address.mobileNumber}</span>
       </p>
-      <p className="mt-0.5 flex items-start gap-1 text-xs text-gray-500">
-        <IconMapPin className="w-3 h-3 text-gray-400 flex-shrink-0 mt-0.5" />
-        <span>
-          {[address.barangay, address.city, address.province].filter(Boolean).join(', ')}
-          {address.otherDetails && <span className="block text-gray-400">{address.otherDetails}</span>}
-        </span>
+      <p className="mt-0.5 text-xs text-gray-500">
+        {[address.barangay, address.city, address.province].filter(Boolean).join(', ')}
+        {address.otherDetails && <span className="block text-gray-400">{address.otherDetails}</span>}
       </p>
     </div>
   );
@@ -99,8 +96,9 @@ export function BookingReviewSummary({ draft, onEditAddresses, onEditItem, deliv
             <CompactAddressRow sectionLabel="Recipient" address={draft.recipientAddress} />
           </div>
         </div>
-        <div className="mt-1 flex items-center gap-1.5 border-t border-gray-100 pt-2.5">
-          <Badge variant="secondary" className="inline-flex items-center gap-1 text-xs">
+        <div className="mt-1 border-t border-gray-100 pt-2.5">
+          <p className="mb-1.5 text-[11px] font-semibold text-gray-500 uppercase tracking-wide">Pickup or drop-off</p>
+          <Badge variant="outline" className="inline-flex items-center gap-1.5 border-blue-200 bg-blue-50 px-2.5 py-1 text-xs font-semibold text-blue-700">
             <DeliveryMethodIcon className="w-3.5 h-3.5" />
             {deliveryMethodLabel}
           </Badge>
