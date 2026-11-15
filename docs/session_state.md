@@ -3,6 +3,109 @@
 > Lightweight resume/checkpoint file. Detailed June 2026 history was archived to
 > `docs/archive/session_log_2026-06.md`.
 
+## Basic Account booking flow — visual/UX refinement pass (2026-11-16)
+
+Comprehensive visual and UX refinement of the Basic Account single-booking
+flow (`src/app/pages/basic-account/BookDelivery.tsx` +
+`BookDeliverySuccess.tsx` + `src/app/components/Booking*.tsx`), combining the
+current GGX Corporate design system's structure with the visual warmth of the
+original `/basic` module (reference only — untouched). Booking architecture,
+validation, and business logic preserved; this was a presentation-layer pass.
+
+- **Pickup & Delivery**: `BookingAddressSection.tsx`'s two separate address
+  slots are now one card with a route indicator (blue pickup pin, red
+  recipient pin, dashed connector rail that stretches with content height —
+  no fixed offsets, so it holds up with long names/addresses). "Recent
+  Addresses"/"Address Book" are now blue-tinted pill buttons instead of plain
+  outline. `BookingDeliverySection.tsx`: Rider Pickup/Drop-off cards gained
+  descriptive subtext and a selected-state check badge (not border color
+  alone); pickup-date chips got a solid-blue selected state and a calendar
+  icon on the label.
+- **Item Details**: new packaging-instructions info box (blue `Alert`, pickup
+  only — gated on the new `firstMile` prop threaded into
+  `BookingItemDetailsSection.tsx`), restored COD explanatory copy ("Our rider
+  will collect payment from the recipient upon delivery"), pouch cards gained
+  a selected-state check badge, Item Protection header gained an icon.
+- **Review**: new shared `BookingScheduleSummary.tsx` (stacked, not 2-column —
+  a 2-column layout truncated the fallback copy in the narrow desktop sidebar)
+  renders a prominent Pickup/Estimated-delivery block at the top of both the
+  mobile Review step (`BookingReviewSummary.tsx`) and the desktop sticky panel
+  (`BookingReviewPaymentPanel.tsx`, which gained a `deliveryEstimateLabel`
+  prop sharing `BookDelivery.tsx`'s existing memoized estimate — never a
+  second computation).
+- **Booking Confirmation** (`BookDeliverySuccess.tsx`, previously a bare
+  generic message): full rewrite — green success icon, a sample tracking
+  number (`GGX-{year}-{6 digits}`, clearly labeled as a demo sample, with a
+  copy button), a compact booking summary (recipient/service/item/pickup/
+  estimated delivery), and conditional shipping-fee payment-state messaging
+  derived from `feePayer`/`senderPaymentMethod` (due at pickup / due at
+  delivery / paid-simulated-GCash — never inferred beyond what those two
+  fields say, and merchandise COD is disclosed as a separate cash amount
+  when the receiver also owes it). `basicBookingHistory.ts`'s
+  `BasicBookingHistoryEntry` gained the fields the confirmation screen needs
+  (`trackingNumber`, `firstMile`, `serviceType`, `pickupDate`,
+  `deliveryEstimateLabel`, `pouchLabel`, `feePayer`, `senderPaymentMethod`,
+  `codAmount`); `recordBookingConfirmation` now returns the entry so
+  `BookDelivery.tsx` can pass its id to the Confirmation screen via
+  `navigate(path, { state: { bookingId } })` — the screen resolves that
+  specific record (falling back to the most recent only when no id was
+  handed over, e.g. a direct link/refresh), rather than always showing
+  "whatever is newest."
+- **Draft-reset behavior** (`useBookingDraft.ts`, already uncommitted at this
+  session's start): the in-progress draft is now plain in-memory React state,
+  never persisted to `sessionStorage` — every mount starts clean, and
+  `BookDelivery.tsx` explicitly `resetDraft()`s on every exit path (header
+  exit confirm, browser back/forward via `exitGuard`, and after a successful
+  Confirm) so "Book another delivery" never carries over a previous booking's
+  details. The pre-existing "prefill with last-used recipient" convenience
+  (`basicBookingPreferencesService.ts`) is a separate, intentional feature —
+  left as-is, not the same thing as resurrecting an abandoned draft.
+- **Codex CLI audit** (`codex exec -s read-only`): found 6 issues, all
+  Medium/Low, no Critical/High — all fixed: (1) a legacy history record
+  missing the new payment fields fell through `derivePaymentState` to a
+  false "paid" state — fixed to return `null` (no payment box) for anything
+  that isn't one of the three known `feePayer`/`senderPaymentMethod`
+  combinations; (2) confirmation wasn't bound to the specific booking just
+  submitted — fixed via the navigation-state id-binding above; (3)
+  receiver-paid shipping + merchandise COD didn't disclose the COD amount —
+  fixed (see above); (4) delivery/pouch/protection toggle buttons' selected
+  state was style-only — added `aria-pressed`; (5) new small-text labels
+  (`text-blue-400`-on-blue-50, `text-gray-400`-on-white) had insufferable
+  contrast — darkened to `blue-600`/`blue-700`/`gray-500`; (6) confirmation
+  summary values used `truncate` unconditionally — changed to wrap
+  (`break-words`). **Tooling note for next session**: launching the Codex
+  CLI via `Bash` with both `run_in_background: true` AND a trailing shell
+  `&` double-backgrounds it — the tool reports "completed" the moment the
+  wrapper's `echo` returns, while the real `codex exec` process keeps running
+  detached/untracked for several more minutes. Use `run_in_background: true`
+  alone (no trailing `&`) next time.
+- **Verified live in the browser** (desktop 1440px/1024px, mobile 390px) via
+  the same localStorage `ggx.auth` session-swap workaround prior sessions
+  documented (this sandbox's plain Vite dev server has no `/api/auth/*`
+  runtime) on a second dev-server port (`.claude/launch.json` gained
+  `ggx-corporate-dev-2` on 18020, since another session's server already
+  held the usual 18010 — kept for future sessions needing a second port):
+  full booking flow end-to-end (address entry, pickup-date selection, item
+  details, review, all three payment scenarios — due-at-pickup, due-at-
+  delivery, paid-simulated — plus drop-off's packaging-box hiding and the
+  cash-pickup reconciliation), "Book another delivery" reset, and the
+  legacy-record payment-state fallback (tested via a synthetic injected
+  record, removed after).
+- `npm run typecheck` and `npm run build` clean. Full suite **276/276**
+  passing (`npm test`); 27 pre-existing Docker-dependent commerce-backend
+  cancellations (same cause as prior sessions — no Docker daemon reachable in
+  this sandbox). No new automated tests were added for this pass (no
+  existing test file covers this flow's UI; `tests/basic-single-booking.test.mjs`
+  covers the lib/service layer only, which wasn't touched).
+- **Not done / deferred**: Figma Design System sync for the new
+  `BookingScheduleSummary` component — the `figma` MCP server needs
+  authorization (`/mcp`) that wasn't available this session; a real
+  "payment pending/failed" state (spec's Scenario D) has no backing data —
+  this app has no real payment gateway, so only due-at-pickup/due-at-
+  delivery/paid-simulated are exercisable, consistent with GCash already
+  being labeled "Simulated — no real payment is processed" elsewhere.
+  Committed only (`5908b51`) — not pushed, per this repo's standing rule.
+
 ## New GGX Basic Account experience, built on the Corporate shell (2026-11-14)
 
 Implemented a new, self-serve **Basic account** experience as a first-class
