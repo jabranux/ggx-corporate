@@ -3,6 +3,95 @@
 > Lightweight resume/checkpoint file. Detailed June 2026 history was archived to
 > `docs/archive/session_log_2026-06.md`.
 
+## Basic Account home redesign — mobile-first, desktop-adaptive, KYC-driven (2026-11-16)
+
+Rebuilt `src/app/pages/basic-account/BasicHome.tsx` (previously a minimal
+booking-entry-point placeholder) into the full home experience the product
+spec called for, inspired by the legacy `/basic` module's structure/behavior
+(reference only — left untouched) but built on the Corporate design system.
+Legacy `/basic`/`/basic-v2` modules, Business+ Dashboard/Settings, and the
+Basic bottom nav/Account drawer are all unmodified and verified unaffected.
+
+- **Responsive composition**: two genuinely distinct trees swapped at the
+  `lg` breakpoint (`lg:hidden` / `hidden lg:grid`), not a stretched mobile
+  layout — mobile stacks Welcome → KYC invite → Announcements → Promo
+  carousel → Services → Activity → Recent transactions; desktop is a 2/3
+  main column (Welcome, carousel, services, activity, transactions) + 1/3
+  supporting column (KYC invite/contextual card, a desktop-only featured
+  promo, Announcements). Verified live at 390px/768px/1440px — no horizontal
+  overflow at any width, confirmed via `document.body.scrollWidth` checks
+  (screenshots were unreliable in this sandbox — a hidden/background Browser
+  pane — so verification leaned on `get_page_text`/`read_page`/JS checks
+  instead, per the built-in-browser skill's own guidance for that case).
+- **KYC profiling** (`lib/basicKycProfile.ts`, localStorage-backed, keyed by
+  account id, same pattern as `basicBookingPreferencesService.ts`): the
+  four-question flow (main use → conditional "where do you sell" → daily
+  orders → delivery needs) in a new `components/basic-account/BasicKycModal.tsx`,
+  using the existing `ui/Dialog.tsx` `Drawer` (bottom sheet on mobile,
+  centered dialog on desktop) exactly as its own doc comment describes.
+  `BasicKycInviteCard.tsx` is dismissible without blocking use; dismissal and
+  completion both persist across reloads (verified). The same modal is
+  reachable again any time via a new "Personalize your GGX experience" card
+  in `Settings.tsx`, gated on `accountSegment === 'basic'` (mirrors how that
+  file already gates "Enable Subaccounts" the other way for Business+).
+- **Recommendation engine** (`lib/basicServiceCatalog.ts`): a 15-item full
+  catalog (Shipping/Commerce/Rewards/Finance/Insights/Account/Support) tag-
+  scored against KYC answers (`matches*100 + baseWeight`, so profile
+  relevance dominates but ties fall back to a sensible default order) into a
+  4-item primary + 6-item secondary shortcut list
+  (`components/basic-account/BasicServiceShortcuts.tsx`). Per the spec's own
+  rule, KYC only ever reorders — "View all" (`pages/basic-account/BasicServiceCatalogPage.tsx`,
+  route `/dashboard/services`) always renders the complete, ungated catalog.
+  Verified two different profiles (a high-volume Shopee/Lazada seller vs. a
+  personal/low-volume "exploring" profile) produce visibly different primary
+  rows. Three new lightweight placeholder routes/pages were added for
+  catalog items with no real destination yet — Same-Day Delivery (gated by
+  product rules to Growing/HVM, not a default Basic feature per
+  `basic_user_requirements.md` §6/§7), Shopify (`basic-shopify` — `'shopify'`
+  itself is already a Business+-only route), and Merchant Analytics
+  (`basic-merchant-analytics`) — all three follow the existing
+  `BasicComingSoon` pattern used by Rewards/Vouchers/Referrals/Sulit Bundles.
+- **Promotions + announcements** (`lib/basicPromotions.ts`/
+  `lib/basicAnnouncements.ts`, structured mock content, swappable later):
+  `components/basic-account/BasicPromotions.tsx` exports a carousel
+  (`placements: ['carousel']`) and a desktop-only featured card
+  (`placements: ['featured']`) drawing from disjoint promo entries so the
+  same message never repeats across both. `components/basic-account/BasicAnnouncements.tsx`
+  renders critical items as a prominent `Alert`, regular items as a compact
+  list with a "View all" `Drawer` for the rest.
+- **Activity + recent transactions** (`components/basic-account/BasicActivitySection.tsx`):
+  sourced from the account's own real confirmed-booking log
+  (`lib/basicBookingHistory.ts`'s `getRecentBookings` — the only data in this
+  sandbox genuinely scoped to a Basic account's own activity; the shared OMS
+  `transactions` fixture has no Basic-segment rows, so it was deliberately
+  NOT used here to avoid either an empty/misleading read or a cross-tenant
+  leak). No delivery status is fabricated (the booking log has no real
+  status field) — shows confirmation info only, newest-first. Empty state
+  collapses to one compact card instead of zeroed stat tiles. A real bug
+  found and fixed during manual verification: the activity stat's total-
+  spend sum produced `₱NaN` against a legacy history record missing
+  `codAmount`/`total` (same kind of missing-field issue a prior session's
+  Codex audit found elsewhere in this booking history) — fixed with
+  `(b.total || 0) + (b.codAmount || 0)`.
+- `npm run typecheck` and `npm run build` clean (one pre-existing chunk-size
+  warning only). Full suite **276/276** passing (`npm test`); 27 pre-existing
+  Docker-dependent commerce-backend cancellations (same cause as prior
+  sessions — no Docker daemon reachable in this sandbox).
+- **Verified live in the browser** via the same localStorage `ggx.auth`
+  session-swap workaround prior sessions documented (port 18020,
+  `ggx-corporate-dev-2`, since another session held 18010): full KYC flow
+  end-to-end including the conditional step, dismiss + persistence across
+  reload, two different profiles producing different recommendations, the
+  full "View all" catalog, one placeholder page, Settings' new card, and —
+  switched back to a Business+ session — confirmed Business+ Dashboard and
+  Settings render exactly as before (new Basic-only card correctly absent).
+- **Not done / deferred**: no new automated tests were added for this pass
+  (verification was manual/browser-based, consistent with how prior Basic-
+  account UI work in this doc was verified); Figma Design System sync for
+  the new components — `figma` MCP server authorization wasn't available
+  this session, same gap a prior session's entry already notes. Committed
+  only (`a2bddba`) — not pushed, per this repo's standing rule.
+
 ## Basic Account booking flow — Review & Payment reuse pass (2026-11-16)
 
 Follow-up refinement to the Review step below, focused on reuse/consistency
