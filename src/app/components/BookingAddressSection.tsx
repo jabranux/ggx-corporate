@@ -26,8 +26,7 @@
  * can still review or edit before saving.
  */
 import { useEffect, useState } from 'react';
-import { IconMapPin, IconUserCircle, IconPencil, IconPlus, IconSearch, IconX, IconClock, IconBook2 } from '@tabler/icons-react';
-import type { ComponentType } from 'react';
+import { IconPencil, IconPlus, IconSearch, IconX, IconClock, IconBook2 } from '@tabler/icons-react';
 import { Card, CardContent } from './ui/Card';
 import { Button } from './ui/Button';
 import { Badge } from './ui/Badge';
@@ -261,13 +260,32 @@ export function BookingAddressSection({
 
   return (
     <Card>
-      <CardContent className="p-4 space-y-3">
-        <AddressSlot
-          icon={IconMapPin}
-          label="Pickup address"
-          address={pickupAddress}
-          onAction={() => setPickupDrawerOpen(true)}
-        />
+      <CardContent className="p-4">
+        {/* Route indicator: a blue pickup pin and a red recipient pin joined
+            by a dashed connector, so the two addresses read as one
+            connected journey rather than two disconnected cards. The rail
+            uses `items-stretch`/`flex-1` (not fixed pixel offsets) so the
+            dots stay pinned to the top/bottom of their row regardless of
+            how much the address text wraps. */}
+        <div className="flex gap-3">
+          <div className="flex flex-col items-center">
+            <span className="mt-4 h-3 w-3 flex-shrink-0 rounded-full border-2 border-blue-500 bg-blue-100" aria-hidden="true" />
+            <span className="my-1 w-px flex-1 border-l-2 border-dashed border-gray-300" aria-hidden="true" />
+            <span className="mb-4 h-3 w-3 flex-shrink-0 rounded-full border-2 border-red-400 bg-red-100" aria-hidden="true" />
+          </div>
+          <div className="min-w-0 flex-1 divide-y divide-gray-100">
+            <AddressSlot
+              label="Pickup address"
+              address={pickupAddress}
+              onAction={() => setPickupDrawerOpen(true)}
+            />
+            <AddressSlot
+              label="Recipient"
+              address={recipientAddress}
+              onAction={openRecipientDrawer}
+            />
+          </div>
+        </div>
 
         <Drawer
           open={pickupDrawerOpen}
@@ -293,13 +311,6 @@ export function BookingAddressSection({
           )}
         </Drawer>
 
-        <AddressSlot
-          icon={IconUserCircle}
-          label="Recipient"
-          address={recipientAddress}
-          onAction={openRecipientDrawer}
-        />
-
         <Drawer
           open={recipientDrawerOpen}
           onClose={closeRecipientDrawer}
@@ -317,10 +328,20 @@ export function BookingAddressSection({
         >
           <div className="space-y-4">
             <div className="grid grid-cols-2 gap-2">
-              <Button type="button" variant="outline" className="w-full" onClick={() => setRecipientRecentOpen(true)}>
+              <Button
+                type="button"
+                variant="outline"
+                className="w-full border-blue-200 bg-blue-50 text-blue-700 hover:border-blue-300 hover:bg-blue-100"
+                onClick={() => setRecipientRecentOpen(true)}
+              >
                 <IconClock className="w-3.5 h-3.5 mr-1.5" /> Recent Addresses
               </Button>
-              <Button type="button" variant="outline" className="w-full" onClick={() => setRecipientBookOpen(true)}>
+              <Button
+                type="button"
+                variant="outline"
+                className="w-full border-blue-200 bg-blue-50 text-blue-700 hover:border-blue-300 hover:bg-blue-100"
+                onClick={() => setRecipientBookOpen(true)}
+              >
                 <IconBook2 className="w-3.5 h-3.5 mr-1.5" /> Address Book
               </Button>
             </div>
@@ -370,12 +391,10 @@ export function BookingAddressSection({
 }
 
 function AddressSlot({
-  icon: Icon,
   label,
   address,
   onAction,
 }: {
-  icon: ComponentType<{ className?: string }>;
   label: string;
   address: Address | null;
   onAction: () => void;
@@ -384,23 +403,20 @@ function AddressSlot({
     <button
       type="button"
       onClick={onAction}
-      className="flex w-full items-center justify-between gap-3 rounded-lg border border-gray-200 px-3 py-2 text-left hover:border-blue-300 hover:bg-gray-50 transition-colors"
+      className="flex w-full items-center justify-between gap-3 py-3 text-left hover:bg-gray-50 transition-colors first:pt-1 last:pb-1 rounded-md"
     >
-      <div className="flex items-start gap-2.5 min-w-0">
-        <Icon className="w-4 h-4 text-gray-400 flex-shrink-0 mt-0.5" />
-        <div className="min-w-0">
-          <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide">{label}</p>
-          {address ? (
-            <>
-              <p className="text-sm font-medium text-gray-900 truncate">{address.name} · {address.mobileNumber}</p>
-              <p className="text-xs text-gray-500 truncate">
-                {[address.barangay, address.city, address.province].filter(Boolean).join(', ')}
-              </p>
-            </>
-          ) : (
-            <p className="text-sm text-gray-400">Not set</p>
-          )}
-        </div>
+      <div className="min-w-0">
+        <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide">{label}</p>
+        {address ? (
+          <>
+            <p className="text-sm font-medium text-gray-900 truncate">{address.name} · {address.mobileNumber}</p>
+            <p className="text-xs text-gray-500 truncate">
+              {[address.barangay, address.city, address.province].filter(Boolean).join(', ')}
+            </p>
+          </>
+        ) : (
+          <p className="text-sm text-gray-400">Not set</p>
+        )}
       </div>
       <span
         aria-hidden

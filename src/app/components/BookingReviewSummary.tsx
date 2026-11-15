@@ -9,6 +9,7 @@
  */
 import { IconMapPin } from '@tabler/icons-react';
 import { Badge } from './ui/Badge';
+import { BookingScheduleSummary } from './BookingScheduleSummary';
 import { getBasicPouchSize } from '../lib/basicPouchSizes';
 import { computeBookingTotals } from '../lib/basicBookingTotals';
 import { labelColors, getDisplayLabel } from './AddressDisplayCard';
@@ -78,7 +79,9 @@ export function BookingReviewSummary({ draft, onEditAddresses, onEditDelivery, o
   const { coveredValue, itemProtection: protectionFee } = totals;
 
   return (
-    <div className="rounded-lg border border-gray-200 divide-y divide-gray-100 bg-white">
+    <div className="space-y-3">
+      <BookingScheduleSummary draft={draft} deliveryEstimateLabel={deliveryEstimateLabel} />
+      <div className="rounded-lg border border-gray-200 divide-y divide-gray-100 bg-white">
       <ReviewSection label="Pickup & recipient" onEdit={onEditAddresses}>
         <div className="space-y-2.5">
           <CompactAddressRow sectionLabel="Pickup" address={draft.pickupAddress} />
@@ -93,7 +96,6 @@ export function BookingReviewSummary({ draft, onEditAddresses, onEditDelivery, o
             <> · {new Date(draft.pickupDate).toLocaleDateString('en-PH', { month: 'short', day: 'numeric' })}</>
           )}
         </p>
-        {deliveryEstimateLabel && <p className="text-xs text-gray-500 mt-0.5">{deliveryEstimateLabel}</p>}
       </ReviewSection>
 
       <ReviewSection label="Item details" onEdit={onEditItem}>
@@ -111,6 +113,7 @@ export function BookingReviewSummary({ draft, onEditAddresses, onEditDelivery, o
           </p>
         </div>
       </ReviewSection>
+      </div>
     </div>
   );
 }

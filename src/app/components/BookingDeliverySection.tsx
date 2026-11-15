@@ -6,7 +6,7 @@
  * from the mock `serviceabilityService` (NOT production validation).
  */
 import { useEffect, useMemo, useState } from 'react';
-import { IconTruckDelivery, IconBuildingStore, IconBolt, IconMapPin } from '@tabler/icons-react';
+import { IconTruckDelivery, IconBuildingStore, IconBolt, IconMapPin, IconCircleCheckFilled, IconCalendarEvent } from '@tabler/icons-react';
 import { Card, CardContent } from './ui/Card';
 import { Drawer } from './ui/Dialog';
 import { CheckoutDeliveryOptions } from './CheckoutDeliveryOptions';
@@ -106,22 +106,27 @@ export function BookingDeliverySection({
       <CardContent className="p-4 space-y-3">
         <div className="grid grid-cols-2 gap-2">
           {([
-            { key: 'pickup' as FirstMile, label: 'Rider Pickup', icon: IconTruckDelivery },
-            { key: 'dropoff' as FirstMile, label: 'Drop-off', icon: IconBuildingStore },
-          ]).map(({ key, label, icon: Icon }) => {
+            { key: 'pickup' as FirstMile, label: 'Rider Pickup', icon: IconTruckDelivery, description: 'We collect your parcel from your pickup address.' },
+            { key: 'dropoff' as FirstMile, label: 'Drop-off', icon: IconBuildingStore, description: 'Bring your parcel to a participating drop-off location.' },
+          ]).map(({ key, label, icon: Icon, description }) => {
             const selected = firstMile === key;
             return (
               <button
                 key={key}
                 type="button"
+                aria-pressed={selected}
                 onClick={() => onFirstMileChange(key)}
                 className={cn(
-                  'flex items-center gap-2 rounded-lg border px-3 py-2 text-left transition-colors',
-                  selected ? 'border-blue-500 bg-blue-50 text-blue-700' : 'border-gray-200 text-gray-700 hover:bg-gray-50',
+                  'relative flex flex-col gap-1.5 rounded-xl border-2 px-3 py-3 text-left transition-colors',
+                  selected ? 'border-blue-500 bg-blue-50' : 'border-gray-200 bg-white hover:bg-gray-50',
                 )}
               >
-                <Icon className="w-4 h-4 flex-shrink-0" />
-                <span className="text-sm font-medium">{label}</span>
+                {selected && (
+                  <IconCircleCheckFilled className="absolute right-2.5 top-2.5 w-4 h-4 text-blue-600" aria-hidden="true" />
+                )}
+                <Icon className={cn('w-5 h-5 flex-shrink-0', selected ? 'text-blue-600' : 'text-gray-400')} />
+                <span className={cn('text-sm font-semibold', selected ? 'text-blue-900' : 'text-gray-900')}>{label}</span>
+                <span className="text-xs text-gray-500 leading-snug">{description}</span>
               </button>
             );
           })}
@@ -181,8 +186,11 @@ export function BookingDeliverySection({
           </div>
         ) : serviceType === 'standard' ? (
           <div className="pt-1">
-            <p className="text-sm font-medium text-gray-700 mb-1.5">Pickup date</p>
-            <div className="flex gap-2 overflow-x-auto pb-1">
+            <p className="mb-1.5 flex items-center gap-1.5 text-sm font-medium text-gray-700">
+              <IconCalendarEvent className="w-4 h-4 text-gray-400" />
+              Pickup date
+            </p>
+            <div className="flex gap-2 overflow-x-auto pb-1 -mx-0.5 px-0.5">
               {eligibleDates.map((date) => {
                 const iso = toIsoDate(date);
                 const selected = pickupDate === iso;
@@ -190,13 +198,14 @@ export function BookingDeliverySection({
                   <button
                     key={iso}
                     type="button"
+                    aria-pressed={selected}
                     onClick={() => onPickupDateChange(iso)}
                     className={cn(
-                      'flex-shrink-0 rounded-lg border px-3 py-2 text-center transition-colors',
-                      selected ? 'border-blue-500 bg-blue-50 text-blue-700' : 'border-gray-200 text-gray-700 hover:bg-gray-50',
+                      'relative flex-shrink-0 rounded-xl border-2 px-3.5 py-2 text-center transition-colors',
+                      selected ? 'border-blue-500 bg-blue-600 text-white shadow-sm' : 'border-gray-200 text-gray-700 hover:bg-gray-50',
                     )}
                   >
-                    <span className="block text-[10px] uppercase tracking-wide text-gray-400">
+                    <span className={cn('block text-[10px] uppercase tracking-wide', selected ? 'text-blue-100' : 'text-gray-400')}>
                       {date.toLocaleDateString('en-PH', { weekday: 'short' })}
                     </span>
                     <span className="block text-sm font-semibold">

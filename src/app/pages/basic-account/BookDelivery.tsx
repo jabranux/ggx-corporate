@@ -104,6 +104,25 @@ export function BookDelivery() {
     return () => mql.removeEventListener('change', handler);
   }, []);
 
+  // Back/forward across a real cross-document navigation (e.g. the user
+  // left this tab for an external site/OAuth redirect, then came back) can
+  // restore this whole page from the browser's back-forward cache instead
+  // of a fresh mount — the frozen JS heap, including this component's
+  // in-memory draft, reappears verbatim with no remount and no re-run of
+  // `useBookingDraft`'s own reset. A same-app SPA route change never
+  // triggers this (no new document is loaded), so it doesn't affect the
+  // step-to-step/desktop-mobile cases above; this only guards the one path
+  // those can't reach. Forcing a real reload here reduces it to the
+  // already-correct refresh case instead of needing to hand-reset every
+  // piece of local UI state (step, editReturn, drawer-open flags, etc.).
+  useEffect(() => {
+    const handlePageShow = (e: PageTransitionEvent) => {
+      if (e.persisted) window.location.reload();
+    };
+    window.addEventListener('pageshow', handlePageShow);
+    return () => window.removeEventListener('pageshow', handlePageShow);
+  }, []);
+
   // Reported by BookingAddressSection: whether a pickup/recipient drawer is
   // open on its editable "add" view with unsaved edits. The wizard's
   // Continue button lives outside that component and has no other
@@ -241,8 +260,11 @@ export function BookDelivery() {
     const totals = computeBookingTotals(draft);
     // Persist a demo booking record BEFORE clearing the draft — see
     // `lib/basicBookingHistory.ts`'s header comment for what this is (and
-    // is not).
-    recordBookingConfirmation(accountId, draft, totals.total);
+    // is not). The Confirmation screen reads this same record (never the
+    // draft, which is cleared immediately below) to show its summary —
+    // bound to it by id via navigation state, not just "the latest record",
+    // so revisiting/refreshing never shows a different booking's details.
+    const entry = recordBookingConfirmation(accountId, draft, totals.total, totals.codAmount, deliveryEstimateLabel);
     // Remember the recipient for next time's prefill — must happen before
     // resetDraft() clears the in-memory draft this reads from.
     if (draft.recipientAddress) {
@@ -250,7 +272,7 @@ export function BookDelivery() {
     }
     touchedRef.current = false;
     resetDraft();
-    navigate('/dashboard/book-delivery/success');
+    navigate('/dashboard/book-delivery/success', { state: { bookingId: entry.id } });
   };
 
   const goToStepFromReview = (target: number) => {
@@ -300,6 +322,11 @@ export function BookDelivery() {
     // true, which would otherwise immediately stack its own "Leave this
     // booking?" dialog on top of the one just confirmed.
     touchedRef.current = false;
+    // Explicitly drop the in-progress draft before leaving, rather than
+    // relying only on the page unmounting — leaving via this confirmation
+    // must behave identically to leaving via the `exitGuard` blocker below
+    // (which also never re-enters this draft).
+    resetDraft();
     navigate('/dashboard');
   };
 
@@ -352,6 +379,7 @@ export function BookDelivery() {
 
   const itemSection = (
     <BookingItemDetailsSection
+      firstMile={draft.firstMile}
       itemDescription={draft.itemDescription}
       onItemDescriptionChange={(v) => updateDraft({ itemDescription: v })}
       pouchSize={draft.pouchSize}
@@ -383,7 +411,15 @@ export function BookDelivery() {
         <ConfirmDialog
           open
           onClose={() => exitGuard.reset()}
-          onConfirm={() => exitGuard.proceed()}
+          onConfirm={() => {
+            // Same reasoning as `handleConfirmExit` — leaving via browser
+            // back/forward or a sidebar link must drop the in-progress
+            // draft just as explicitly as leaving via the header's own
+            // exit confirmation does.
+            touchedRef.current = false;
+            resetDraft();
+            exitGuard.proceed();
+          }}
           title="Leave this booking?"
           description="Your in-progress booking details will be lost if you leave this page."
           cancelLabel="Continue booking"
@@ -461,6 +497,7 @@ export function BookDelivery() {
                 onConfirm={handleConfirm}
                 confirmDisabled={!canConfirm}
                 blockingReason={confirmBlockReason}
+                deliveryEstimateLabel={deliveryEstimateLabel}
               />
             </div>
           </div>

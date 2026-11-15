@@ -18,17 +18,20 @@
  * dead, confusing input.
  */
 import { useState } from 'react';
-import { IconShieldCheck, IconShieldPlus } from '@tabler/icons-react';
+import { IconShieldCheck, IconShieldPlus, IconPackage, IconCash, IconCircleCheckFilled, IconInfoCircle } from '@tabler/icons-react';
 import { Card, CardContent } from './ui/Card';
+import { Alert } from './ui/Alert';
 import { Input } from './ui/Input';
 import { Switch } from './ui/Switch';
 import { BASIC_POUCH_SIZES, type BasicPouchSizeKey } from '../lib/basicPouchSizes';
 import { computeItemProtectionFee } from '../lib/bookingFees';
 import { getProtectionCoveredValue } from '../lib/basicItemProtection';
-import type { ItemProtectionTier } from '../lib/basicBookingDraft';
+import type { ItemProtectionTier, FirstMile } from '../lib/basicBookingDraft';
 import { cn } from '../lib/utils';
 
 export interface BookingItemDetailsSectionProps {
+  /** Gates the packaging-instructions note below — a rider only brings a pouch/waybill when there's a rider pickup to bring it on. */
+  firstMile: FirstMile;
   itemDescription: string;
   onItemDescriptionChange: (v: string) => void;
   pouchSize: BasicPouchSizeKey;
@@ -47,6 +50,7 @@ function fmtPHP(n: number): string {
 }
 
 export function BookingItemDetailsSection({
+  firstMile,
   itemDescription,
   onItemDescriptionChange,
   pouchSize,
@@ -96,12 +100,16 @@ export function BookingItemDetailsSection({
                 <button
                   key={size.key}
                   type="button"
+                  aria-pressed={selected}
                   onClick={() => onPouchSizeChange(size.key)}
                   className={cn(
-                    'flex-shrink-0 w-32 snap-start rounded-lg border p-2.5 text-left transition-colors',
+                    'relative flex-shrink-0 w-32 snap-start rounded-lg border-2 p-2.5 text-left transition-colors',
                     selected ? 'border-blue-500 bg-blue-50' : 'border-gray-200 hover:bg-gray-50',
                   )}
                 >
+                  {selected && (
+                    <IconCircleCheckFilled className="absolute right-1.5 top-1.5 w-4 h-4 text-blue-600" aria-hidden="true" />
+                  )}
                   <div className="mb-1.5 flex h-10 w-10 items-center justify-center rounded-md bg-gray-50">
                     <img src={size.iconUrl} alt={size.label} className="h-10 w-10 object-contain" />
                   </div>
@@ -113,12 +121,22 @@ export function BookingItemDetailsSection({
               );
             })}
           </div>
+          {/* Packaging-instructions note only applies when a rider is actually involved in pickup. */}
+          {firstMile === 'pickup' && (
+            <Alert variant="info" icon={<IconInfoCircle className="w-4 h-4" />} className="mt-2">
+              Our rider will bring a pouch and a printed waybill when picking up your parcel — no need to print or pack anything yourself.
+            </Alert>
+          )}
         </div>
 
         <div className="flex items-center justify-between rounded-lg border border-gray-200 p-3">
-          <div className="min-w-0 pr-3">
-            <p className="text-sm font-medium text-gray-900">Collect Cash on Delivery (merchandise)</p>
-            <p className="text-xs text-gray-500">This is separate from who pays the shipping fee.</p>
+          <div className="flex min-w-0 items-start gap-2.5 pr-3">
+            <IconCash className="w-4 h-4 flex-shrink-0 mt-0.5 text-gray-400" />
+            <div className="min-w-0">
+              <p className="text-sm font-medium text-gray-900">Collect Cash on Delivery (merchandise)</p>
+              <p className="text-xs text-gray-500">Our rider will collect payment from the recipient upon delivery.</p>
+              <p className="text-xs text-gray-500">This is separate from who pays the shipping fee.</p>
+            </div>
           </div>
           <Switch checked={codEnabled} onCheckedChange={(checked) => onCodChange(checked, codAmount)} />
         </div>
@@ -139,10 +157,14 @@ export function BookingItemDetailsSection({
         )}
 
         <div className="rounded-lg border border-gray-200 p-3 space-y-2">
-          <p className="text-sm font-medium text-gray-900">Item protection</p>
+          <p className="flex items-center gap-1.5 text-sm font-medium text-gray-900">
+            <IconShieldCheck className="w-4 h-4 text-gray-400" />
+            Item protection
+          </p>
           <div className="grid grid-cols-2 gap-2">
             <button
               type="button"
+              aria-pressed={itemProtectionTier === 'free'}
               onClick={() => onItemProtectionTierChange('free')}
               className={cn(
                 'flex items-start gap-2 rounded-lg border px-3 py-2.5 text-left transition-colors',
@@ -157,6 +179,7 @@ export function BookingItemDetailsSection({
             </button>
             <button
               type="button"
+              aria-pressed={itemProtectionTier === 'paid'}
               onClick={() => onItemProtectionTierChange('paid')}
               className={cn(
                 'flex items-start gap-2 rounded-lg border px-3 py-2.5 text-left transition-colors',

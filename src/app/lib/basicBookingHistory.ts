@@ -16,7 +16,9 @@
  * Transactions page.
  */
 import { loadState, saveState } from './storage';
-import type { BookingDraft } from './basicBookingDraft';
+import { getBasicPouchSize } from './basicPouchSizes';
+import type { BookingDraft, FirstMile, FeePayer, SenderPaymentMethod } from './basicBookingDraft';
+import type { DeliveryServiceType } from '../services/transactionService';
 
 export interface BasicBookingHistoryEntry {
   id: string;
@@ -25,10 +27,28 @@ export interface BasicBookingHistoryEntry {
   recipientName: string | null;
   itemDescription: string;
   total: number;
+  /** Sample-only identifier for the Booking Confirmation screen — never a real GGX tracking number (see this file's header comment). */
+  trackingNumber: string;
+  firstMile: FirstMile;
+  serviceType: DeliveryServiceType;
+  pickupDate: string | null;
+  deliveryEstimateLabel: string | undefined;
+  pouchLabel: string;
+  feePayer: FeePayer;
+  senderPaymentMethod: SenderPaymentMethod;
+  /** Merchandise COD amount, separate from `total` (the shipping charge) — see `basicBookingTotals.ts`'s `codAmount`. 0 when COD is off. */
+  codAmount: number;
 }
 
 function key(accountId: string): string {
   return `basicBookingHistory.${accountId}`;
+}
+
+/** `GGX-{year}-{6 digits}` — same shape as the original /basic module's demo tracking number, always surfaced as a labeled sample, never as a real shipment reference. */
+function generateSampleTrackingNumber(): string {
+  const year = new Date().getFullYear();
+  const digits = String(Math.floor(Math.random() * 1_000_000)).padStart(6, '0');
+  return `GGX-${year}-${digits}`;
 }
 
 /** Appends a demo booking record. Call this BEFORE clearing the draft, never after. */
@@ -36,6 +56,8 @@ export function recordBookingConfirmation(
   accountId: string,
   draft: BookingDraft,
   total: number,
+  codAmount: number,
+  deliveryEstimateLabel: string | undefined,
 ): BasicBookingHistoryEntry {
   const entry: BasicBookingHistoryEntry = {
     id: `BKG-${Date.now()}`,
@@ -44,6 +66,15 @@ export function recordBookingConfirmation(
     recipientName: draft.recipientAddress?.name ?? null,
     itemDescription: draft.itemDescription,
     total,
+    trackingNumber: generateSampleTrackingNumber(),
+    firstMile: draft.firstMile,
+    serviceType: draft.serviceType,
+    pickupDate: draft.pickupDate,
+    deliveryEstimateLabel,
+    pouchLabel: getBasicPouchSize(draft.pouchSize).label,
+    feePayer: draft.feePayer,
+    senderPaymentMethod: draft.senderPaymentMethod,
+    codAmount,
   };
   const history = loadState<BasicBookingHistoryEntry[]>(key(accountId), []);
   saveState(key(accountId), [entry, ...history]);
