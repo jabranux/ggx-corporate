@@ -3,6 +3,47 @@
 > Lightweight resume/checkpoint file. Detailed June 2026 history was archived to
 > `docs/archive/session_log_2026-06.md`.
 
+## Basic Account booking flow — Review & Payment reuse pass (2026-11-16)
+
+Follow-up refinement to the Review step below, focused on reuse/consistency
+rather than new visuals (`BookingAddressSection.tsx`, `BookingScheduleSummary.tsx`,
+`BookingReviewSummary.tsx`, `BookDelivery.tsx`).
+
+- **Schedule**: `BookingScheduleSummary.tsx` changed from a stacked two-row
+  block to a compact horizontal line (icon + value, `flex-wrap`), matching
+  Step 1's own density, and dropped its own "Pickup"/"Estimated delivery"
+  headings — `deliveryLabel` already spells out "Estimated delivery …" itself
+  (`estimateDeliveryDateRange`'s `label`), so the heading was duplicated text.
+  `sr-only` labels keep screen readers informed (a Codex finding — see below).
+- **Pickup & delivery**: `BookingAddressSection.tsx`'s route rail (blue/red
+  pins + dashed connector) is now `AddressRouteRail`, an exported sub-
+  component with no visual change, so `BookingReviewSummary.tsx` can reuse the
+  exact same rail read-only instead of re-implementing it. The Review card
+  is renamed "Pickup & delivery" (was "Pickup & recipient"), Delivery Method
+  is a compact badge inside it (no longer repeating the pickup date, which
+  the schedule already shows) under one Edit action — the now-single-purpose
+  `onEditDelivery` prop was dropped from `BookingReviewSummaryProps` and its
+  passthrough in `BookDelivery.tsx`.
+- **Item details**: moved out of the shared address/delivery card into its
+  own card, with the Step 2 pouch icon (`basicPouchSizes.ts`'s `iconUrl`) so
+  the selected parcel size reads the same way it did at selection time.
+- **Codex CLI audit** (`codex exec -s read-only`): 1 Low finding, fixed —
+  removing the schedule's text headings left bare values ("Not yet selected",
+  "Within 40 minutes of pickup") with no explicit label for assistive tech
+  once the icons went `aria-hidden`; added `sr-only` "Pickup:"/"Delivery:"
+  prefixes (no visible change). No correctness/navigation/null-address
+  regressions found.
+- **Verified live in the browser** (desktop 1280px, mobile 390px): full
+  flow through Review including both Edit actions (returning to the correct
+  step with data preserved) and Confirm Booking, plus the desktop sticky
+  panel's compact schedule at the narrow (~280px) sidebar width — the exact
+  case that caused a 2-column layout to truncate in the prior pass.
+- `npm run typecheck` and `npm run build` clean. Full suite **276/276**
+  passing (`npm test`); 27 pre-existing Docker-dependent cancellations (same
+  cause as prior sessions — no Docker daemon reachable in this sandbox).
+- Committed (`878f045`) and pushed to both `origin`/jabranux and
+  `james`/jamesabran at the user's request.
+
 ## Basic Account booking flow — visual/UX refinement pass (2026-11-16)
 
 Comprehensive visual and UX refinement of the Basic Account single-booking
