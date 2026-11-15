@@ -1,6 +1,6 @@
 /**
- * Prominent pickup/estimated-delivery schedule summary for the GGX Basic
- * single-booking Review step — shared between the mobile Review step
+ * Compact, horizontal pickup/estimated-delivery schedule summary for the GGX
+ * Basic single-booking Review step — shared between the mobile Review step
  * (`BookingReviewSummary.tsx`) and the desktop sticky Review & Payment panel
  * (`BookingReviewPaymentPanel.tsx`) so the two surfaces never duplicate this
  * markup or disagree on wording.
@@ -37,26 +37,24 @@ export function BookingScheduleSummary({ draft, deliveryEstimateLabel }: Booking
   const deliveryLabel = deliveryEstimateLabel
     ?? (draft.firstMile === 'dropoff' ? 'Depends on drop-off time' : 'Select a pickup date to see an estimate');
 
-  // Stacked (not side-by-side) so the labels never need to truncate — this
-  // block renders both inside the ~280px desktop sidebar panel and the full-
-  // width mobile Review card, and a 2-column grid left the fallback copy
-  // ("Select a pickup date to see an estimate") clipped in the narrower one.
+  // Compact and horizontal, matching Step 1's own date-chip/estimate-line
+  // density — no separate "Pickup"/"Estimated delivery" headings, since
+  // `deliveryLabel` already spells out "Estimated delivery …" itself
+  // (`estimateDeliveryDateRange`'s `label`); repeating it as a heading above
+  // read as duplicated text. `flex-wrap` lets the second item drop to its
+  // own line in the ~280px desktop sidebar instead of truncating.
   return (
-    <div className="space-y-2 rounded-xl border border-blue-100 bg-blue-50 p-3">
-      <div className="flex items-start gap-2">
-        <IconCalendarEvent className="w-4 h-4 text-blue-600 flex-shrink-0 mt-0.5" />
-        <div className="min-w-0">
-          <p className="text-[10px] font-semibold uppercase tracking-wide text-blue-500">Pickup</p>
-          <p className="text-sm font-semibold text-blue-900">{pickupLabel}</p>
-        </div>
-      </div>
-      <div className="flex items-start gap-2 border-t border-blue-200 pt-2">
-        <IconTruckDelivery className="w-4 h-4 text-blue-600 flex-shrink-0 mt-0.5" />
-        <div className="min-w-0">
-          <p className="text-[10px] font-semibold uppercase tracking-wide text-blue-500">Estimated delivery</p>
-          <p className="text-sm font-semibold text-blue-900">{deliveryLabel}</p>
-        </div>
-      </div>
+    <div className="flex flex-wrap items-center gap-x-4 gap-y-1 rounded-lg border border-blue-100 bg-blue-50 px-3 py-2.5">
+      <span className="inline-flex items-center gap-1.5 text-sm font-medium text-blue-900">
+        <IconCalendarEvent className="w-4 h-4 text-blue-600 flex-shrink-0" aria-hidden="true" />
+        <span className="sr-only">Pickup: </span>
+        {pickupLabel}
+      </span>
+      <span className="inline-flex items-center gap-1.5 text-sm text-blue-800">
+        <IconTruckDelivery className="w-4 h-4 text-blue-600 flex-shrink-0" aria-hidden="true" />
+        <span className="sr-only">Delivery: </span>
+        {deliveryLabel}
+      </span>
     </div>
   );
 }

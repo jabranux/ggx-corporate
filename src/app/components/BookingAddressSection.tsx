@@ -261,18 +261,8 @@ export function BookingAddressSection({
   return (
     <Card>
       <CardContent className="p-4">
-        {/* Route indicator: a blue pickup pin and a red recipient pin joined
-            by a dashed connector, so the two addresses read as one
-            connected journey rather than two disconnected cards. The rail
-            uses `items-stretch`/`flex-1` (not fixed pixel offsets) so the
-            dots stay pinned to the top/bottom of their row regardless of
-            how much the address text wraps. */}
         <div className="flex gap-3">
-          <div className="flex flex-col items-center">
-            <span className="mt-4 h-3 w-3 flex-shrink-0 rounded-full border-2 border-blue-500 bg-blue-100" aria-hidden="true" />
-            <span className="my-1 w-px flex-1 border-l-2 border-dashed border-gray-300" aria-hidden="true" />
-            <span className="mb-4 h-3 w-3 flex-shrink-0 rounded-full border-2 border-red-400 bg-red-100" aria-hidden="true" />
-          </div>
+          <AddressRouteRail />
           <div className="min-w-0 flex-1 divide-y divide-gray-100">
             <AddressSlot
               label="Pickup address"
@@ -387,6 +377,26 @@ export function BookingAddressSection({
         </Drawer>
       </CardContent>
     </Card>
+  );
+}
+
+/**
+ * Route indicator: a blue pickup pin and a red recipient pin joined by a
+ * dashed connector, so the two addresses read as one connected journey
+ * rather than two disconnected cards. Exported so the read-only Review
+ * summary (`BookingReviewSummary.tsx`) can reuse the exact same visual
+ * instead of re-implementing it — this file's own editable layout above is
+ * otherwise unchanged. Uses `items-stretch`/`flex-1` (not fixed pixel
+ * offsets) so the dots stay pinned to the top/bottom of their row
+ * regardless of how much the address text wraps.
+ */
+export function AddressRouteRail() {
+  return (
+    <div className="flex flex-col items-center">
+      <span className="mt-4 h-3 w-3 flex-shrink-0 rounded-full border-2 border-blue-500 bg-blue-100" aria-hidden="true" />
+      <span className="my-1 w-px flex-1 border-l-2 border-dashed border-gray-300" aria-hidden="true" />
+      <span className="mb-4 h-3 w-3 flex-shrink-0 rounded-full border-2 border-red-400 bg-red-100" aria-hidden="true" />
+    </div>
   );
 }
 

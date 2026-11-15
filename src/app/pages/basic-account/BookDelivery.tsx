@@ -525,7 +525,6 @@ export function BookDelivery() {
                 <BookingReviewSummary
                   draft={draft}
                   onEditAddresses={() => goToStepFromReview(0)}
-                  onEditDelivery={() => goToStepFromReview(0)}
                   onEditItem={() => goToStepFromReview(1)}
                   deliveryEstimateLabel={deliveryEstimateLabel}
                 />
