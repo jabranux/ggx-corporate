@@ -82,6 +82,10 @@ import { ReferralsPage } from './pages/basic-account/ReferralsPage';
 import { SulitBundlesPage } from './pages/basic-account/SulitBundlesPage';
 import { BookDelivery } from './pages/basic-account/BookDelivery';
 import { BookDeliverySuccess } from './pages/basic-account/BookDeliverySuccess';
+import { BasicServiceCatalogPage } from './pages/basic-account/BasicServiceCatalogPage';
+import { SameDayDeliveryPage } from './pages/basic-account/SameDayDeliveryPage';
+import { BasicShopifyPage } from './pages/basic-account/BasicShopifyPage';
+import { BasicMerchantAnalyticsPage } from './pages/basic-account/BasicMerchantAnalyticsPage';
 import { TrackingPage } from './pages/TrackingPage';
 import { StorefrontPreview } from './pages/StorefrontPreview';
 import { StorefrontProductDetail } from './pages/StorefrontProductDetail';
@@ -282,6 +286,10 @@ export const router = createBrowserRouter([
       { path: 'vouchers',         element: <BasicOnlyRoute><VouchersPage /></BasicOnlyRoute> },
       { path: 'referrals',        element: <BasicOnlyRoute><ReferralsPage /></BasicOnlyRoute> },
       { path: 'sulit-bundles',    element: <BasicOnlyRoute><SulitBundlesPage /></BasicOnlyRoute> },
+      { path: 'services',                element: <BasicOnlyRoute><BasicServiceCatalogPage /></BasicOnlyRoute> },
+      { path: 'same-day-delivery',        element: <BasicOnlyRoute><SameDayDeliveryPage /></BasicOnlyRoute> },
+      { path: 'basic-shopify',            element: <BasicOnlyRoute><BasicShopifyPage /></BasicOnlyRoute> },
+      { path: 'basic-merchant-analytics', element: <BasicOnlyRoute><BasicMerchantAnalyticsPage /></BasicOnlyRoute> },
     ],
   },
 ]);

@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { useNavigate, Link } from 'react-router';
-import { IconBuilding, IconArrowRight, IconEdit, IconSettings, IconCheck, IconLoader2 } from '@tabler/icons-react';
+import { IconBuilding, IconArrowRight, IconEdit, IconSettings, IconCheck, IconLoader2, IconSparkles } from '@tabler/icons-react';
 import { Dialog } from '../components/ui/Dialog';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '../components/ui/Card';
 import { Button } from '../components/ui/Button';
@@ -10,6 +10,8 @@ import { AddressDisplayCard } from '../components/AddressDisplayCard';
 import type { Address } from '../components/AddressBook';
 import { useSubAccounts } from '../contexts/SubAccountContext';
 import { useAuth } from '../contexts/AuthContext';
+import { BasicKycModal } from '../components/basic-account/BasicKycModal';
+import { getKycProfile, hasCompletedKyc, type BasicKycProfile } from '../lib/basicKycProfile';
 
 // Default pickup address shown on the account. Address Book is the source of
 // truth for creating/editing addresses, so this is display-only here.
@@ -30,6 +32,9 @@ export function Settings() {
   const navigate = useNavigate();
   const { user } = useAuth();
   const isBasic = user?.accountSegment === 'basic';
+  const accountId = user?.accountId ?? 'basic-guest';
+  const [kycProfile, setKycProfile] = useState<BasicKycProfile>(() => getKycProfile(accountId));
+  const [kycModalOpen, setKycModalOpen] = useState(false);
   const { subAccountsEnabled, isMainAccountView, getCurrentAccountName, getCurrentAccountId } = useSubAccounts();
   const [savingAccount, setSavingAccount] = useState(false);
   const [savedAccount, setSavedAccount] = useState(false);
@@ -109,6 +114,35 @@ export function Settings() {
                   </Link>
                 </div>
               </div>
+            </CardContent>
+          </Card>
+        )}
+
+        {/* Basic-only: update KYC/profiling answers used for home service
+            recommendations (spec §2: "Allow users to update their answers
+            later through Account"). Never gates access — see
+            `lib/basicServiceCatalog.ts`. */}
+        {isBasic && (
+          <Card className="border-blue-200 bg-blue-50">
+            <CardHeader>
+              <div className="flex items-start gap-4">
+                <div className="w-12 h-12 rounded-xl bg-blue-100 flex items-center justify-center flex-shrink-0">
+                  <IconSparkles className="w-6 h-6 text-blue-600" />
+                </div>
+                <div className="flex-1">
+                  <CardTitle>Personalize your GGX experience</CardTitle>
+                  <CardDescription className="text-blue-800">
+                    {hasCompletedKyc(kycProfile)
+                      ? 'Update your answers any time to refresh your home service recommendations.'
+                      : 'Answer 4 quick questions so we can show you the most useful services first.'}
+                  </CardDescription>
+                </div>
+              </div>
+            </CardHeader>
+            <CardContent>
+              <Button onClick={() => setKycModalOpen(true)}>
+                {hasCompletedKyc(kycProfile) ? 'Update my answers' : 'Personalize now'}
+              </Button>
             </CardContent>
           </Card>
         )}
@@ -281,6 +315,16 @@ export function Settings() {
           </>
         )}
       </Dialog>
+
+      {isBasic && (
+        <BasicKycModal
+          open={kycModalOpen}
+          onClose={() => setKycModalOpen(false)}
+          accountId={accountId}
+          initialAnswers={kycProfile.answers}
+          onSaved={setKycProfile}
+        />
+      )}
     </div>
   );
 }
