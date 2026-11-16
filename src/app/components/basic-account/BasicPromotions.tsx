@@ -38,7 +38,7 @@ export function BasicPromoCarousel() {
             <div key={slide.id} className="w-full flex-shrink-0 snap-start px-0.5">
               <button
                 onClick={() => navigate(slide.href)}
-                className="flex w-full items-center gap-3 rounded-xl border border-gray-200 bg-white px-3.5 py-2.5 text-left cursor-pointer hover:border-gray-300 hover:shadow-sm transition-colors"
+                className="flex w-full items-center gap-3 rounded-2xl border border-gray-100 bg-white px-3.5 py-2.5 text-left cursor-pointer shadow-sm active:bg-gray-50 transition-colors"
               >
                 <div className={cn('w-9 h-9 rounded-full flex items-center justify-center flex-shrink-0', slide.iconClassName)}>
                   <Icon className="w-4.5 h-4.5" />
@@ -83,7 +83,7 @@ export function BasicFeaturedPromo() {
   return (
     <button
       onClick={() => navigate(featured.href)}
-      className="flex w-full flex-col items-start gap-3 rounded-xl border border-gray-200 bg-white p-4 text-left cursor-pointer hover:border-gray-300 hover:shadow-sm transition-colors"
+      className="flex w-full flex-col items-start gap-3 rounded-2xl border border-gray-100 bg-white p-4 text-left cursor-pointer shadow-sm hover:shadow transition-shadow"
     >
       <div className={cn('w-10 h-10 rounded-lg flex items-center justify-center', featured.iconClassName)}>
         <Icon className="w-5 h-5" />

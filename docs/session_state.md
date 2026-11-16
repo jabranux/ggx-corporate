@@ -3,6 +3,74 @@
 > Lightweight resume/checkpoint file. Detailed June 2026 history was archived to
 > `docs/archive/session_log_2026-06.md`.
 
+## Basic Account home — mobile UI refinement, KYC reset hardening, booking-draft audit (2026-11-16)
+
+Third pass on the Basic home mobile experience, plus two reported form-state
+bugs (KYC temporary-answer leakage, booking draft not resetting). Desktop
+composition explicitly preserved per the request — only shared
+components (shortcuts, cards) changed, not desktop's layout structure.
+
+- **Shortcuts rework** (`components/basic-account/BasicServiceShortcuts.tsx`):
+  `BasicPrimaryShortcuts` is now always exactly 4 items in one
+  equal-width (`flex-1`) row — larger icon containers (64px mobile/72px
+  desktop) and labels, no truncation (`break-words`, wraps to 2 lines).
+  `BasicSecondaryShortcuts` shows up to 5 in a single non-scrolling row;
+  at 6+ (the recommender's current default) it becomes a horizontally
+  scrollable, scroll-snapped carousel instead of wrapping. Both now prefer
+  a legacy `/basic`-module illustrated icon (`item.image`, 9 of 15 catalog
+  items have one) over the generic Tabler icon, imported directly from
+  `assets/basic/*.png` into `lib/basicServiceCatalog.ts` (`/basic` itself
+  untouched — only its static assets are reused).
+- **KYC + secondary grouping** (`BasicHome.tsx`, mobile only): the KYC
+  invite and secondary shortcuts now sit in one card (`kycAndSecondaryGroup`)
+  — invite banner on top (borderless, see below), a divider, then "More
+  services". Collapses to just the secondary row once profiling is
+  complete. Desktop is unchanged (KYC stays in its own supporting-column
+  card; secondary shortcuts stay in the main column) per the request's
+  explicit "don't force mobile layout onto desktop."
+- **Card styling pass**: standardized promo cards, the KYC/secondary group,
+  activity, recent transactions, and announcements on one recipe
+  (`rounded-2xl border border-gray-100 bg-white shadow-sm`, matching
+  `BookDeliverySuccess.tsx`'s existing cards) instead of the prior
+  inconsistent `rounded-xl border-gray-200` with no elevation.
+  `BasicKycInviteCard` dropped its own border (now a borderless blue-tinted
+  fill) so it doesn't read as a nested card inside the new group container.
+  `BasicCriticalAlerts` (`BasicAnnouncements.tsx`) is now compact-by-default
+  (one line, tap to expand the body) instead of a permanently-expanded
+  `Alert`. `BasicCorporateLayout.tsx`'s main content padding now accounts
+  for the actual device safe-area inset on top of the bottom nav's height
+  (`pb-[calc(4rem_+_env(safe-area-inset-bottom))]`), not just a flat `pb-16`.
+- **KYC form reset — real gap found and fixed** (`BasicKycModal.tsx`): the
+  reset-to-defaults effect only ran `if (open)`, i.e. on reopen, not on
+  close. Functionally this still produced a reset on next open (confirmed
+  live before the fix), but it relied on the component never being
+  observed while closed-but-dirty — exactly the "relies on visual
+  unmounting" failure mode the request called out, since this component is
+  always mounted by its callers (`BasicHome.tsx`/`Settings.tsx`) and the
+  `Drawer` only visually hides. Changed to reset unconditionally on every
+  `open`/`initialAnswers` change (both directions). Verified live
+  end-to-end: partial answers + close + reopen → cleared; completed
+  profile persists and updates recommendations immediately; Settings'
+  "Edit Preferences" loads saved answers; editing then closing without
+  saving leaves the saved profile untouched and reopening shows the saved
+  values again, not the discarded edit.
+- **Booking draft reset — investigated, no reproducible bug found**: traced
+  every exit path (`BookDelivery.tsx`'s header exit-confirm, the
+  `useBlocker`-based nav guard, and post-Confirm) and the `useBookingDraft`
+  hook (plain in-memory `useState`, never persisted). Live-tested both the
+  header-exit and the app-navigation (`useBlocker`) paths — changed
+  `firstMile` to Drop-off, triggered each exit's "Leave this booking?"
+  confirmation, confirmed, and re-entered the flow: both times it came back
+  clean (Rider Pickup, no pickup date, recipient "Not set", pickup address
+  back to its legitimate saved-address prefill). No code change was made
+  here since nothing reproduced; flagging this so a future session with a
+  concrete repro steps doesn't have to re-derive this trace from scratch.
+- `npm run typecheck` and `npm run build` clean (same pre-existing
+  chunk-size warning). Full suite run; see this entry's follow-up note if
+  results weren't recorded here.
+- **Verified live** at 390px (mobile) and 1440px (desktop) via the same
+  `ggx.auth` localStorage session-swap workaround, port 18020.
+
 ## Basic Account home — mobile hierarchy/layout correction pass (2026-11-16)
 
 Follow-up to the home redesign below: the mobile content order and shortcut

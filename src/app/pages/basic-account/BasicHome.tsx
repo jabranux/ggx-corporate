@@ -23,9 +23,10 @@ import { getRecentBookings } from '../../lib/basicBookingHistory';
  *
  * Mobile content order mirrors the original GGX app's home hierarchy:
  * Welcome → (critical alerts, only when there are any) → compact promo
- * carousel → primary shortcuts (single row) → KYC invite (only while
- * profiling is incomplete) → secondary shortcuts (single scrollable row) →
- * activity → recent transactions → regular announcements. Regular
+ * carousel → primary shortcuts (single row of exactly 4) → a grouped KYC-
+ * invite-+-secondary-shortcuts card (KYC above, only while profiling is
+ * incomplete; secondary below, single row up to 5 or a swipeable carousel
+ * at 6+) → activity → recent transactions → regular announcements. Regular
  * announcements deliberately sit at the BOTTOM on mobile so they never push
  * the primary services below the fold; only critical advisories get a
  * near-top placement. Desktop keeps its own composition (KYC/featured
@@ -63,6 +64,20 @@ export function BasicHome() {
   const activitySection = <BasicActivityOverview bookings={bookings} />;
   const transactionsSection = <BasicRecentTransactions bookings={bookings} />;
 
+  // Mobile only (spec: "group the KYC invitation and secondary shortcuts
+  // into one cohesive container, KYC above secondary") — a single card
+  // holding the invite banner (when shown), a divider, then "More
+  // services". Desktop keeps KYC in its own supporting-column card and
+  // secondary shortcuts in the main column (unchanged composition — see
+  // the desktop tree below).
+  const kycAndSecondaryGroup = (
+    <div className="rounded-2xl border border-gray-100 bg-white p-4 shadow-sm space-y-4">
+      {kycInviteCard}
+      {kycInviteCard && <div className="border-t border-gray-100" />}
+      {secondarySection}
+    </div>
+  );
+
   return (
     <div className="p-4 lg:p-6">
       {/* ── Mobile / tablet: single-column, action-oriented stack (<lg) ── */}
@@ -71,8 +86,7 @@ export function BasicHome() {
         <BasicCriticalAlerts />
         <BasicPromoCarousel />
         {primarySection}
-        {kycInviteCard}
-        {secondarySection}
+        {kycAndSecondaryGroup}
         {activitySection}
         {transactionsSection}
         <BasicAnnouncementsPanel />

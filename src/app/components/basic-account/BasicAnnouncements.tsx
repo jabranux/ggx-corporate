@@ -1,7 +1,7 @@
 import { useState } from 'react';
-import { IconAlertTriangle, IconBellRinging } from '@tabler/icons-react';
-import { Alert } from '../ui/Alert';
+import { IconAlertTriangle, IconBellRinging, IconChevronDown } from '@tabler/icons-react';
 import { Drawer } from '../ui/Dialog';
+import { cn } from '../../lib/utils';
 import { getCriticalAnnouncements, getRegularAnnouncements } from '../../lib/basicAnnouncements';
 
 function formatDate(iso: string): string {
@@ -14,18 +14,46 @@ function formatDate(iso: string): string {
  * without also pulling the full regular-announcements list up with them
  * (spec: "regular announcements should not push the primary services below
  * the fold"). Renders nothing when there are none.
+ *
+ * Compact by default — a single line (icon + title), tap to expand the full
+ * body — rather than a permanently-expanded `Alert`, per the mobile card-
+ * styling pass ("critical service advisories should be compact with
+ * expandable details"). Each item expands independently.
  */
 export function BasicCriticalAlerts() {
   const critical = getCriticalAnnouncements();
+  const [expanded, setExpanded] = useState<Set<string>>(new Set());
   if (critical.length === 0) return null;
+
+  const toggle = (id: string) => {
+    setExpanded((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id); else next.add(id);
+      return next;
+    });
+  };
 
   return (
     <div className="space-y-2">
-      {critical.map((a) => (
-        <Alert key={a.id} variant="warning" icon={<IconAlertTriangle className="w-4 h-4" />} title={a.title}>
-          {a.body}
-        </Alert>
-      ))}
+      {critical.map((a) => {
+        const isOpen = expanded.has(a.id);
+        return (
+          <div key={a.id} className="overflow-hidden rounded-2xl bg-amber-50 shadow-sm">
+            <button
+              onClick={() => toggle(a.id)}
+              className="flex w-full items-center gap-2.5 px-3.5 py-2.5 text-left cursor-pointer"
+              aria-expanded={isOpen}
+            >
+              <IconAlertTriangle className="h-4 w-4 flex-shrink-0 text-amber-600" />
+              <p className="min-w-0 flex-1 truncate text-sm font-medium text-amber-900">{a.title}</p>
+              <IconChevronDown className={cn('h-4 w-4 flex-shrink-0 text-amber-500 transition-transform', isOpen && 'rotate-180')} />
+            </button>
+            {isOpen && (
+              <p className="px-3.5 pb-3 text-xs leading-snug text-amber-800">{a.body}</p>
+            )}
+          </div>
+        );
+      })}
     </div>
   );
 }
@@ -47,7 +75,7 @@ export function BasicAnnouncementsPanel() {
 
   return (
     <div>
-      <div className="rounded-xl border border-gray-200 bg-white overflow-hidden">
+      <div className="overflow-hidden rounded-2xl border border-gray-100 bg-white shadow-sm">
         <div className="flex items-center justify-between px-4 pt-3.5 pb-1">
           <h3 className="text-sm font-semibold text-gray-900">Announcements</h3>
           {regular.length > visibleRegular.length && (
@@ -76,9 +104,13 @@ export function BasicAnnouncementsPanel() {
       <Drawer open={viewAllOpen} onClose={() => setViewAllOpen(false)} title="Announcements">
         <div className="space-y-3">
           {critical.map((a) => (
-            <Alert key={a.id} variant="warning" icon={<IconAlertTriangle className="w-4 h-4" />} title={a.title}>
-              {a.body}
-            </Alert>
+            <div key={a.id} className="flex items-start gap-3 rounded-lg bg-amber-50 px-3 py-2.5">
+              <IconAlertTriangle className="w-4 h-4 text-amber-600 flex-shrink-0 mt-0.5" />
+              <div className="min-w-0 flex-1">
+                <p className="text-sm font-medium text-amber-900 leading-snug">{a.title}</p>
+                <p className="text-xs text-amber-800 leading-snug mt-0.5">{a.body}</p>
+              </div>
+            </div>
           ))}
           {regular.map((a) => (
             <div key={a.id} className="flex items-start gap-3 rounded-lg border border-gray-100 px-3 py-2.5">

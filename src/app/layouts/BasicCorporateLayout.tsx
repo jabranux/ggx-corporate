@@ -276,7 +276,15 @@ export function BasicCorporateLayout() {
           </div>
         </header>
 
-        <main className={cn('flex-1 overflow-auto', !isBookingFlow && 'pb-16 lg:pb-0')}>
+        <main className={cn(
+          'flex-1 overflow-auto',
+          // Fixed bottom nav's own height (~4rem) plus the device's actual
+          // home-indicator safe area — a flat `pb-16` isn't enough on
+          // devices with a tall safe-area inset (the nav already adds its
+          // own `env(safe-area-inset-bottom)`, so content needs the same on
+          // top of its ~4rem height to never render underneath it).
+          !isBookingFlow && 'pb-[calc(4rem_+_env(safe-area-inset-bottom))] lg:pb-0',
+        )}>
           <Outlet />
         </main>
       </div>

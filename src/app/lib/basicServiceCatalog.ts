@@ -17,6 +17,22 @@ import {
 import type { BasicKycAnswers, BasicKycProfile, KycDailyOrders, KycDeliveryNeeds, KycMainUse, KycSellingChannel } from './basicKycProfile';
 import { hasCompletedKyc } from './basicKycProfile';
 
+// Reuses the legacy `/basic` module's own illustrated service icons (never
+// imported FROM that module's components — just the same static assets) so
+// the Corporate home's shortcuts match the original GGX app's look rather
+// than a generic icon-in-a-circle. Only 9 of the 15 catalog items have a
+// legacy illustration; the rest fall back to their existing Tabler icon
+// (see `BasicServiceShortcuts.tsx`, which renders `image` when present).
+import iconSdd from '../../assets/basic/icon-sdd.png';
+import iconStandard from '../../assets/basic/icon-standard.png';
+import iconBulk from '../../assets/basic/icon-bulk.png';
+import iconPacks from '../../assets/basic/icon-packs.png';
+import iconShopify from '../../assets/basic/icon-shopify.png';
+import iconStorefront from '../../assets/basic/icon-storefront.png';
+import iconRewards from '../../assets/basic/icon-rewards.png';
+import iconReferrals from '../../assets/basic/icon-referrals.png';
+import iconAnalytics from '../../assets/basic/icon-analytics.png';
+
 export type ServiceCategory = 'Shipping' | 'Commerce' | 'Rewards' | 'Finance' | 'Insights' | 'Account' | 'Support';
 
 /** Profile-derived tags a catalog item can match against. 'everyone' always matches. */
@@ -32,6 +48,8 @@ export interface BasicServiceItem {
   label: string;
   description: string;
   icon: ComponentType<{ className?: string }>;
+  /** Legacy `/basic` illustrated icon (preferred over `icon` when present — see this file's import block). */
+  image?: string;
   href: string;
   category: ServiceCategory;
   badge?: string;
@@ -44,32 +62,32 @@ export interface BasicServiceItem {
 export const CATALOG: BasicServiceItem[] = [
   {
     id: 'standard-delivery', label: 'Standard Delivery', description: 'Book a rider pickup or drop-off for a single parcel.',
-    icon: IconPackage, href: '/dashboard/book-delivery', category: 'Shipping',
+    icon: IconPackage, image: iconStandard, href: '/dashboard/book-delivery', category: 'Shipping',
     tags: ['everyone', 'personal', 'selling', 'business', 'exploring', 'low-volume'], baseWeight: 10,
   },
   {
     id: 'bulk-upload', label: 'Bulk Upload', description: 'Upload a spreadsheet to book many shipments at once.',
-    icon: IconUpload, href: '/dashboard/bulk-uploader', category: 'Shipping', badge: 'Free',
+    icon: IconUpload, image: iconBulk, href: '/dashboard/bulk-uploader', category: 'Shipping', badge: 'Free',
     tags: ['selling', 'business', 'mid-volume', 'high-volume'], baseWeight: 9,
   },
   {
     id: 'same-day-delivery', label: 'Same-Day Delivery', description: 'Urgent, same-day delivery for time-sensitive orders.',
-    icon: IconBolt, href: '/dashboard/same-day-delivery', category: 'Shipping', badge: 'Growing',
+    icon: IconBolt, image: iconSdd, href: '/dashboard/same-day-delivery', category: 'Shipping', badge: 'Growing',
     tags: ['business', 'same-day'], baseWeight: 3,
   },
   {
     id: 'sulit-bundles', label: 'Sulit Bundles', description: 'Prepaid delivery bundles at a lower per-order cost.',
-    icon: IconTag, href: '/dashboard/sulit-bundles', category: 'Rewards', badge: 'New',
+    icon: IconTag, image: iconPacks, href: '/dashboard/sulit-bundles', category: 'Rewards', badge: 'New',
     tags: ['selling', 'business', 'mid-volume', 'high-volume'], baseWeight: 7,
   },
   {
     id: 'basic-shopify', label: 'Shopify', description: 'Connect your Shopify store as a selling channel.',
-    icon: IconShoppingBag, href: '/dashboard/basic-shopify', category: 'Commerce',
+    icon: IconShoppingBag, image: iconShopify, href: '/dashboard/basic-shopify', category: 'Commerce',
     tags: ['selling', 'shopify'], baseWeight: 2,
   },
   {
     id: 'storefront', label: 'Storefront', description: 'Build a free storefront so buyers can order directly from you.',
-    icon: IconBuildingStore, href: '/dashboard/account-add-ons', category: 'Commerce',
+    icon: IconBuildingStore, image: iconStorefront, href: '/dashboard/account-add-ons', category: 'Commerce',
     tags: ['selling', 'facebook_instagram', 'own_website'], baseWeight: 6,
   },
   {
@@ -79,17 +97,17 @@ export const CATALOG: BasicServiceItem[] = [
   },
   {
     id: 'rewards', label: 'Rewards', description: 'Earn perks as you ship more with GoGo Xpress.',
-    icon: IconGift, href: '/dashboard/rewards', category: 'Rewards',
+    icon: IconGift, image: iconRewards, href: '/dashboard/rewards', category: 'Rewards',
     tags: ['everyone', 'exploring'], baseWeight: 5,
   },
   {
     id: 'referrals', label: 'Referrals', description: 'Invite other sellers and earn referral rewards.',
-    icon: IconUserPlus, href: '/dashboard/referrals', category: 'Rewards',
+    icon: IconUserPlus, image: iconReferrals, href: '/dashboard/referrals', category: 'Rewards',
     tags: ['everyone'], baseWeight: 4,
   },
   {
     id: 'merchant-analytics', label: 'Merchant Analytics', description: 'Track your shipping and selling performance over time.',
-    icon: IconChartBar, href: '/dashboard/basic-merchant-analytics', category: 'Insights',
+    icon: IconChartBar, image: iconAnalytics, href: '/dashboard/basic-merchant-analytics', category: 'Insights',
     tags: ['business', 'mid-volume', 'high-volume'], baseWeight: 4,
   },
   {

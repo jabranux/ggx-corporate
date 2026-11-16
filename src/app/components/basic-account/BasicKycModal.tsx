@@ -66,11 +66,20 @@ export function BasicKycModal({ open, onClose, accountId, initialAnswers, onSave
   const [answers, setAnswers] = useState<BasicKycAnswers>(initialAnswers ?? DEFAULT_ANSWERS);
   const [stepIndex, setStepIndex] = useState(0);
 
+  // Temporary, unsubmitted answers must never survive a close — reset on
+  // BOTH transitions (open AND close), not only "load fresh answers when
+  // reopened". Relying solely on the open-side reset is fragile: this
+  // component is rendered unconditionally by its callers (`BasicHome.tsx`/
+  // `Settings.tsx`), so it never actually unmounts when the Drawer closes —
+  // without this, a closed-but-still-mounted instance keeps holding
+  // whatever was last typed until something happens to reopen it, which is
+  // exactly the "relies on visual unmounting" failure mode this guards
+  // against. Resetting on close also means a background change to
+  // `initialAnswers` (e.g. a save completing elsewhere) can never be
+  // clobbered by a stale in-flight edit the next time this opens.
   useEffect(() => {
-    if (open) {
-      setAnswers(initialAnswers ?? DEFAULT_ANSWERS);
-      setStepIndex(0);
-    }
+    setAnswers(initialAnswers ?? DEFAULT_ANSWERS);
+    setStepIndex(0);
   }, [open, initialAnswers]);
 
   const needsChannelsStep = mainUseRequiresSellingChannels(answers.mainUse);

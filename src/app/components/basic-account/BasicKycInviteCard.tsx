@@ -11,10 +11,15 @@ interface BasicKycInviteCardProps {
  * hasn't completed profiling (spec §2 "Behavior"). Dismissing it only hides
  * the card — default services keep working, and the same questionnaire stays
  * reachable later through Account/Settings.
+ *
+ * Deliberately borderless (a soft blue-tinted fill, no `border`) — on mobile
+ * this renders nested inside the KYC/secondary-shortcuts group container
+ * (`BasicHome.tsx`), and stacking two bordered boxes reads as "nested
+ * cards," which the mobile card-styling pass explicitly avoids.
  */
 export function BasicKycInviteCard({ onPersonalize, onDismiss }: BasicKycInviteCardProps) {
   return (
-    <div className="relative rounded-xl border border-blue-200 bg-blue-50 px-4 py-3.5 pr-10">
+    <div className="relative rounded-xl bg-blue-50 px-4 py-3.5 pr-10">
       <button
         onClick={onDismiss}
         aria-label="Dismiss"
