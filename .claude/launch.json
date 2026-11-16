@@ -12,6 +12,12 @@
       "runtimeExecutable": "npm",
       "runtimeArgs": ["run", "dev", "--", "--port", "18020"],
       "port": 18020
+    },
+    {
+      "name": "ggx-corporate-dev-3",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": ["run", "dev", "--", "--port", "18030"],
+      "port": 18030
     }
   ]
 }

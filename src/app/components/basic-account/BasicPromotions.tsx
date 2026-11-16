@@ -5,10 +5,13 @@ import { getPromotionsFor } from '../../lib/basicPromotions';
 import { cn } from '../../lib/utils';
 
 /**
- * Promotional carousel for the Basic home (spec §4) — Corporate design-
- * system styling (plain cards, not the legacy `/basic` module's glass
- * treatment), horizontally scrollable with snap + pagination dots, same
- * interaction model as the legacy reference used for this redesign.
+ * Promotional carousel for the Basic home (spec §5) — large, colorful,
+ * campaign-style banners (gradient background + a big illustration from the
+ * legacy `/basic` module's own assets), deliberately distinct from the
+ * dashboard's plain white cards so it reads as marketing content, never as a
+ * service advisory or an account reminder. Horizontally scrollable with snap
+ * + pagination dots. Realistic mobile proportions — one banner is capped at a
+ * fixed height, not an oversized hero, so it never dominates the page.
  */
 export function BasicPromoCarousel() {
   const navigate = useNavigate();
@@ -32,27 +35,40 @@ export function BasicPromoCarousel() {
         onScroll={handleScroll}
         className="flex overflow-x-auto scrollbar-none snap-x snap-mandatory"
       >
-        {slides.map((slide) => {
-          const Icon = slide.icon;
-          return (
-            <div key={slide.id} className="w-full flex-shrink-0 snap-start px-0.5">
-              <button
-                onClick={() => navigate(slide.href)}
-                className="flex w-full items-center gap-3 rounded-2xl border border-gray-100 bg-white px-3.5 py-2.5 text-left cursor-pointer shadow-sm active:bg-gray-50 transition-colors"
-              >
-                <div className={cn('w-9 h-9 rounded-full flex items-center justify-center flex-shrink-0', slide.iconClassName)}>
-                  <Icon className="w-4.5 h-4.5" />
-                </div>
-                <div className="min-w-0 flex-1">
-                  <p className="text-sm font-semibold text-gray-900 leading-snug truncate">{slide.title}</p>
-                  <span className="mt-0.5 flex items-center gap-1 text-xs font-medium text-blue-600 truncate">
-                    {slide.cta} <IconArrowRight className="w-3 h-3 flex-shrink-0" />
+        {slides.map((slide) => (
+          <div key={slide.id} className="w-full flex-shrink-0 snap-start px-0.5">
+            <button
+              onClick={() => navigate(slide.href)}
+              className={cn(
+                'relative flex h-[116px] w-full items-center overflow-hidden rounded-2xl text-left cursor-pointer shadow-sm active:brightness-95 transition-[filter]',
+                slide.bannerClassName ?? 'bg-gradient-to-br from-blue-600 to-blue-500',
+              )}
+            >
+              <div className="relative z-10 min-w-0 flex-1 py-3.5 pl-4 pr-1.5">
+                {slide.label && (
+                  <span className="inline-block rounded-full bg-white/20 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-white">
+                    {slide.label}
                   </span>
-                </div>
-              </button>
-            </div>
-          );
-        })}
+                )}
+                <p className="mt-1.5 text-[15px] font-bold leading-tight text-white break-words">
+                  {slide.headline ?? slide.title}
+                </p>
+                <p className="mt-1 text-[11px] leading-snug text-white/85 line-clamp-2">{slide.body}</p>
+                <span className="mt-2 inline-flex items-center rounded-lg bg-white px-2.5 py-1 text-[11px] font-semibold text-gray-900">
+                  {slide.cta}
+                </span>
+              </div>
+              {slide.image && (
+                <img
+                  src={slide.image}
+                  alt=""
+                  className="relative z-10 h-[100px] w-[100px] flex-shrink-0 object-contain drop-shadow-md"
+                />
+              )}
+              <div className="pointer-events-none absolute -right-6 -top-6 h-28 w-28 rounded-full bg-white/10" />
+            </button>
+          </div>
+        ))}
       </div>
       {slides.length > 1 && (
         <div className="mt-2.5 flex items-center justify-center gap-1.5">

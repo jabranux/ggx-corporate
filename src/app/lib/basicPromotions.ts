@@ -1,13 +1,25 @@
 /**
  * Promotional content for the Basic home's carousel + desktop featured
- * placement. Structured mock content for now (spec §4) — a dedicated
+ * placement. Structured mock content for now (spec §4/§5) — a dedicated
  * `placements` field keeps the carousel and the desktop featured slot from
  * repeating the same message, and keeps this swappable for a future
  * campaigns/promotions API without touching the rendering components
  * (`components/basic-account/BasicPromotions.tsx`).
+ *
+ * Carousel entries additionally carry `label`/`headline`/`image`/
+ * `bannerClassName` for the mobile home's larger, campaign-style banner
+ * treatment (spec §5: "visually distinct from ordinary dashboard cards") —
+ * `title`/`body`/`icon` stay the source of truth for the desktop featured
+ * card, which is unchanged by this pass. `image` reuses the legacy `/basic`
+ * module's own illustrated artwork (never imported from that module's
+ * components — just the same static assets), matching how service shortcuts
+ * already reuse them.
  */
 import type { ComponentType } from 'react';
 import { IconTag, IconBolt, IconGift, IconUserPlus } from '@tabler/icons-react';
+import iconPacksBanner from '../../assets/basic/icon-packs-banner.png';
+import iconSdd from '../../assets/basic/icon-sdd.png';
+import iconRewardsBanner from '../../assets/basic/icon-rewards.png';
 
 export type PromoPlacement = 'carousel' | 'featured';
 
@@ -20,6 +32,14 @@ export interface BasicPromotion {
   body: string;
   cta: string;
   href: string;
+  /** Small eyebrow/campaign label shown above the headline (carousel banner only). */
+  label?: string;
+  /** Bold banner headline (carousel banner only) — falls back to `title` when absent. */
+  headline?: string;
+  /** Large campaign illustration (carousel banner only) — falls back to the `icon` chip when absent. */
+  image?: string;
+  /** Tailwind gradient classes for the banner background (carousel banner only). */
+  bannerClassName?: string;
 }
 
 export const PROMOTIONS: BasicPromotion[] = [
@@ -28,10 +48,14 @@ export const PROMOTIONS: BasicPromotion[] = [
     placements: ['carousel'],
     icon: IconTag,
     iconClassName: 'bg-pink-50 text-pink-600',
-    title: 'Save more with Sulit Bundles',
-    body: 'Prepaid deliveries at a lower cost per order.',
-    cta: 'View Sulit Bundles',
+    title: 'More deliveries. More savings.',
+    body: 'Get lower shipping costs with prepaid bundles.',
+    cta: 'Explore bundles',
     href: '/dashboard/sulit-bundles',
+    label: 'Sulit Bundles',
+    headline: 'More deliveries. More savings.',
+    image: iconPacksBanner,
+    bannerClassName: 'bg-gradient-to-br from-pink-500 via-rose-500 to-orange-400',
   },
   {
     id: 'same-day',
@@ -42,6 +66,10 @@ export const PROMOTIONS: BasicPromotion[] = [
     body: 'Book before 11AM, at the door by 6PM.',
     cta: 'Learn more',
     href: '/dashboard/same-day-delivery',
+    label: 'Same-Day Delivery',
+    headline: 'At the door by 6PM.',
+    image: iconSdd,
+    bannerClassName: 'bg-gradient-to-br from-blue-600 via-blue-500 to-cyan-400',
   },
   {
     id: 'rewards',
@@ -52,6 +80,10 @@ export const PROMOTIONS: BasicPromotion[] = [
     body: 'Collect points for every delivery you book.',
     cta: 'View Rewards',
     href: '/dashboard/rewards',
+    label: 'GGX Rewards',
+    headline: 'Earn rewards every shipment.',
+    image: iconRewardsBanner,
+    bannerClassName: 'bg-gradient-to-br from-amber-500 via-orange-500 to-rose-500',
   },
   {
     id: 'referrals',

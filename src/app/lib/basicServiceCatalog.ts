@@ -57,6 +57,21 @@ export interface BasicServiceItem {
   tags: ServiceTag[];
   /** Base relevance when no profile signal matches — keeps a sensible default order. */
   baseWeight: number;
+  /**
+   * Eligible for the home's 4-item primary shortcut row (booking/service
+   * entry points only). Items without this flag never appear there — the
+   * recommender still just ranks within this pool, it never gates access
+   * (the full catalog stays reachable via "View all" regardless).
+   */
+  primaryEligible?: boolean;
+  /**
+   * Eligible for the home's secondary shortcut row — service discovery/
+   * adoption only (spec §4). Utility and transaction-support pages (Earnings,
+   * Address Book, Account Add-ons, Support Tickets, Merchant Analytics) are
+   * deliberately left unflagged so they never surface there, staying
+   * reachable only through "View all".
+   */
+  secondaryEligible?: boolean;
 }
 
 export const CATALOG: BasicServiceItem[] = [
@@ -64,46 +79,55 @@ export const CATALOG: BasicServiceItem[] = [
     id: 'standard-delivery', label: 'Standard Delivery', description: 'Book a rider pickup or drop-off for a single parcel.',
     icon: IconPackage, image: iconStandard, href: '/dashboard/book-delivery', category: 'Shipping',
     tags: ['everyone', 'personal', 'selling', 'business', 'exploring', 'low-volume'], baseWeight: 10,
+    primaryEligible: true,
   },
   {
     id: 'bulk-upload', label: 'Bulk Upload', description: 'Upload a spreadsheet to book many shipments at once.',
     icon: IconUpload, image: iconBulk, href: '/dashboard/bulk-uploader', category: 'Shipping', badge: 'Free',
     tags: ['selling', 'business', 'mid-volume', 'high-volume'], baseWeight: 9,
+    primaryEligible: true,
   },
   {
     id: 'same-day-delivery', label: 'Same-Day Delivery', description: 'Urgent, same-day delivery for time-sensitive orders.',
     icon: IconBolt, image: iconSdd, href: '/dashboard/same-day-delivery', category: 'Shipping', badge: 'Growing',
     tags: ['business', 'same-day'], baseWeight: 3,
+    primaryEligible: true,
   },
   {
     id: 'sulit-bundles', label: 'Sulit Bundles', description: 'Prepaid delivery bundles at a lower per-order cost.',
     icon: IconTag, image: iconPacks, href: '/dashboard/sulit-bundles', category: 'Rewards', badge: 'New',
     tags: ['selling', 'business', 'mid-volume', 'high-volume'], baseWeight: 7,
+    primaryEligible: true, secondaryEligible: true,
   },
   {
     id: 'basic-shopify', label: 'Shopify', description: 'Connect your Shopify store as a selling channel.',
     icon: IconShoppingBag, image: iconShopify, href: '/dashboard/basic-shopify', category: 'Commerce',
     tags: ['selling', 'shopify'], baseWeight: 2,
+    primaryEligible: true, secondaryEligible: true,
   },
   {
     id: 'storefront', label: 'Storefront', description: 'Build a free storefront so buyers can order directly from you.',
     icon: IconBuildingStore, image: iconStorefront, href: '/dashboard/account-add-ons', category: 'Commerce',
     tags: ['selling', 'facebook_instagram', 'own_website'], baseWeight: 6,
+    primaryEligible: true, secondaryEligible: true,
   },
   {
     id: 'vouchers', label: 'Vouchers', description: 'View and apply promo codes for your deliveries.',
     icon: IconTicket, href: '/dashboard/vouchers', category: 'Rewards',
     tags: ['everyone'], baseWeight: 5,
+    secondaryEligible: true,
   },
   {
     id: 'rewards', label: 'Rewards', description: 'Earn perks as you ship more with GoGo Xpress.',
     icon: IconGift, image: iconRewards, href: '/dashboard/rewards', category: 'Rewards',
     tags: ['everyone', 'exploring'], baseWeight: 5,
+    secondaryEligible: true,
   },
   {
     id: 'referrals', label: 'Referrals', description: 'Invite other sellers and earn referral rewards.',
     icon: IconUserPlus, image: iconReferrals, href: '/dashboard/referrals', category: 'Rewards',
     tags: ['everyone'], baseWeight: 4,
+    secondaryEligible: true,
   },
   {
     id: 'merchant-analytics', label: 'Merchant Analytics', description: 'Track your shipping and selling performance over time.',
@@ -186,18 +210,27 @@ export interface RecommendedServices {
 }
 
 /**
- * Ranks the full catalog by relevance to the account's KYC answers (or a
- * sensible default order when profiling hasn't been completed yet) and
- * splits it into a 4-item primary row and the next-most-relevant secondary
- * items. Never excludes anything — see this file's header comment.
+ * Ranks the catalog by relevance to the account's KYC answers (or a sensible
+ * default order when profiling hasn't been completed yet) and splits it into
+ * a 4-item primary row (service/booking entry points only — `primaryEligible`)
+ * and a secondary row (service discovery/adoption only — `secondaryEligible`,
+ * spec §4; excludes utility/transaction-support pages like Earnings, Address
+ * Book, Account Add-ons, Support Tickets, and Merchant Analytics, which stay
+ * reachable only via "View all"). Primary and secondary are ranked from two
+ * separate eligibility pools, and any item chosen for primary is excluded
+ * from secondary, so the two rows never duplicate a service. KYC only ever
+ * reorders/selects within these pools — it never restricts access to the
+ * full catalog (see this file's header comment).
  */
 export function getRecommendedServices(profile: BasicKycProfile | null): RecommendedServices {
   const profileTags = profile && hasCompletedKyc(profile) && profile.answers ? tagsForAnswers(profile.answers) : null;
+  const byScoreDesc = (a: BasicServiceItem, b: BasicServiceItem) => scoreItem(b, profileTags) - scoreItem(a, profileTags);
 
-  const ranked = [...CATALOG].sort((a, b) => scoreItem(b, profileTags) - scoreItem(a, profileTags));
+  const primary = CATALOG.filter((item) => item.primaryEligible).sort(byScoreDesc).slice(0, 4);
+  const primaryIds = new Set(primary.map((item) => item.id));
+  const secondary = CATALOG
+    .filter((item) => item.secondaryEligible && !primaryIds.has(item.id))
+    .sort(byScoreDesc);
 
-  return {
-    primary: ranked.slice(0, 4),
-    secondary: ranked.slice(4, 10),
-  };
+  return { primary, secondary };
 }

@@ -79,6 +79,16 @@ export function BasicCorporateLayout() {
   // for, and it sits beside the content rather than competing with it).
   const isBookingFlow = location.pathname.startsWith('/dashboard/book-delivery');
 
+  // The mobile home (`BasicHome.tsx`) integrates the notification bell into
+  // its own greeting row and drops this header's logo entirely on mobile —
+  // a redundant second "GoGo Xpress / Basic" brand mark right above the
+  // exact same thing the bottom nav's "Home" tab already identifies (spec
+  // §1). Every other mobile page still needs this header for notification
+  // access, since the bottom nav itself has no notifications tab — only the
+  // home route drops it, and only below `lg:` (desktop keeps its header,
+  // including on the home route, exactly as before).
+  const isHomeMobile = location.pathname === '/dashboard';
+
   const [accountDrawerOpen, setAccountDrawerOpen] = useState(false);
   const [accountMenuOpen, setAccountMenuOpen] = useState(false);
   const [showLogoutConfirm, setShowLogoutConfirm] = useState(false);
@@ -200,9 +210,12 @@ export function BasicCorporateLayout() {
             header every other desktop page has. */}
         <header className={cn(
           'h-14 bg-white border-b border-gray-200 items-center gap-3 px-4 lg:px-6 flex-shrink-0',
-          isBookingFlow ? 'hidden lg:flex' : 'flex',
+          isBookingFlow || isHomeMobile ? 'hidden lg:flex' : 'flex',
         )}>
-          {/* Mobile-only brand (desktop sidebar already shows it). */}
+          {/* Mobile-only brand (desktop sidebar already shows it; the home
+              route drops this header on mobile entirely — see isHomeMobile
+              above — so this never renders alongside the home's own
+              greeting-integrated bell). */}
           <div className="flex items-center gap-2 lg:hidden">
             <img
               src="https://gogoxpress.com/wp-content/uploads/2022/07/gogox-logo.png"
