@@ -7,6 +7,17 @@ interface ShortcutRowProps {
   items: BasicServiceItem[];
 }
 
+interface SecondaryShortcutRowProps extends ShortcutRowProps {
+  /**
+   * Set `false` when a parent container renders its own "More features" /
+   * "View all" heading above this row (spec §3 — the mobile KYC/secondary
+   * group reorders that heading to the top of the shared container).
+   * Defaults to `true` so desktop, which still uses this component's own
+   * heading, is unaffected.
+   */
+  showHeader?: boolean;
+}
+
 /**
  * Primary service shortcuts (spec §2/§3, refined per the mobile layout
  * correction pass) — always exactly 4 items in a single row (the recommender
@@ -24,7 +35,7 @@ export function BasicPrimaryShortcuts({ items }: ShortcutRowProps) {
   const primaryItems = items.slice(0, 4);
 
   return (
-    <div className="flex gap-3">
+    <div className="flex gap-2">
       {primaryItems.map((item) => {
         const Icon = item.icon;
         return (
@@ -40,9 +51,9 @@ export function BasicPrimaryShortcuts({ items }: ShortcutRowProps) {
             )}
             <div className="flex h-16 w-16 flex-shrink-0 items-center justify-center overflow-hidden rounded-2xl bg-blue-50 lg:h-[72px] lg:w-[72px]">
               {item.image ? (
-                <img src={item.image} alt="" className="h-12 w-12 object-contain lg:h-14 lg:w-14" />
+                <img src={item.image} alt="" className="h-14 w-14 object-contain lg:h-14 lg:w-14" />
               ) : (
-                <Icon className="h-6 w-6 text-blue-600 lg:h-7 lg:w-7" />
+                <Icon className="h-7 w-7 text-blue-600 lg:h-7 lg:w-7" />
               )}
             </div>
             <span className="w-full text-center text-[12px] font-semibold leading-tight text-gray-700 break-words lg:text-sm">
@@ -64,24 +75,26 @@ export function BasicPrimaryShortcuts({ items }: ShortcutRowProps) {
  * "View all" either way. On `lg`+ screens there's enough width to lay these
  * out as a non-scrolling grid regardless of count.
  */
-export function BasicSecondaryShortcuts({ items }: ShortcutRowProps) {
+export function BasicSecondaryShortcuts({ items, showHeader = true }: SecondaryShortcutRowProps) {
   const navigate = useNavigate();
   const isCarousel = items.length >= 6;
 
   return (
     <div>
-      <div className="mb-2.5 flex items-center justify-between">
-        <h3 className="text-sm font-semibold text-gray-500">More services</h3>
-        <button
-          onClick={() => navigate('/dashboard/services')}
-          className="flex items-center gap-1 text-xs font-medium text-blue-600 hover:text-blue-700 cursor-pointer"
-        >
-          View all <IconArrowRight className="w-3 h-3" />
-        </button>
-      </div>
+      {showHeader && (
+        <div className="mb-2.5 flex items-center justify-between">
+          <h3 className="text-sm font-semibold text-gray-500">More features</h3>
+          <button
+            onClick={() => navigate('/dashboard/services')}
+            className="flex items-center gap-1 text-xs font-medium text-blue-600 hover:text-blue-700 cursor-pointer"
+          >
+            View all <IconArrowRight className="w-3 h-3" />
+          </button>
+        </div>
+      )}
       <div
         className={cn(
-          'flex gap-2.5 -mx-0.5 px-0.5 lg:grid lg:grid-cols-6 lg:gap-3 lg:overflow-visible',
+          'flex gap-2 -mx-0.5 px-0.5 lg:grid lg:grid-cols-6 lg:gap-3 lg:overflow-visible',
           isCarousel ? 'overflow-x-auto scrollbar-none snap-x snap-proximity' : 'justify-between',
         )}
       >
@@ -92,8 +105,8 @@ export function BasicSecondaryShortcuts({ items }: ShortcutRowProps) {
               key={item.id}
               onClick={() => navigate(item.href)}
               className={cn(
-                'flex min-w-0 flex-col items-center gap-1.5 rounded-lg px-1 py-1.5 text-center active:bg-gray-50 transition-colors cursor-pointer lg:w-full',
-                isCarousel ? 'w-16 flex-shrink-0 snap-start' : 'flex-1',
+                'flex min-w-0 flex-col items-center gap-1.5 rounded-lg py-1.5 text-center active:bg-gray-50 transition-colors cursor-pointer lg:w-full lg:px-1',
+                isCarousel ? 'w-16 flex-shrink-0 snap-start px-1' : 'flex-1 px-0',
               )}
             >
               <div className="flex h-11 w-11 flex-shrink-0 items-center justify-center overflow-hidden rounded-xl bg-gray-50">

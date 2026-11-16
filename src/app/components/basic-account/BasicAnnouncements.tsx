@@ -41,7 +41,7 @@ export function BasicCriticalAlerts() {
           <div key={a.id} className="overflow-hidden rounded-2xl bg-amber-50 shadow-sm">
             <button
               onClick={() => toggle(a.id)}
-              className="flex w-full items-center gap-2.5 px-3.5 py-2.5 text-left cursor-pointer"
+              className="flex w-full items-center gap-2.5 px-3 py-2.5 text-left cursor-pointer"
               aria-expanded={isOpen}
             >
               <IconAlertTriangle className="h-4 w-4 flex-shrink-0 text-amber-600" />
@@ -49,7 +49,7 @@ export function BasicCriticalAlerts() {
               <IconChevronDown className={cn('h-4 w-4 flex-shrink-0 text-amber-500 transition-transform', isOpen && 'rotate-180')} />
             </button>
             {isOpen && (
-              <p className="px-3.5 pb-3 text-xs leading-snug text-amber-800">{a.body}</p>
+              <p className="px-3 pb-3 text-xs leading-snug text-amber-800">{a.body}</p>
             )}
           </div>
         );
@@ -76,7 +76,7 @@ export function BasicAnnouncementsPanel() {
   return (
     <div>
       <div className="overflow-hidden rounded-2xl border border-gray-100 bg-white shadow-sm">
-        <div className="flex items-center justify-between px-4 pt-3.5 pb-1">
+        <div className="flex items-center justify-between px-3 pt-3 pb-1">
           <h3 className="text-sm font-semibold text-gray-900">Announcements</h3>
           {regular.length > visibleRegular.length && (
             <button
@@ -89,7 +89,7 @@ export function BasicAnnouncementsPanel() {
         </div>
         <div className="divide-y divide-gray-100">
           {visibleRegular.map((a) => (
-            <div key={a.id} className="flex items-start gap-3 px-4 py-3">
+            <div key={a.id} className="flex items-start gap-3 px-3 py-3">
               <IconBellRinging className="w-4 h-4 text-gray-400 flex-shrink-0 mt-0.5" />
               <div className="min-w-0 flex-1">
                 <p className="text-sm font-medium text-gray-900 leading-snug">{a.title}</p>

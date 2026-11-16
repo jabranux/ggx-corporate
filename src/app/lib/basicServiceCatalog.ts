@@ -12,7 +12,7 @@ import type { ComponentType } from 'react';
 import {
   IconPackage, IconUpload, IconBolt, IconTag, IconShoppingBag,
   IconBuildingStore, IconTicket, IconGift, IconUserPlus, IconChartBar,
-  IconMapPin, IconWallet, IconBuildingBank, IconMessage, IconApps,
+  IconMapPin, IconWallet, IconBuildingBank, IconMessage, IconApps, IconCode,
 } from '@tabler/icons-react';
 import type { BasicKycAnswers, BasicKycProfile, KycDailyOrders, KycDeliveryNeeds, KycMainUse, KycSellingChannel } from './basicKycProfile';
 import { hasCompletedKyc } from './basicKycProfile';
@@ -58,20 +58,18 @@ export interface BasicServiceItem {
   /** Base relevance when no profile signal matches — keeps a sensible default order. */
   baseWeight: number;
   /**
-   * Eligible for the home's 4-item primary shortcut row (booking/service
-   * entry points only). Items without this flag never appear there — the
-   * recommender still just ranks within this pool, it never gates access
-   * (the full catalog stays reachable via "View all" regardless).
+   * In the single eligible pool for the home's primary (4-item) and
+   * secondary (up to 5-item) recommendation rows — a fixed 11-item list
+   * (Standard Delivery, Same Day Delivery, Bulk Upload, Sulit Bundles, API
+   * Integration, Vouchers, Rewards, Referrals, Shopify, Storefront,
+   * Analytics). KYC answers only re-rank within this pool to choose the top
+   * 4 (primary) and next up to 5 (secondary) — the same item never appears
+   * in both. Transactional utility pages (Earnings, Address Book, Payout
+   * Settings, Support Tickets, Account Add-ons) are deliberately left
+   * unflagged so they never surface in either row, staying reachable only
+   * through "View all" (which always lists the complete, ungated catalog).
    */
-  primaryEligible?: boolean;
-  /**
-   * Eligible for the home's secondary shortcut row — service discovery/
-   * adoption only (spec §4). Utility and transaction-support pages (Earnings,
-   * Address Book, Account Add-ons, Support Tickets, Merchant Analytics) are
-   * deliberately left unflagged so they never surface there, staying
-   * reachable only through "View all".
-   */
-  secondaryEligible?: boolean;
+  eligible?: boolean;
 }
 
 export const CATALOG: BasicServiceItem[] = [
@@ -79,60 +77,67 @@ export const CATALOG: BasicServiceItem[] = [
     id: 'standard-delivery', label: 'Standard Delivery', description: 'Book a rider pickup or drop-off for a single parcel.',
     icon: IconPackage, image: iconStandard, href: '/dashboard/book-delivery', category: 'Shipping',
     tags: ['everyone', 'personal', 'selling', 'business', 'exploring', 'low-volume'], baseWeight: 10,
-    primaryEligible: true,
+    eligible: true,
   },
   {
     id: 'bulk-upload', label: 'Bulk Upload', description: 'Upload a spreadsheet to book many shipments at once.',
     icon: IconUpload, image: iconBulk, href: '/dashboard/bulk-uploader', category: 'Shipping', badge: 'Free',
     tags: ['selling', 'business', 'mid-volume', 'high-volume'], baseWeight: 9,
-    primaryEligible: true,
+    eligible: true,
   },
   {
-    id: 'same-day-delivery', label: 'Same-Day Delivery', description: 'Urgent, same-day delivery for time-sensitive orders.',
+    id: 'same-day-delivery', label: 'Same Day Delivery', description: 'Urgent, same-day delivery for time-sensitive orders.',
     icon: IconBolt, image: iconSdd, href: '/dashboard/same-day-delivery', category: 'Shipping', badge: 'Growing',
     tags: ['business', 'same-day'], baseWeight: 3,
-    primaryEligible: true,
+    eligible: true,
   },
   {
     id: 'sulit-bundles', label: 'Sulit Bundles', description: 'Prepaid delivery bundles at a lower per-order cost.',
     icon: IconTag, image: iconPacks, href: '/dashboard/sulit-bundles', category: 'Rewards', badge: 'New',
     tags: ['selling', 'business', 'mid-volume', 'high-volume'], baseWeight: 7,
-    primaryEligible: true, secondaryEligible: true,
+    eligible: true,
+  },
+  {
+    id: 'api-integration', label: 'API Integration', description: 'Connect your own systems to GGX with API keys and webhooks.',
+    icon: IconCode, href: '/dashboard/basic-api-integration', category: 'Account',
+    tags: ['business', 'mid-volume', 'high-volume'], baseWeight: 2,
+    eligible: true,
   },
   {
     id: 'basic-shopify', label: 'Shopify', description: 'Connect your Shopify store as a selling channel.',
     icon: IconShoppingBag, image: iconShopify, href: '/dashboard/basic-shopify', category: 'Commerce',
     tags: ['selling', 'shopify'], baseWeight: 2,
-    primaryEligible: true, secondaryEligible: true,
+    eligible: true,
   },
   {
     id: 'storefront', label: 'Storefront', description: 'Build a free storefront so buyers can order directly from you.',
     icon: IconBuildingStore, image: iconStorefront, href: '/dashboard/account-add-ons', category: 'Commerce',
     tags: ['selling', 'facebook_instagram', 'own_website'], baseWeight: 6,
-    primaryEligible: true, secondaryEligible: true,
+    eligible: true,
   },
   {
     id: 'vouchers', label: 'Vouchers', description: 'View and apply promo codes for your deliveries.',
     icon: IconTicket, href: '/dashboard/vouchers', category: 'Rewards',
     tags: ['everyone'], baseWeight: 5,
-    secondaryEligible: true,
+    eligible: true,
   },
   {
     id: 'rewards', label: 'Rewards', description: 'Earn perks as you ship more with GoGo Xpress.',
     icon: IconGift, image: iconRewards, href: '/dashboard/rewards', category: 'Rewards',
     tags: ['everyone', 'exploring'], baseWeight: 5,
-    secondaryEligible: true,
+    eligible: true,
   },
   {
     id: 'referrals', label: 'Referrals', description: 'Invite other sellers and earn referral rewards.',
     icon: IconUserPlus, image: iconReferrals, href: '/dashboard/referrals', category: 'Rewards',
     tags: ['everyone'], baseWeight: 4,
-    secondaryEligible: true,
+    eligible: true,
   },
   {
-    id: 'merchant-analytics', label: 'Merchant Analytics', description: 'Track your shipping and selling performance over time.',
+    id: 'merchant-analytics', label: 'Analytics', description: 'Track your shipping and selling performance over time.',
     icon: IconChartBar, image: iconAnalytics, href: '/dashboard/basic-merchant-analytics', category: 'Insights',
     tags: ['business', 'mid-volume', 'high-volume'], baseWeight: 4,
+    eligible: true,
   },
   {
     id: 'address-book', label: 'Address Book', description: 'Save and manage your pickup and delivery addresses.',
@@ -210,27 +215,25 @@ export interface RecommendedServices {
 }
 
 /**
- * Ranks the catalog by relevance to the account's KYC answers (or a sensible
- * default order when profiling hasn't been completed yet) and splits it into
- * a 4-item primary row (service/booking entry points only — `primaryEligible`)
- * and a secondary row (service discovery/adoption only — `secondaryEligible`,
- * spec §4; excludes utility/transaction-support pages like Earnings, Address
- * Book, Account Add-ons, Support Tickets, and Merchant Analytics, which stay
- * reachable only via "View all"). Primary and secondary are ranked from two
- * separate eligibility pools, and any item chosen for primary is excluded
- * from secondary, so the two rows never duplicate a service. KYC only ever
- * reorders/selects within these pools — it never restricts access to the
- * full catalog (see this file's header comment).
+ * Ranks the single 11-item eligible pool (see `eligible` on
+ * `BasicServiceItem`) by relevance to the account's KYC answers (or a
+ * sensible default order when profiling hasn't been completed yet) and
+ * splits the ranked list into a 4-item primary row and a next-up-to-5-item
+ * secondary row. Because both rows draw from the same ranked list, a service
+ * can never appear in both at once. Utility/transaction-support pages
+ * (Earnings, Address Book, Payout Settings, Support Tickets, Account
+ * Add-ons) are excluded from the pool entirely, so they never surface in
+ * either row — they stay reachable only via "View all". KYC only ever
+ * reorders/selects within the eligible pool — it never restricts access to
+ * the full catalog (see this file's header comment).
  */
 export function getRecommendedServices(profile: BasicKycProfile | null): RecommendedServices {
   const profileTags = profile && hasCompletedKyc(profile) && profile.answers ? tagsForAnswers(profile.answers) : null;
   const byScoreDesc = (a: BasicServiceItem, b: BasicServiceItem) => scoreItem(b, profileTags) - scoreItem(a, profileTags);
 
-  const primary = CATALOG.filter((item) => item.primaryEligible).sort(byScoreDesc).slice(0, 4);
-  const primaryIds = new Set(primary.map((item) => item.id));
-  const secondary = CATALOG
-    .filter((item) => item.secondaryEligible && !primaryIds.has(item.id))
-    .sort(byScoreDesc);
+  const ranked = CATALOG.filter((item) => item.eligible).sort(byScoreDesc);
+  const primary = ranked.slice(0, 4);
+  const secondary = ranked.slice(4, 9);
 
   return { primary, secondary };
 }

@@ -27,7 +27,7 @@ interface BasicActivityOverviewProps {
 export function BasicActivityOverview({ bookings }: BasicActivityOverviewProps) {
   if (bookings.length === 0) {
     return (
-      <div className="rounded-2xl border border-gray-100 bg-white px-4 py-5 text-center shadow-sm">
+      <div className="rounded-2xl border border-gray-100 bg-white px-3 py-5 text-center shadow-sm">
         <IconTruckDelivery className="w-6 h-6 text-gray-300 mx-auto mb-1.5" />
         <p className="text-sm text-gray-500">No activity yet this week.</p>
         <p className="text-xs text-gray-400 mt-0.5">Book your first delivery to see your activity here.</p>
@@ -39,7 +39,7 @@ export function BasicActivityOverview({ bookings }: BasicActivityOverviewProps) 
   const totalSpend = last7Days.reduce((sum, b) => sum + (b.total || 0) + (b.codAmount || 0), 0);
 
   return (
-    <div className="rounded-2xl border border-gray-100 bg-white px-4 py-3.5 shadow-sm">
+    <div className="rounded-2xl border border-gray-100 bg-white p-3 shadow-sm">
       <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-3">Activity — last 7 days</p>
       <div className="flex flex-wrap gap-6">
         <div className="flex items-center gap-2.5">
@@ -82,7 +82,7 @@ export function BasicRecentTransactions({ bookings }: BasicRecentTransactionsPro
 
   return (
     <div className="rounded-2xl border border-gray-100 bg-white shadow-sm overflow-hidden">
-      <div className="flex items-center justify-between px-4 pt-3.5 pb-1">
+      <div className="flex items-center justify-between px-3 pt-3 pb-1">
         <h3 className="text-sm font-semibold text-gray-900">Recent transactions</h3>
         <button
           onClick={() => navigate('/dashboard/transactions')}
@@ -104,7 +104,7 @@ export function BasicRecentTransactions({ bookings }: BasicRecentTransactionsPro
             <button
               key={b.id}
               onClick={() => navigate('/dashboard/book-delivery/success', { state: { bookingId: b.id } })}
-              className="flex w-full items-center gap-3 px-4 py-3 text-left active:bg-gray-50 transition-colors cursor-pointer"
+              className="flex w-full items-center gap-3 px-3 py-3 text-left active:bg-gray-50 transition-colors cursor-pointer"
             >
               <div className="w-9 h-9 rounded-lg bg-blue-50 flex items-center justify-center flex-shrink-0">
                 <IconPackage className="w-4 h-4 text-blue-600" />

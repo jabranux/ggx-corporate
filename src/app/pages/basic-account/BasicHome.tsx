@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router';
-import { IconBell } from '@tabler/icons-react';
+import { IconArrowRight, IconBell } from '@tabler/icons-react';
 import { useAuth } from '../../contexts/AuthContext';
 import { BasicKycModal } from '../../components/basic-account/BasicKycModal';
 import { BasicKycInviteCard } from '../../components/basic-account/BasicKycInviteCard';
@@ -29,18 +29,20 @@ import { getUnreadCount } from '../../services/notificationService';
  * Mobile content hierarchy (spec §1): personalized greeting with the
  * notification bell integrated beside it (no separate logo header) →
  * critical service advisories, only when any exist → "Attention needed"
- * account reminders, only when any are outstanding → primary shortcuts
- * (single row of exactly 4) → a grouped KYC-invite-+-secondary-shortcuts
- * card (KYC above, only while profiling is incomplete; secondary below,
- * single row up to 5 or a swipeable carousel at 6+) → the campaign-style
- * promotional carousel → activity → recent transactions → regular
- * announcements. Regular announcements deliberately sit at the BOTTOM on
- * mobile so they never push the primary services below the fold; only
- * critical advisories get a near-top placement. None of the conditional
- * sections reserve space when empty — each returns `null` outright. Desktop
- * keeps its own, unchanged composition (own header bell, KYC/featured
- * promo/announcements in a supporting column, promo carousel near the top)
- * rather than reusing this order — this pass is mobile-only.
+ * account reminders (a header "X pending" badge, a fully-clickable first
+ * row, and a combined second row — title + "+N more" — opening the full
+ * pending list), only when any are outstanding → primary shortcuts (single
+ * row of exactly 4) → a grouped "More features" card (heading + View all,
+ * then the KYC invite when profiling is incomplete, then secondary
+ * shortcuts — single row up to 5 or a swipeable carousel at 6+) → the
+ * campaign-style promotional carousel → activity → recent transactions →
+ * regular announcements. Regular announcements deliberately sit at the
+ * BOTTOM on mobile so they never push the primary services below the fold;
+ * only critical advisories get a near-top placement. None of the
+ * conditional sections reserve space when empty — each returns `null`
+ * outright. Desktop keeps its own, unchanged composition (own header bell,
+ * KYC/featured promo/announcements in a supporting column, promo carousel
+ * near the top) rather than reusing this order — this pass is mobile-only.
  */
 export function BasicHome() {
   const { user } = useAuth();
@@ -84,10 +86,15 @@ export function BasicHome() {
     return () => { cancelled = true; };
   }, [notificationViewer]);
 
+  const firstName = user?.name ? user.name.split(' ')[0] : '';
   const greetingText = (
     <>
       <h1 className="text-2xl lg:text-3xl font-bold text-gray-900">
-        Welcome back{user?.name ? `, ${user.name.split(' ')[0]}` : ''}
+        {firstName ? (
+          <>Welcome, <span className="text-blue-600">{firstName}</span>!</>
+        ) : (
+          'Welcome!'
+        )}
       </h1>
       <p className="mt-1 text-sm lg:text-base text-gray-600">What do you want to send today?</p>
     </>
@@ -120,17 +127,25 @@ export function BasicHome() {
   const activitySection = <BasicActivityOverview bookings={bookings} />;
   const transactionsSection = <BasicRecentTransactions bookings={bookings} />;
 
-  // Mobile only (spec: "group the KYC invitation and secondary shortcuts
-  // into one cohesive container, KYC above secondary") — a single card
-  // holding the invite banner (when shown), a divider, then "More
-  // services". Desktop keeps KYC in its own supporting-column card and
-  // secondary shortcuts in the main column (unchanged composition — see
-  // the desktop tree below).
+  // Mobile only (spec §3 — "More features" heading + View all above the KYC
+  // invitation, which sits above the secondary shortcuts; no divider between
+  // KYC and secondary, relying on the invite's own tinted surface for
+  // contrast instead). Desktop keeps KYC in its own supporting-column card
+  // and secondary shortcuts (with their own heading) in the main column —
+  // unchanged composition, see the desktop tree below.
   const kycAndSecondaryGroup = (
-    <div className="rounded-2xl border border-gray-100 bg-white p-4 shadow-sm space-y-4">
+    <div className="rounded-2xl border border-gray-100 bg-white p-3 shadow-sm space-y-3">
+      <div className="flex items-center justify-between">
+        <h3 className="text-sm font-semibold text-gray-500">More features</h3>
+        <button
+          onClick={() => navigate('/dashboard/services')}
+          className="flex items-center gap-1 text-xs font-medium text-blue-600 hover:text-blue-700 cursor-pointer"
+        >
+          View all <IconArrowRight className="w-3 h-3" />
+        </button>
+      </div>
       {mobileKycInviteCard}
-      {mobileKycInviteCard && <div className="border-t border-gray-100" />}
-      {secondarySection}
+      <BasicSecondaryShortcuts items={secondary} showHeader={false} />
     </div>
   );
 

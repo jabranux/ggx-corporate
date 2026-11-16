@@ -86,6 +86,7 @@ import { BasicServiceCatalogPage } from './pages/basic-account/BasicServiceCatal
 import { SameDayDeliveryPage } from './pages/basic-account/SameDayDeliveryPage';
 import { BasicShopifyPage } from './pages/basic-account/BasicShopifyPage';
 import { BasicMerchantAnalyticsPage } from './pages/basic-account/BasicMerchantAnalyticsPage';
+import { BasicApiIntegrationPage } from './pages/basic-account/BasicApiIntegrationPage';
 import { TrackingPage } from './pages/TrackingPage';
 import { StorefrontPreview } from './pages/StorefrontPreview';
 import { StorefrontProductDetail } from './pages/StorefrontProductDetail';
@@ -290,6 +291,7 @@ export const router = createBrowserRouter([
       { path: 'same-day-delivery',        element: <BasicOnlyRoute><SameDayDeliveryPage /></BasicOnlyRoute> },
       { path: 'basic-shopify',            element: <BasicOnlyRoute><BasicShopifyPage /></BasicOnlyRoute> },
       { path: 'basic-merchant-analytics', element: <BasicOnlyRoute><BasicMerchantAnalyticsPage /></BasicOnlyRoute> },
+      { path: 'basic-api-integration',    element: <BasicOnlyRoute><BasicApiIntegrationPage /></BasicOnlyRoute> },
     ],
   },
 ]);
