@@ -57,8 +57,15 @@ export function BasicHome() {
   const handleDismissInvite = () => setProfile(dismissKycInvitation(accountId));
   const handleKycSaved = (next: BasicKycProfile) => setProfile(next);
 
+  // Desktop keeps the original card (filled button, original padding) —
+  // mobile gets the fully-clickable/text-link compact variant (spec §2).
+  // Two separate elements, not one shared with a responsive class, since the
+  // difference is behavioral (whole-card onClick), not just visual.
   const kycInviteCard = showInvite ? (
     <BasicKycInviteCard onPersonalize={() => setKycModalOpen(true)} onDismiss={handleDismissInvite} />
+  ) : null;
+  const mobileKycInviteCard = showInvite ? (
+    <BasicKycInviteCard onPersonalize={() => setKycModalOpen(true)} onDismiss={handleDismissInvite} compact />
   ) : null;
 
   // Mobile only: the notification bell normally lives in the top app header
@@ -121,16 +128,20 @@ export function BasicHome() {
   // the desktop tree below).
   const kycAndSecondaryGroup = (
     <div className="rounded-2xl border border-gray-100 bg-white p-4 shadow-sm space-y-4">
-      {kycInviteCard}
-      {kycInviteCard && <div className="border-t border-gray-100" />}
+      {mobileKycInviteCard}
+      {mobileKycInviteCard && <div className="border-t border-gray-100" />}
       {secondarySection}
     </div>
   );
 
   return (
     <div className="p-4 lg:p-6">
-      {/* ── Mobile / tablet: single-column, action-oriented stack (<lg) ── */}
-      <div className="lg:hidden space-y-5">
+      {/* ── Mobile / tablet: single-column, action-oriented stack (<lg) ──
+          `space-y-4` (tightened from `space-y-5`) so the now-more-compact
+          reminders/KYC sections pull the promo banner higher up common
+          mobile screens, per a follow-up refinement request — without
+          cutting into any single section's own internal padding. */}
+      <div className="lg:hidden space-y-4">
         {mobileGreeting}
         <BasicCriticalAlerts />
         <BasicAttentionNeeded />

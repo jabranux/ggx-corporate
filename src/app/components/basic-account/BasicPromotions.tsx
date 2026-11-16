@@ -11,7 +11,8 @@ import { cn } from '../../lib/utils';
  * dashboard's plain white cards so it reads as marketing content, never as a
  * service advisory or an account reminder. Horizontally scrollable with snap
  * + pagination dots. Realistic mobile proportions — one banner is capped at a
- * fixed height, not an oversized hero, so it never dominates the page.
+ * fixed height (~25% taller than the previous pass, per a follow-up refinement
+ * request), not an oversized hero, so it never dominates the page.
  */
 export function BasicPromoCarousel() {
   const navigate = useNavigate();
@@ -40,21 +41,26 @@ export function BasicPromoCarousel() {
             <button
               onClick={() => navigate(slide.href)}
               className={cn(
-                'relative flex h-[116px] w-full items-center overflow-hidden rounded-2xl text-left cursor-pointer shadow-sm active:brightness-95 transition-[filter]',
+                // Mobile banner is ~25% taller than before, per a follow-up
+                // refinement request; `lg:` reverts every size below back to
+                // its pre-refinement value so this stays mobile-only — the
+                // task scope explicitly leaves desktop untouched, and this
+                // component is shared with the desktop tree.
+                'relative flex h-[145px] lg:h-[116px] w-full items-center overflow-hidden rounded-2xl text-left cursor-pointer shadow-sm active:brightness-95 transition-[filter]',
                 slide.bannerClassName ?? 'bg-gradient-to-br from-blue-600 to-blue-500',
               )}
             >
-              <div className="relative z-10 min-w-0 flex-1 py-3.5 pl-4 pr-1.5">
+              <div className="relative z-10 min-w-0 flex-1 py-4 lg:py-3.5 pl-4 pr-1.5">
                 {slide.label && (
                   <span className="inline-block rounded-full bg-white/20 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-white">
                     {slide.label}
                   </span>
                 )}
-                <p className="mt-1.5 text-[15px] font-bold leading-tight text-white break-words">
+                <p className="mt-2 lg:mt-1.5 text-[17px] lg:text-[15px] font-bold leading-tight text-white break-words">
                   {slide.headline ?? slide.title}
                 </p>
-                <p className="mt-1 text-[11px] leading-snug text-white/85 line-clamp-2">{slide.body}</p>
-                <span className="mt-2 inline-flex items-center rounded-lg bg-white px-2.5 py-1 text-[11px] font-semibold text-gray-900">
+                <p className="mt-1.5 lg:mt-1 text-xs lg:text-[11px] leading-snug text-white/85 line-clamp-2">{slide.body}</p>
+                <span className="mt-2.5 lg:mt-2 inline-flex items-center rounded-lg bg-white px-3 lg:px-2.5 py-1.5 lg:py-1 text-xs lg:text-[11px] font-semibold text-gray-900">
                   {slide.cta}
                 </span>
               </div>
@@ -62,10 +68,10 @@ export function BasicPromoCarousel() {
                 <img
                   src={slide.image}
                   alt=""
-                  className="relative z-10 h-[100px] w-[100px] flex-shrink-0 object-contain drop-shadow-md"
+                  className="relative z-10 h-[125px] w-[125px] lg:h-[100px] lg:w-[100px] flex-shrink-0 object-contain drop-shadow-md"
                 />
               )}
-              <div className="pointer-events-none absolute -right-6 -top-6 h-28 w-28 rounded-full bg-white/10" />
+              <div className="pointer-events-none absolute -right-6 -top-6 h-32 w-32 lg:h-28 lg:w-28 rounded-full bg-white/10" />
             </button>
           </div>
         ))}
