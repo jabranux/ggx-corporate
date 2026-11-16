@@ -18,8 +18,8 @@ function PrimaryAttentionRow({ item }: { item: BasicAttentionItem }) {
       onClick={() => navigate(item.href)}
       className="flex w-full items-start gap-3 px-3 py-3 text-left cursor-pointer active:bg-gray-50 transition-colors"
     >
-      <div className="flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-full bg-blue-100">
-        <Icon className="h-4.5 w-4.5 text-blue-600" />
+      <div className="flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-full bg-amber-100">
+        <Icon className="h-4.5 w-4.5 text-amber-600" />
       </div>
       <div className="min-w-0 flex-1">
         <p className="text-sm font-semibold text-gray-900 leading-snug">{item.title}</p>
@@ -56,7 +56,7 @@ function CombinedSecondaryRow({
       </div>
       <p className="min-w-0 flex-1 truncate text-sm font-medium text-gray-700">
         {item.title}
-        {moreCount > 0 && <span className="text-gray-400"> +{moreCount} more</span>}
+        {moreCount > 0 && <span className="font-semibold text-blue-600"> +{moreCount} more</span>}
       </p>
       <IconChevronRight className="h-4 w-4 flex-shrink-0 text-gray-400" />
     </button>
@@ -112,7 +112,7 @@ export function BasicAttentionNeeded() {
       <div className="overflow-hidden rounded-2xl border border-blue-100 bg-white shadow-sm">
         <div className="flex items-center justify-between px-3 pt-2.5 pb-0.5">
           <h3 className="text-sm font-semibold text-gray-900">Needs your attention</h3>
-          <span className="flex-shrink-0 rounded-full bg-blue-100 px-2 py-0.5 text-[11px] font-semibold text-blue-700">
+          <span className="flex-shrink-0 rounded-full bg-amber-100 px-2 py-0.5 text-[11px] font-semibold text-amber-700">
             {items.length} pending
           </span>
         </div>

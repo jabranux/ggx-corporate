@@ -35,25 +35,25 @@ export function BasicPrimaryShortcuts({ items }: ShortcutRowProps) {
   const primaryItems = items.slice(0, 4);
 
   return (
-    <div className="flex gap-2">
+    <div className="flex gap-1 lg:gap-3">
       {primaryItems.map((item) => {
         const Icon = item.icon;
         return (
           <button
             key={item.id}
             onClick={() => navigate(item.href)}
-            className="relative flex min-w-0 flex-1 cursor-pointer flex-col items-center gap-2 active:opacity-70 transition-opacity"
+            className="relative flex min-w-0 flex-1 cursor-pointer flex-col items-center gap-0 lg:gap-2 active:opacity-70 transition-opacity"
           >
             {item.badge && (
               <span className="absolute -top-1.5 right-1 lg:right-3 z-10 rounded-full bg-emerald-500 px-1.5 py-0.5 text-[9px] font-bold text-white leading-none shadow-sm">
                 {item.badge}
               </span>
             )}
-            <div className="flex h-16 w-16 flex-shrink-0 items-center justify-center overflow-hidden rounded-2xl bg-blue-50 lg:h-[72px] lg:w-[72px]">
+            <div className="flex h-[72px] w-[72px] flex-shrink-0 items-center justify-center overflow-hidden rounded-2xl bg-blue-50">
               {item.image ? (
-                <img src={item.image} alt="" className="h-14 w-14 object-contain lg:h-14 lg:w-14" />
+                <img src={item.image} alt="" className="h-16 w-16 object-contain lg:h-14 lg:w-14" />
               ) : (
-                <Icon className="h-7 w-7 text-blue-600 lg:h-7 lg:w-7" />
+                <Icon className="h-8 w-8 text-blue-600 lg:h-7 lg:w-7" />
               )}
             </div>
             <span className="w-full text-center text-[12px] font-semibold leading-tight text-gray-700 break-words lg:text-sm">
@@ -94,7 +94,7 @@ export function BasicSecondaryShortcuts({ items, showHeader = true }: SecondaryS
       )}
       <div
         className={cn(
-          'flex gap-2 -mx-0.5 px-0.5 lg:grid lg:grid-cols-6 lg:gap-3 lg:overflow-visible',
+          'flex gap-1 -mx-0.5 px-0.5 lg:grid lg:grid-cols-6 lg:gap-3 lg:overflow-visible',
           isCarousel ? 'overflow-x-auto scrollbar-none snap-x snap-proximity' : 'justify-between',
         )}
       >
@@ -105,15 +105,15 @@ export function BasicSecondaryShortcuts({ items, showHeader = true }: SecondaryS
               key={item.id}
               onClick={() => navigate(item.href)}
               className={cn(
-                'flex min-w-0 flex-col items-center gap-1.5 rounded-lg py-1.5 text-center active:bg-gray-50 transition-colors cursor-pointer lg:w-full lg:px-1',
+                'flex min-w-0 flex-col items-center gap-0.5 rounded-lg py-1 lg:gap-1.5 lg:py-1.5 text-center active:bg-gray-50 transition-colors cursor-pointer lg:w-full lg:px-1',
                 isCarousel ? 'w-16 flex-shrink-0 snap-start px-1' : 'flex-1 px-0',
               )}
             >
-              <div className="flex h-11 w-11 flex-shrink-0 items-center justify-center overflow-hidden rounded-xl bg-gray-50">
+              <div className="flex h-[52px] w-[52px] flex-shrink-0 items-center justify-center overflow-hidden rounded-xl bg-gray-50 lg:h-11 lg:w-11">
                 {item.image ? (
-                  <img src={item.image} alt="" className="h-8 w-8 object-contain" />
+                  <img src={item.image} alt="" className="h-10 w-10 object-contain lg:h-8 lg:w-8" />
                 ) : (
-                  <Icon className="h-4.5 w-4.5 text-gray-600" />
+                  <Icon className="h-6 w-6 text-gray-600 lg:h-4.5 lg:w-4.5" />
                 )}
               </div>
               <span className="w-full text-[11px] font-medium leading-tight text-gray-600 break-words">{item.label}</span>

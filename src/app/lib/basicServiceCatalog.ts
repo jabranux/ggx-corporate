@@ -74,6 +74,12 @@ export interface BasicServiceItem {
 
 export const CATALOG: BasicServiceItem[] = [
   {
+    id: 'same-day-delivery', label: 'Same Day Delivery', description: 'Urgent, same-day delivery for time-sensitive orders.',
+    icon: IconBolt, image: iconSdd, href: '/dashboard/same-day-delivery', category: 'Shipping', badge: 'Growing',
+    tags: ['business', 'same-day'], baseWeight: 11,
+    eligible: true,
+  },
+  {
     id: 'standard-delivery', label: 'Standard Delivery', description: 'Book a rider pickup or drop-off for a single parcel.',
     icon: IconPackage, image: iconStandard, href: '/dashboard/book-delivery', category: 'Shipping',
     tags: ['everyone', 'personal', 'selling', 'business', 'exploring', 'low-volume'], baseWeight: 10,
@@ -86,57 +92,51 @@ export const CATALOG: BasicServiceItem[] = [
     eligible: true,
   },
   {
-    id: 'same-day-delivery', label: 'Same Day Delivery', description: 'Urgent, same-day delivery for time-sensitive orders.',
-    icon: IconBolt, image: iconSdd, href: '/dashboard/same-day-delivery', category: 'Shipping', badge: 'Growing',
-    tags: ['business', 'same-day'], baseWeight: 3,
-    eligible: true,
-  },
-  {
     id: 'sulit-bundles', label: 'Sulit Bundles', description: 'Prepaid delivery bundles at a lower per-order cost.',
     icon: IconTag, image: iconPacks, href: '/dashboard/sulit-bundles', category: 'Rewards', badge: 'New',
-    tags: ['selling', 'business', 'mid-volume', 'high-volume'], baseWeight: 7,
-    eligible: true,
-  },
-  {
-    id: 'api-integration', label: 'API Integration', description: 'Connect your own systems to GGX with API keys and webhooks.',
-    icon: IconCode, href: '/dashboard/basic-api-integration', category: 'Account',
-    tags: ['business', 'mid-volume', 'high-volume'], baseWeight: 2,
-    eligible: true,
-  },
-  {
-    id: 'basic-shopify', label: 'Shopify', description: 'Connect your Shopify store as a selling channel.',
-    icon: IconShoppingBag, image: iconShopify, href: '/dashboard/basic-shopify', category: 'Commerce',
-    tags: ['selling', 'shopify'], baseWeight: 2,
-    eligible: true,
-  },
-  {
-    id: 'storefront', label: 'Storefront', description: 'Build a free storefront so buyers can order directly from you.',
-    icon: IconBuildingStore, image: iconStorefront, href: '/dashboard/account-add-ons', category: 'Commerce',
-    tags: ['selling', 'facebook_instagram', 'own_website'], baseWeight: 6,
+    tags: ['selling', 'business', 'mid-volume', 'high-volume'], baseWeight: 8,
     eligible: true,
   },
   {
     id: 'vouchers', label: 'Vouchers', description: 'View and apply promo codes for your deliveries.',
     icon: IconTicket, href: '/dashboard/vouchers', category: 'Rewards',
-    tags: ['everyone'], baseWeight: 5,
+    tags: ['everyone'], baseWeight: 7,
     eligible: true,
   },
   {
     id: 'rewards', label: 'Rewards', description: 'Earn perks as you ship more with GoGo Xpress.',
     icon: IconGift, image: iconRewards, href: '/dashboard/rewards', category: 'Rewards',
-    tags: ['everyone', 'exploring'], baseWeight: 5,
+    tags: ['everyone', 'exploring'], baseWeight: 6,
     eligible: true,
   },
   {
     id: 'referrals', label: 'Referrals', description: 'Invite other sellers and earn referral rewards.',
     icon: IconUserPlus, image: iconReferrals, href: '/dashboard/referrals', category: 'Rewards',
-    tags: ['everyone'], baseWeight: 4,
+    tags: ['everyone'], baseWeight: 5,
+    eligible: true,
+  },
+  {
+    id: 'basic-shopify', label: 'Shopify', description: 'Connect your Shopify store as a selling channel.',
+    icon: IconShoppingBag, image: iconShopify, href: '/dashboard/basic-shopify', category: 'Commerce',
+    tags: ['selling', 'shopify'], baseWeight: 4,
+    eligible: true,
+  },
+  {
+    id: 'storefront', label: 'Storefront', description: 'Build a free storefront so buyers can order directly from you.',
+    icon: IconBuildingStore, image: iconStorefront, href: '/dashboard/account-add-ons', category: 'Commerce',
+    tags: ['selling', 'facebook_instagram', 'own_website'], baseWeight: 3,
     eligible: true,
   },
   {
     id: 'merchant-analytics', label: 'Analytics', description: 'Track your shipping and selling performance over time.',
     icon: IconChartBar, image: iconAnalytics, href: '/dashboard/basic-merchant-analytics', category: 'Insights',
-    tags: ['business', 'mid-volume', 'high-volume'], baseWeight: 4,
+    tags: ['business', 'mid-volume', 'high-volume'], baseWeight: 2,
+    eligible: true,
+  },
+  {
+    id: 'api-integration', label: 'API Integration', description: 'Connect your own systems to GGX with API keys and webhooks.',
+    icon: IconCode, href: '/dashboard/basic-api-integration', category: 'Account',
+    tags: ['business', 'mid-volume', 'high-volume'], baseWeight: 1,
     eligible: true,
   },
   {
