@@ -84,6 +84,18 @@ export function dismissKycInvitation(accountId: string): BasicKycProfile {
   return next;
 }
 
+/**
+ * Wipes the profile back to never-completed/never-dismissed — a demo-only
+ * utility (`Settings.tsx`'s "Reset personalization" action) so the home
+ * invite card and the full first-time flow can be re-demoed repeatedly
+ * without clearing browser storage by hand. Distinct from editing: this
+ * discards the saved answers entirely rather than updating them.
+ */
+export function resetKycProfile(accountId: string): BasicKycProfile {
+  saveState(key(accountId), EMPTY_PROFILE);
+  return EMPTY_PROFILE;
+}
+
 export function mainUseRequiresSellingChannels(mainUse: KycMainUse): boolean {
   return mainUse === 'selling' || mainUse === 'business';
 }

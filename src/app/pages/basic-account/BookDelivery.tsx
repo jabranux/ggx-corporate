@@ -12,8 +12,10 @@
  * with no visible cause. Switching the mounted tree instead only resets
  * that kind of transient, component-local UI state (an open address
  * drawer, in-progress unsaved new-address text) — the booking DATA itself
- * lives in `draft` (sessionStorage-backed, independent of any component's
- * mount lifecycle), so no entered information is ever lost on resize.
+ * lives in `draft` (`useBookingDraft`'s plain in-memory React state, NOT
+ * persisted to any storage — see that hook's own docblock), which survives
+ * a resize because it's owned by THIS component, not by the layout that
+ * switches, so no entered information is ever lost on resize.
  *
  * - **Desktop (≥1024px)**: the ORIGINAL continuous two-column layout — no
  *   steps, no Continue buttons. Addresses, Delivery, and Item Details all
@@ -40,8 +42,11 @@
  * for this route only below `lg:` — desktop keeps the standard app header
  * above this page's own title.
  *
- * Phase 1 scope: saved-address prefill only (pickup + recipient). No
- * shortened journey and no remembered item details — deferred.
+ * Phase 1 scope: saved-address prefill for PICKUP only. The recipient is
+ * deliberately never remembered or prefilled from a past booking (not even
+ * the one just confirmed) — every new booking starts with no recipient
+ * selected, full stop. No shortened journey and no remembered item
+ * details — deferred.
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router';
@@ -50,7 +55,7 @@ import { ConfirmDialog } from '../../components/ui/Dialog';
 import { useAuth } from '../../contexts/AuthContext';
 import { useBookingDraft } from '../../hooks/useBookingDraft';
 import { useUploadExitGuard } from '../../hooks/useUploadExitGuard';
-import { getDefaultBookingAddresses, setLastRecipientAddress } from '../../services/basicBookingPreferencesService';
+import { getDefaultBookingAddresses } from '../../services/basicBookingPreferencesService';
 import { recordBookingConfirmation } from '../../lib/basicBookingHistory';
 import { isPickupDateSelectable, estimateDeliveryDateRange } from '../../lib/basicPickupScheduling';
 import { classifyRegion } from '../../lib/checkoutEstimates';
@@ -150,21 +155,21 @@ export function BookDelivery() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [draft.firstMile, draft.senderPaymentMethod]);
 
-  // Phase 1: prefill from saved addresses only, and only when the draft is
-  // still empty (never overwrite something the user already picked/edited).
-  // Uses the raw setDraft, not updateDraft — a background prefill is not a
-  // user edit and must not arm the exit guard.
+  // Phase 1: prefill the PICKUP address only, and only when the draft
+  // doesn't already have one (never overwrite something the user already
+  // picked/edited). The recipient is deliberately never prefilled here —
+  // see this file's module docblock. Uses the raw setDraft, not
+  // updateDraft — a background prefill is not a user edit and must not
+  // arm the exit guard.
   useEffect(() => {
-    if (draft.pickupAddress || draft.recipientAddress) return;
+    if (draft.pickupAddress) return;
     let active = true;
-    getDefaultBookingAddresses(accountId).then(({ pickup, recipient }) => {
+    getDefaultBookingAddresses(accountId).then(({ pickup }) => {
       if (!active) return;
       setDraft((prev) => ({
         ...prev,
         pickupAddress: prev.pickupAddress ?? pickup,
         pickupAddressId: prev.pickupAddressId ?? pickup?.id ?? null,
-        recipientAddress: prev.recipientAddress ?? recipient,
-        recipientAddressId: prev.recipientAddressId ?? recipient?.id ?? null,
       }));
     });
     return () => { active = false; };
@@ -265,11 +270,6 @@ export function BookDelivery() {
     // bound to it by id via navigation state, not just "the latest record",
     // so revisiting/refreshing never shows a different booking's details.
     const entry = recordBookingConfirmation(accountId, draft, totals.total, totals.codAmount, deliveryEstimateLabel);
-    // Remember the recipient for next time's prefill — must happen before
-    // resetDraft() clears the in-memory draft this reads from.
-    if (draft.recipientAddress) {
-      void setLastRecipientAddress(accountId, draft.recipientAddress.id);
-    }
     touchedRef.current = false;
     resetDraft();
     navigate('/dashboard/book-delivery/success', { state: { bookingId: entry.id } });

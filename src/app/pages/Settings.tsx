@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { useNavigate, Link } from 'react-router';
-import { IconBuilding, IconArrowRight, IconEdit, IconSettings, IconCheck, IconLoader2, IconSparkles } from '@tabler/icons-react';
-import { Dialog } from '../components/ui/Dialog';
+import { IconBuilding, IconArrowRight, IconEdit, IconSettings, IconCheck, IconLoader2, IconSparkles, IconRefresh } from '@tabler/icons-react';
+import { Dialog, ConfirmDialog } from '../components/ui/Dialog';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '../components/ui/Card';
 import { Button } from '../components/ui/Button';
 import { Input } from '../components/ui/Input';
@@ -11,7 +11,7 @@ import type { Address } from '../components/AddressBook';
 import { useSubAccounts } from '../contexts/SubAccountContext';
 import { useAuth } from '../contexts/AuthContext';
 import { BasicKycModal } from '../components/basic-account/BasicKycModal';
-import { getKycProfile, hasCompletedKyc, type BasicKycProfile } from '../lib/basicKycProfile';
+import { getKycProfile, hasCompletedKyc, resetKycProfile, type BasicKycProfile } from '../lib/basicKycProfile';
 
 // Default pickup address shown on the account. Address Book is the source of
 // truth for creating/editing addresses, so this is display-only here.
@@ -35,6 +35,7 @@ export function Settings() {
   const accountId = user?.accountId ?? 'basic-guest';
   const [kycProfile, setKycProfile] = useState<BasicKycProfile>(() => getKycProfile(accountId));
   const [kycModalOpen, setKycModalOpen] = useState(false);
+  const [showKycResetConfirm, setShowKycResetConfirm] = useState(false);
   const { subAccountsEnabled, isMainAccountView, getCurrentAccountName, getCurrentAccountId } = useSubAccounts();
   const [savingAccount, setSavingAccount] = useState(false);
   const [savedAccount, setSavedAccount] = useState(false);
@@ -140,12 +141,36 @@ export function Settings() {
               </div>
             </CardHeader>
             <CardContent>
-              <Button onClick={() => setKycModalOpen(true)}>
-                {hasCompletedKyc(kycProfile) ? 'Update my answers' : 'Personalize now'}
-              </Button>
+              <div className="flex items-center gap-2">
+                <Button onClick={() => setKycModalOpen(true)}>
+                  {hasCompletedKyc(kycProfile) ? 'Update my answers' : 'Personalize now'}
+                </Button>
+                {/* Demo-only: wipes the saved profile entirely (not an edit)
+                    so the first-time invite + flow can be re-demoed without
+                    clearing browser storage by hand. Only meaningful once
+                    there's something saved to wipe. */}
+                {hasCompletedKyc(kycProfile) && (
+                  <Button variant="ghost" size="sm" onClick={() => setShowKycResetConfirm(true)}>
+                    <IconRefresh className="w-3.5 h-3.5 mr-1.5" /> Reset personalization (demo)
+                  </Button>
+                )}
+              </div>
             </CardContent>
           </Card>
         )}
+
+        <ConfirmDialog
+          open={showKycResetConfirm}
+          onClose={() => setShowKycResetConfirm(false)}
+          onConfirm={() => {
+            setKycProfile(resetKycProfile(accountId));
+            setShowKycResetConfirm(false);
+          }}
+          title="Reset personalization?"
+          description="This clears your saved profiling answers entirely — the Personalize invite will reappear on Home as if you never answered. For demoing the first-time flow repeatedly; your bookings and other account data are unaffected."
+          confirmLabel="Reset"
+          variant="destructive"
+        />
 
         {/* Subaccounts is a Business+-only hierarchy concept — never offered to a Basic account. */}
         {!subAccountsEnabled && !isBasic && (

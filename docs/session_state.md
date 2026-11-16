@@ -54,20 +54,44 @@ components (shortcuts, cards) changed, not desktop's layout structure.
   "Edit Preferences" loads saved answers; editing then closing without
   saving leaves the saved profile untouched and reopening shows the saved
   values again, not the discarded edit.
-- **Booking draft reset — investigated, no reproducible bug found**: traced
-  every exit path (`BookDelivery.tsx`'s header exit-confirm, the
-  `useBlocker`-based nav guard, and post-Confirm) and the `useBookingDraft`
-  hook (plain in-memory `useState`, never persisted). Live-tested both the
-  header-exit and the app-navigation (`useBlocker`) paths — changed
-  `firstMile` to Drop-off, triggered each exit's "Leave this booking?"
-  confirmation, confirmed, and re-entered the flow: both times it came back
-  clean (Rider Pickup, no pickup date, recipient "Not set", pickup address
-  back to its legitimate saved-address prefill). No code change was made
-  here since nothing reproduced; flagging this so a future session with a
-  concrete repro steps doesn't have to re-derive this trace from scratch.
+- **Booking draft reset — initially investigated as "no bug found," then a
+  real one was located from user follow-up**: the in-progress draft itself
+  (`useBookingDraft`, plain in-memory `useState`) was never the problem —
+  every abandon-mid-flow exit path already reset it correctly (confirmed
+  live). The actual leak was a separate, deliberate feature:
+  `basicBookingPreferencesService.ts` remembered the recipient from the
+  most recently *confirmed* booking and `BookDelivery.tsx` prefilled the
+  next booking's recipient from it — by design, but not what's wanted here.
+  Removed entirely: `getDefaultBookingAddresses` now returns only `pickup`
+  (the account's own fixed address, still a legitimate default);
+  `setLastRecipientAddress` and `lastRecipientAddressId` are gone; the
+  prefill effect and `handleConfirm` no longer touch the recipient. Also
+  fixed a stale doc comment in `BookDelivery.tsx` that claimed the draft
+  was "sessionStorage-backed" — it never was; corrected to describe the
+  actual plain-in-memory-state architecture, since the inaccurate comment
+  is exactly what made this look like a persistence bug on first read.
+  Verified live end-to-end: confirmed a real booking with a saved
+  recipient (Max Rodriguez), clicked "Book another delivery," and the new
+  draft showed recipient "Not set" (pickup address still correctly
+  defaulted) — the confirmed booking itself still correctly appears in
+  Activity/Recent Transactions, only the new draft's recipient is clear.
+- **KYC "reset", not just edit" — demo utility added**: completing KYC
+  permanently hides the Home invite by design (refreshing was never
+  supposed to bring it back); the user wanted a way to wipe it back to
+  never-answered for repeat demos without clearing browser storage by
+  hand, distinct from `BasicKycModal`'s editing flow. Added
+  `resetKycProfile(accountId)` (`lib/basicKycProfile.ts`) and a "Reset
+  personalization (demo)" button in `Settings.tsx` (next to "Update my
+  answers," only shown once something's actually completed), behind a
+  `ConfirmDialog`. Verified live: resets `localStorage` to
+  `{answers: null, completedAt: null, invitationDismissedAt: null}` and
+  the Home invite card reappears immediately.
 - `npm run typecheck` and `npm run build` clean (same pre-existing
-  chunk-size warning). Full suite run; see this entry's follow-up note if
-  results weren't recorded here.
+  chunk-size warning) after both the UI refinement pass and this
+  follow-up fix. Full `npm test` run: 276 pass / 0 fail / 27 cancelled —
+  the cancellations are the pre-existing Docker-dependent "Commerce
+  products API" suite (no Docker daemon in this sandbox), unrelated to
+  this work.
 - **Verified live** at 390px (mobile) and 1440px (desktop) via the same
   `ggx.auth` localStorage session-swap workaround, port 18020.
 
