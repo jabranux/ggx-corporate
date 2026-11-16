@@ -32,6 +32,7 @@ import iconStorefront from '../../assets/basic/icon-storefront.png';
 import iconRewards from '../../assets/basic/icon-rewards.png';
 import iconReferrals from '../../assets/basic/icon-referrals.png';
 import iconAnalytics from '../../assets/basic/icon-analytics.png';
+import iconVouchers from '../../assets/basic/icon-vouchers.png';
 
 export type ServiceCategory = 'Shipping' | 'Commerce' | 'Rewards' | 'Finance' | 'Insights' | 'Account' | 'Support';
 
@@ -99,7 +100,7 @@ export const CATALOG: BasicServiceItem[] = [
   },
   {
     id: 'vouchers', label: 'Vouchers', description: 'View and apply promo codes for your deliveries.',
-    icon: IconTicket, href: '/dashboard/vouchers', category: 'Rewards',
+    icon: IconTicket, image: iconVouchers, href: '/dashboard/vouchers', category: 'Rewards',
     tags: ['everyone'], baseWeight: 7,
     eligible: true,
   },
