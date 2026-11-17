@@ -16,6 +16,7 @@ import {
 } from '@tabler/icons-react';
 import type { BasicKycAnswers, BasicKycProfile, KycDailyOrders, KycDeliveryNeeds, KycMainUse, KycSellingChannel } from './basicKycProfile';
 import { hasCompletedKyc } from './basicKycProfile';
+import { getSameDayEnrollment } from './basicSameDayEnrollment';
 
 // Reuses the legacy `/basic` module's own illustrated service icons (never
 // imported FROM that module's components — just the same static assets) so
@@ -76,7 +77,7 @@ export interface BasicServiceItem {
 export const CATALOG: BasicServiceItem[] = [
   {
     id: 'same-day-delivery', label: 'Same Day Delivery', description: 'Urgent, same-day delivery for time-sensitive orders.',
-    icon: IconBolt, image: iconSdd, href: '/dashboard/same-day-delivery', category: 'Shipping', badge: 'Growing',
+    icon: IconBolt, image: iconSdd, href: '/dashboard/same-day-delivery', category: 'Shipping',
     tags: ['business', 'same-day'], baseWeight: 11,
     eligible: true,
   },
@@ -166,6 +167,42 @@ export const CATALOG: BasicServiceItem[] = [
     tags: ['everyone'], baseWeight: 2,
   },
 ];
+
+export type ServiceBadgeTone = 'success' | 'info' | 'warning';
+
+export interface ServiceBadge {
+  label: string;
+  tone: ServiceBadgeTone;
+}
+
+/**
+ * The badge a catalog item should currently show. Static badges ("Free",
+ * "New") come from the catalog; Same Day Delivery's depends on the account's
+ * enrollment status (`basicSameDayEnrollment.ts`): not enrolled -> "Join",
+ * pending -> "Pending", approved -> none, rejected -> "Join" (reapply allowed).
+ */
+export function resolveServiceBadge(item: BasicServiceItem, accountId: string): ServiceBadge | null {
+  if (item.id === 'same-day-delivery') {
+    const { status } = getSameDayEnrollment(accountId);
+    if (status === 'approved') return null;
+    return status === 'pending' ? { label: 'Pending', tone: 'warning' } : { label: 'Join', tone: 'info' };
+  }
+  return item.badge ? { label: item.badge, tone: 'success' } : null;
+}
+
+export const SERVICE_BADGE_CLASS: Record<ServiceBadgeTone, string> = {
+  success: 'bg-emerald-500 text-white',
+  info: 'bg-blue-600 text-white',
+  warning: 'bg-amber-100 text-amber-800 ring-1 ring-amber-300',
+};
+
+/** Where a shortcut should send the user — approved Same Day Delivery goes straight to booking. */
+export function resolveServiceHref(item: BasicServiceItem, accountId: string): string {
+  if (item.id === 'same-day-delivery' && getSameDayEnrollment(accountId).status === 'approved') {
+    return '/dashboard/book-delivery';
+  }
+  return item.href;
+}
 
 export function getCatalogItem(id: string): BasicServiceItem | undefined {
   return CATALOG.find((item) => item.id === id);

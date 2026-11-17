@@ -1,6 +1,7 @@
 import { useNavigate } from 'react-router';
 import { IconArrowRight } from '@tabler/icons-react';
-import type { BasicServiceItem } from '../../lib/basicServiceCatalog';
+import { useAuth } from '../../contexts/AuthContext';
+import { resolveServiceBadge, resolveServiceHref, SERVICE_BADGE_CLASS, type BasicServiceItem } from '../../lib/basicServiceCatalog';
 import { cn } from '../../lib/utils';
 
 interface ShortcutRowProps {
@@ -44,24 +45,31 @@ interface SecondaryShortcutRowProps extends ShortcutRowProps {
  */
 export function BasicPrimaryShortcuts({ items }: ShortcutRowProps) {
   const navigate = useNavigate();
+  const { user } = useAuth();
+  const accountId = user?.accountId ?? 'basic-guest';
   const primaryItems = items.slice(0, 4);
 
+  // `pt-2` (mobile only; padding, since a margin would collapse with the
+  // stack's own 16px gap) on top of that gap = 24px between
+  // the card above and the icon containers; the badges overhang ~6px above
+  // the containers, so they still clear the card above by ~18px.
   return (
-    <div className="flex gap-1 lg:grid lg:grid-cols-2 lg:gap-3 [@media(min-width:1180px)]:gap-4">
+    <div className="flex gap-1 pt-2 lg:pt-0 lg:grid lg:grid-cols-2 lg:gap-3 [@media(min-width:1180px)]:gap-4">
       {primaryItems.map((item) => {
         const Icon = item.icon;
+        const badge = resolveServiceBadge(item, accountId);
         return (
           <button
             key={item.id}
-            onClick={() => navigate(item.href)}
+            onClick={() => navigate(resolveServiceHref(item, accountId))}
             className="relative flex min-w-0 flex-1 cursor-pointer flex-col items-center gap-0 active:opacity-70 transition-opacity lg:w-full lg:flex-row lg:items-center lg:gap-3 [@media(min-width:1180px)]:gap-4 lg:rounded-xl lg:border lg:border-slate-200 lg:bg-white lg:px-3 [@media(min-width:1180px)]:px-5 lg:py-2.5 [@media(min-width:1180px)]:py-3 lg:hover:border-gray-300 lg:hover:shadow-sm lg:transition-shadow"
           >
-            {item.badge && (
-              <span className="absolute -top-1.5 right-1 z-10 rounded-full bg-emerald-500 px-1.5 py-0.5 text-[9px] font-bold text-white leading-none shadow-sm lg:top-2.5 lg:right-2.5 [@media(min-width:1180px)]:top-3 [@media(min-width:1180px)]:right-3">
-                {item.badge}
+            {badge && (
+              <span className={cn('absolute -top-1.5 right-1 z-10 rounded-full px-1.5 py-0.5 text-[9px] font-bold leading-none shadow-sm lg:top-2.5 lg:right-2.5 [@media(min-width:1180px)]:top-3 [@media(min-width:1180px)]:right-3', SERVICE_BADGE_CLASS[badge.tone])}>
+                {badge.label}
               </span>
             )}
-            <div className="flex h-[72px] w-[72px] flex-shrink-0 items-center justify-center overflow-hidden rounded-2xl bg-blue-50 lg:h-14 lg:w-14 [@media(min-width:1180px)]:h-[76px] [@media(min-width:1180px)]:w-[76px] lg:rounded-xl">
+            <div className="flex h-[72px] w-[72px] flex-shrink-0 items-center justify-center overflow-hidden rounded-2xl border border-slate-200/70 bg-white shadow-sm lg:border-0 lg:bg-blue-50 lg:shadow-none lg:h-14 lg:w-14 [@media(min-width:1180px)]:h-[76px] [@media(min-width:1180px)]:w-[76px] lg:rounded-xl">
               {item.image ? (
                 <img src={item.image} alt="" className="h-16 w-16 object-contain lg:h-10 lg:w-10 [@media(min-width:1180px)]:h-[52px] [@media(min-width:1180px)]:w-[52px]" />
               ) : (
@@ -100,6 +108,8 @@ export function BasicPrimaryShortcuts({ items }: ShortcutRowProps) {
  */
 export function BasicSecondaryShortcuts({ items, showHeader = true }: SecondaryShortcutRowProps) {
   const navigate = useNavigate();
+  const { user } = useAuth();
+  const accountId = user?.accountId ?? 'basic-guest';
   const isCarousel = items.length >= 6;
 
   return (
@@ -126,7 +136,7 @@ export function BasicSecondaryShortcuts({ items, showHeader = true }: SecondaryS
           return (
             <button
               key={item.id}
-              onClick={() => navigate(item.href)}
+              onClick={() => navigate(resolveServiceHref(item, accountId))}
               className={cn(
                 'flex min-w-0 flex-col items-center gap-0.5 rounded-lg py-1 text-center active:bg-gray-50 transition-colors cursor-pointer',
                 isCarousel ? 'w-16 flex-shrink-0 snap-start px-1' : 'flex-1 px-0',

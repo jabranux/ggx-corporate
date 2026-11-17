@@ -11,7 +11,7 @@ import { BasicPrimaryShortcuts, BasicSecondaryShortcuts } from '../../components
 import { BasicActivityOverview, BasicRecentTransactions } from '../../components/basic-account/BasicActivitySection';
 import { dismissKycInvitation, getKycProfile, hasCompletedKyc, type BasicKycProfile } from '../../lib/basicKycProfile';
 import { getRecommendedServices } from '../../lib/basicServiceCatalog';
-import { getRecentBookings } from '../../lib/basicBookingHistory';
+import { getActivitySummary, getRecentBookings } from '../../lib/basicBookingHistory';
 import { useNotificationViewer } from '../../data/notifications';
 import { getUnreadCount } from '../../services/notificationService';
 
@@ -123,7 +123,8 @@ export function BasicHome() {
   );
 
   const primarySection = <BasicPrimaryShortcuts items={primary} />;
-  const activitySection = <BasicActivityOverview bookings={bookings} />;
+  const activitySummary = useMemo(() => getActivitySummary(accountId, 7), [accountId]);
+  const activitySection = <BasicActivityOverview bookings={bookings} summary={activitySummary} />;
   const transactionsSection = <BasicRecentTransactions bookings={bookings} />;
 
   // Mobile only (spec §3 — "More features" heading + View all above the KYC

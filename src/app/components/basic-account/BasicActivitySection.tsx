@@ -1,18 +1,26 @@
+import type { ComponentType } from 'react';
 import { useNavigate } from 'react-router';
-import { IconArrowRight, IconPackage, IconReceipt2, IconTruckDelivery } from '@tabler/icons-react';
-import type { BasicBookingHistoryEntry } from '../../lib/basicBookingHistory';
+import { IconArrowRight, IconPackage, IconPackageImport, IconReceipt2, IconTruckDelivery } from '@tabler/icons-react';
+import type { BasicActivitySummary, BasicBookingHistoryEntry } from '../../lib/basicBookingHistory';
+import { cn } from '../../lib/utils';
 
 function peso(amount: number): string {
   return `₱${amount.toLocaleString('en-PH', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 }
 
-function isWithinDays(iso: string, days: number): boolean {
-  const ms = Date.now() - new Date(iso).getTime();
-  return ms <= days * 24 * 60 * 60 * 1000;
+interface ActivityMetric {
+  key: string;
+  label: string;
+  value: string;
+  icon: ComponentType<{ className?: string }>;
+  tone: string;
+  desktopOnly?: boolean;
 }
 
 interface BasicActivityOverviewProps {
+  /** Used only to decide between the empty state and the metrics. */
   bookings: BasicBookingHistoryEntry[];
+  summary: BasicActivitySummary;
 }
 
 /**
@@ -24,7 +32,7 @@ interface BasicActivityOverviewProps {
  * three zeroed stat tiles, per spec ("avoid giving empty activity dashboards
  * excessive screen space").
  */
-export function BasicActivityOverview({ bookings }: BasicActivityOverviewProps) {
+export function BasicActivityOverview({ bookings, summary }: BasicActivityOverviewProps) {
   if (bookings.length === 0) {
     return (
       <div className="rounded-2xl border border-gray-100 bg-white px-3 py-5 text-center shadow-sm">
@@ -35,31 +43,41 @@ export function BasicActivityOverview({ bookings }: BasicActivityOverviewProps) 
     );
   }
 
-  const last7Days = bookings.filter((b) => isWithinDays(b.confirmedAt, 7));
-  const totalSpend = last7Days.reduce((sum, b) => sum + (b.total || 0) + (b.codAmount || 0), 0);
+  const metrics: ActivityMetric[] = [
+    { key: 'bookings', label: 'Bookings', value: String(summary.bookings), icon: IconPackage, tone: 'bg-blue-50 text-blue-600' },
+    { key: 'cod', label: 'COD Earnings', value: summary.codEarnings == null ? '—' : peso(summary.codEarnings), icon: IconReceipt2, tone: 'bg-emerald-50 text-emerald-600' },
+    { key: 'transit', label: 'In Transit', value: summary.inTransit == null ? '—' : String(summary.inTransit), icon: IconTruckDelivery, tone: 'bg-amber-50 text-amber-600', desktopOnly: true },
+    { key: 'delivered', label: 'Delivered', value: summary.delivered == null ? '—' : String(summary.delivered), icon: IconPackageImport, tone: 'bg-violet-50 text-violet-600', desktopOnly: true },
+  ];
 
   return (
     <div className="rounded-2xl border border-gray-100 lg:border-slate-200 bg-white p-3 lg:p-4 shadow-sm">
-      <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-3">Activity — last 7 days</p>
-      <div className="flex flex-wrap gap-6">
-        <div className="flex items-center gap-2.5">
-          <div className="w-8 h-8 lg:w-10 lg:h-10 rounded-lg bg-blue-50 flex items-center justify-center flex-shrink-0">
-            <IconPackage className="w-4 h-4 lg:w-5 lg:h-5 text-blue-600" />
-          </div>
-          <div>
-            <p className="text-base lg:text-base font-bold lg:font-semibold text-gray-900 leading-none">{last7Days.length}</p>
-            <p className="text-[11px] lg:text-sm text-gray-500 leading-none mt-0.5">Bookings</p>
-          </div>
-        </div>
-        <div className="flex items-center gap-2.5">
-          <div className="w-8 h-8 lg:w-10 lg:h-10 rounded-lg bg-emerald-50 flex items-center justify-center flex-shrink-0">
-            <IconReceipt2 className="w-4 h-4 lg:w-5 lg:h-5 text-emerald-600" />
-          </div>
-          <div>
-            <p className="text-base lg:text-base font-bold lg:font-semibold text-gray-900 leading-none">{peso(totalSpend)}</p>
-            <p className="text-[11px] lg:text-sm text-gray-500 leading-none mt-0.5">Est. total handled</p>
-          </div>
-        </div>
+      <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-3">Activity — last {summary.periodDays} days</p>
+      {/* Mobile: two metrics side by side. Desktop: four equal columns with
+          subtle vertical dividers filling the card width. */}
+      <div className="grid grid-cols-2 lg:grid-cols-4">
+        {metrics.map((m, i) => {
+          const Icon = m.icon;
+          return (
+            <div
+              key={m.key}
+              className={cn(
+                'flex min-w-0 items-center gap-2.5 lg:gap-3 lg:px-5',
+                i === 0 && 'lg:pl-0',
+                i > 0 && 'pl-3 border-l border-gray-100 lg:border-slate-200',
+                m.desktopOnly && 'hidden lg:flex',
+              )}
+            >
+              <div className={cn('w-8 h-8 lg:w-10 lg:h-10 rounded-lg flex items-center justify-center flex-shrink-0', m.tone)}>
+                <Icon className="w-4 h-4 lg:w-5 lg:h-5" />
+              </div>
+              <div className="min-w-0">
+                <p className="text-base font-bold lg:font-semibold text-gray-900 leading-none truncate">{m.value}</p>
+                <p className="text-[11px] lg:text-sm text-gray-500 leading-none mt-1 truncate">{m.label}</p>
+              </div>
+            </div>
+          );
+        })}
       </div>
     </div>
   );

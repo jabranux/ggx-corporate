@@ -84,6 +84,34 @@ export function recordBookingConfirmation(
   return entry;
 }
 
+export interface BasicActivitySummary {
+  /** Reporting window in days — every metric below covers the same window. */
+  periodDays: number;
+  /** Bookings confirmed within the window. */
+  bookings: number;
+  /**
+   * COD actually collected within the window. `null` = not available: the demo
+   * booking log only stores the COD amount declared at booking time, with no
+   * collected/remitted state, and declared COD must not be shown as earnings.
+   */
+  codEarnings: number | null;
+  /** Shipments currently in transit. `null` = the booking log has no delivery status. */
+  inTransit: number | null;
+  /** Shipments delivered within the window. `null` = the booking log has no delivery status. */
+  delivered: number | null;
+}
+
+/**
+ * Last-N-days activity for the Basic home. Only `bookings` is derivable from
+ * the demo log; the rest become real numbers once the backend exposes delivery
+ * and COD-collection status (Future BFF: GET /accounts/:id/activity?days=7).
+ */
+export function getActivitySummary(accountId: string, periodDays = 7): BasicActivitySummary {
+  const cutoff = Date.now() - periodDays * 24 * 60 * 60 * 1000;
+  const bookings = getRecentBookings(accountId).filter((b) => new Date(b.confirmedAt).getTime() >= cutoff).length;
+  return { periodDays, bookings, codEarnings: null, inTransit: null, delivered: null };
+}
+
 export function getRecentBookings(accountId: string): BasicBookingHistoryEntry[] {
   return loadState<BasicBookingHistoryEntry[]>(key(accountId), []);
 }
