@@ -100,7 +100,7 @@ export function BasicAnnouncementsPanel() {
     <div>
       <div className="overflow-hidden rounded-2xl border border-gray-100 bg-white shadow-sm">
         <div className="flex items-center justify-between px-3 pt-3 pb-1 lg:px-4 lg:pt-4">
-          <h3 className="text-sm lg:text-base font-semibold text-gray-900">Announcements</h3>
+          <h3 className="text-sm lg:text-lg font-semibold text-gray-900">Announcements</h3>
           {regular.length > visibleRegular.length && (
             <button
               onClick={() => setViewAllOpen(true)}

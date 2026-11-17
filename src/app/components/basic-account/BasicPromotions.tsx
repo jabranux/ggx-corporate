@@ -19,12 +19,23 @@ import { cn } from '../../lib/utils';
  * multi-banner carousel, not a single full-width slide that changes), plus
  * arrow navigation alongside the existing dots. Mobile keeps its full-width,
  * one-slide-at-a-time behavior untouched.
+ *
+ * Arrow opacity (corrective pass) is driven by React state rather than
+ * `hover:`/`group-hover:` CSS alone — `.group:hover .arrow` is MORE specific
+ * than a plain `.arrow:hover` (three simple selectors vs. two), so hovering
+ * the arrow directly would otherwise still lose to the dimmer "hovering the
+ * carousel" rule instead of reaching full opacity. Tracking hover/focus on
+ * each arrow and the carousel area as state sidesteps that entirely and
+ * also covers keyboard focus, which no CSS hover variant can.
  */
 export function BasicPromoCarousel() {
   const navigate = useNavigate();
   const slides = getPromotionsFor('carousel');
   const scrollRef = useRef<HTMLDivElement>(null);
   const [active, setActive] = useState(0);
+  const [carouselActive, setCarouselActive] = useState(false);
+  const [prevArrowActive, setPrevArrowActive] = useState(false);
+  const [nextArrowActive, setNextArrowActive] = useState(false);
 
   const handleScroll = useCallback(() => {
     const el = scrollRef.current;
@@ -41,8 +52,14 @@ export function BasicPromoCarousel() {
 
   if (slides.length === 0) return null;
 
+  const arrowOpacity = (ownActive: boolean) => (ownActive ? 1 : carouselActive ? 0.7 : 0.18);
+
   return (
-    <div className="relative">
+    <div
+      className="relative"
+      onMouseEnter={() => setCarouselActive(true)}
+      onMouseLeave={() => setCarouselActive(false)}
+    >
       <div
         ref={scrollRef}
         onScroll={handleScroll}
@@ -59,7 +76,7 @@ export function BasicPromoCarousel() {
                 // its pre-refinement value so this stays mobile-only — the
                 // task scope explicitly leaves desktop untouched, and this
                 // component is shared with the desktop tree.
-                'relative flex h-[145px] lg:h-[116px] w-full items-center overflow-hidden rounded-2xl text-left cursor-pointer shadow-sm active:brightness-95 transition-[filter]',
+                'relative flex h-[145px] lg:h-[132px] w-full items-center overflow-hidden rounded-2xl text-left cursor-pointer shadow-sm active:brightness-95 transition-[filter]',
                 slide.bannerClassName ?? 'bg-gradient-to-br from-blue-600 to-blue-500',
               )}
             >
@@ -93,15 +110,25 @@ export function BasicPromoCarousel() {
         <>
           <button
             onClick={() => scrollByBanner(-1)}
+            onMouseEnter={() => setPrevArrowActive(true)}
+            onMouseLeave={() => setPrevArrowActive(false)}
+            onFocus={() => setPrevArrowActive(true)}
+            onBlur={() => setPrevArrowActive(false)}
             aria-label="Previous promotion"
-            className="hidden lg:flex absolute z-20 left-3 top-1/2 -translate-y-1/2 h-9 w-9 items-center justify-center rounded-full bg-white/90 text-gray-700 shadow-md hover:bg-white cursor-pointer transition-colors"
+            style={{ opacity: arrowOpacity(prevArrowActive) }}
+            className="hidden lg:flex absolute z-20 left-2 top-1/2 -translate-y-1/2 h-9 w-9 items-center justify-center rounded-full bg-white text-gray-700 shadow-md cursor-pointer transition-opacity"
           >
             <IconChevronLeft className="h-5 w-5" />
           </button>
           <button
             onClick={() => scrollByBanner(1)}
+            onMouseEnter={() => setNextArrowActive(true)}
+            onMouseLeave={() => setNextArrowActive(false)}
+            onFocus={() => setNextArrowActive(true)}
+            onBlur={() => setNextArrowActive(false)}
             aria-label="Next promotion"
-            className="hidden lg:flex absolute z-20 right-[calc(32%+0.75rem)] top-1/2 -translate-y-1/2 h-9 w-9 items-center justify-center rounded-full bg-white/90 text-gray-700 shadow-md hover:bg-white cursor-pointer transition-colors"
+            style={{ opacity: arrowOpacity(nextArrowActive) }}
+            className="hidden lg:flex absolute z-20 right-2 top-1/2 -translate-y-1/2 h-9 w-9 items-center justify-center rounded-full bg-white text-gray-700 shadow-md cursor-pointer transition-opacity"
           >
             <IconChevronRight className="h-5 w-5" />
           </button>

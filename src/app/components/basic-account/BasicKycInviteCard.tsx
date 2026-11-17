@@ -38,33 +38,45 @@ export function BasicKycInviteCard({ onPersonalize, onDismiss, compact = false }
     </button>
   );
 
+  if (!compact) {
+    // Desktop layout (corrective pass): icon + title/description grouped on
+    // the left, the "Personalize now" CTA on the right and vertically
+    // centered against the whole row — not stacked underneath the
+    // description like the mobile `compact` variant below, which read as a
+    // mobile layout stretched onto desktop.
+    return (
+      <div className="relative flex items-center gap-4 rounded-xl bg-blue-50 px-5 py-4 pr-12">
+        {dismissButton}
+        <div className="flex min-w-0 flex-1 items-center gap-3">
+          <div className="w-9 h-9 rounded-lg bg-blue-100 flex items-center justify-center flex-shrink-0">
+            <IconSparkles className="w-4.5 h-4.5 text-blue-600" />
+          </div>
+          <div className="min-w-0">
+            <p className="text-base font-semibold text-blue-900 leading-snug">Personalize your GGX experience</p>
+            <p className="text-sm text-blue-700 mt-0.5 leading-snug">
+              Answer 4 quick questions so we can show you the most useful services first.
+            </p>
+          </div>
+        </div>
+        <Button size="sm" className="flex-shrink-0" onClick={onPersonalize}>Personalize now</Button>
+      </div>
+    );
+  }
+
   const body = (
     <div className="flex items-start gap-3">
       <div className="w-9 h-9 rounded-lg bg-blue-100 flex items-center justify-center flex-shrink-0">
         <IconSparkles className="w-4.5 h-4.5 text-blue-600" />
       </div>
       <div className="min-w-0 flex-1">
-        <p className="text-sm lg:text-base font-semibold text-blue-900 leading-snug">Personalize your GGX experience</p>
-        <p className="text-xs lg:text-sm text-blue-700 mt-0.5 leading-snug">
+        <p className="text-sm font-semibold text-blue-900 leading-snug">Personalize your GGX experience</p>
+        <p className="text-xs text-blue-700 mt-0.5 leading-snug">
           Answer 4 quick questions so we can show you the most useful services first.
         </p>
-        {compact ? (
-          <span className="mt-1.5 inline-block text-sm font-medium text-blue-600">Personalize now →</span>
-        ) : (
-          <Button size="sm" className="mt-2.5" onClick={onPersonalize}>Personalize now</Button>
-        )}
+        <span className="mt-1.5 inline-block text-sm font-medium text-blue-600">Personalize now →</span>
       </div>
     </div>
   );
-
-  if (!compact) {
-    return (
-      <div className="relative rounded-xl bg-blue-50 px-4 py-3.5 pr-10 lg:px-5 lg:py-4 lg:pr-12">
-        {dismissButton}
-        {body}
-      </div>
-    );
-  }
 
   // Compact/mobile variant: the whole card is the tap target (spec §2 —
   // "make the entire KYC invitation card clickable"). A real `<button>`

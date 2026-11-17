@@ -47,8 +47,8 @@ export function BasicActivityOverview({ bookings }: BasicActivityOverviewProps) 
             <IconPackage className="w-4 h-4 lg:w-5 lg:h-5 text-blue-600" />
           </div>
           <div>
-            <p className="text-base lg:text-lg font-bold text-gray-900 leading-none">{last7Days.length}</p>
-            <p className="text-[11px] lg:text-xs text-gray-500 leading-none mt-0.5">Bookings</p>
+            <p className="text-base lg:text-base font-bold lg:font-semibold text-gray-900 leading-none">{last7Days.length}</p>
+            <p className="text-[11px] lg:text-sm text-gray-500 leading-none mt-0.5">Bookings</p>
           </div>
         </div>
         <div className="flex items-center gap-2.5">
@@ -56,8 +56,8 @@ export function BasicActivityOverview({ bookings }: BasicActivityOverviewProps) 
             <IconReceipt2 className="w-4 h-4 lg:w-5 lg:h-5 text-emerald-600" />
           </div>
           <div>
-            <p className="text-base lg:text-lg font-bold text-gray-900 leading-none">{peso(totalSpend)}</p>
-            <p className="text-[11px] lg:text-xs text-gray-500 leading-none mt-0.5">Est. total handled</p>
+            <p className="text-base lg:text-base font-bold lg:font-semibold text-gray-900 leading-none">{peso(totalSpend)}</p>
+            <p className="text-[11px] lg:text-sm text-gray-500 leading-none mt-0.5">Est. total handled</p>
           </div>
         </div>
       </div>
@@ -110,12 +110,12 @@ export function BasicRecentTransactions({ bookings }: BasicRecentTransactionsPro
                 <IconPackage className="w-4 h-4 text-blue-600" />
               </div>
               <div className="min-w-0 flex-1">
-                <p className="text-sm lg:text-[15px] font-medium text-gray-900 truncate">{b.recipientName ?? 'Recipient'}</p>
-                <p className="text-xs text-gray-400 truncate">{b.trackingNumber}</p>
+                <p className="text-sm lg:text-base font-medium lg:font-semibold text-gray-900 truncate">{b.recipientName ?? 'Recipient'}</p>
+                <p className="text-xs lg:text-sm text-gray-400 truncate">{b.trackingNumber}</p>
               </div>
               <div className="flex-shrink-0 text-right">
-                <p className="text-sm lg:text-[15px] font-semibold text-gray-900">{peso(b.total)}</p>
-                <p className="text-[11px] text-gray-400">{new Date(b.confirmedAt).toLocaleDateString('en-PH', { month: 'short', day: 'numeric' })}</p>
+                <p className="text-sm lg:text-base font-semibold text-gray-900">{peso(b.total)}</p>
+                <p className="text-[11px] lg:text-sm text-gray-400">{new Date(b.confirmedAt).toLocaleDateString('en-PH', { month: 'short', day: 'numeric' })}</p>
               </div>
             </button>
           ))}

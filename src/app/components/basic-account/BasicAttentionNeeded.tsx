@@ -111,7 +111,7 @@ export function BasicAttentionNeeded() {
     <div>
       <div className="overflow-hidden rounded-2xl border border-blue-100 bg-white shadow-sm">
         <div className="flex items-center justify-between px-3 pt-2.5 pb-0.5 lg:px-4 lg:pt-3.5 lg:pb-1">
-          <h3 className="text-sm lg:text-base font-semibold text-gray-900">Needs your attention</h3>
+          <h3 className="text-sm lg:text-lg font-semibold text-gray-900">Needs your attention</h3>
           <span className="flex-shrink-0 rounded-full bg-amber-100 px-2 py-0.5 text-[11px] font-semibold text-amber-700">
             {items.length} pending
           </span>

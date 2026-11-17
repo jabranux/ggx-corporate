@@ -3,6 +3,68 @@
 > Lightweight resume/checkpoint file. Detailed June 2026 history was archived to
 > `docs/archive/session_log_2026-06.md`.
 
+## Basic Account home — desktop sizing/typography corrective pass v3 (2026-11-17)
+
+Focused corrective pass on top of the v2 mockup pass directly below — layout,
+1440px max-width, and two-column structure explicitly preserved; only sizing,
+typography, and a few interaction details changed. Not committed yet per the
+request. Primary reference widths this time were 1366px/1440px, not
+ultrawide (explicit instruction) — this mattered: it surfaced a real
+regression (see below) that v2's own testing at 1024/1280/1440 had missed.
+
+- **Primary cards hit exact targets at 1366/1440**: 102px card height, 76px
+  icon, 20px label — verified via `getBoundingClientRect`/`getComputedStyle`,
+  not just by reading the Tailwind classes. **Real regression found and
+  fixed**: applying that full size flatly from `lg:`/1024px (as v2 had done
+  for primary, reasoning multi-word labels "only wrap at spaces") was wrong
+  — at 1024px's narrow ~190px card width, the individual word "Standard" (in
+  "Standard Delivery") is itself too wide at 20px and mid-word-breaks
+  ("Stan"/"dard"), the exact failure mode v2 had already fixed for secondary
+  but not reconsidered for primary. Reintroduced a smaller tier below a
+  custom `1180px` breakpoint (56px icon/16px label) — picked by rendering at
+  1024px/1100px/1180px and checking for the break, not estimated alone.
+- **Secondary cards hit exact targets**: 82px card height, 56px icon, 18px
+  label, held constant across all breakpoints this time (unlike v2's
+  shrink-at-narrow-widths approach) — only the column count adapts: 2-up at
+  `lg:`, 3-up past 1280px, 5-up past 1600px (custom arbitrary-media
+  breakpoints; empirically confirmed all five single-word labels, including
+  "Storefront", render on one line with no mid-word break at 1366/1440,
+  where it lands on 3-up).
+- **KYC card desktop layout**: icon+title/description grouped left, CTA
+  button right — confirmed vertically centered against the card's full
+  height via exact rect math (button and card midpoints both landed at
+  503.25px in one check), not eyeballed. 16px/14px title/description
+  confirmed via `getComputedStyle`.
+- **Carousel**: banner height 132px (target 120–140). Arrow opacity is now
+  React state (`carouselActive`/`prevArrowActive`/`nextArrowActive`) instead
+  of `hover:`/`group-hover:` Tailwind classes — confirmed via computed-style
+  checks through real `hover`/`focus`/`blur` interactions that resting
+  opacity is 0.18, hovering the carousel area (not an arrow) is 0.7, and
+  hovering/focusing an arrow directly is 1.0, correctly returning to 0.18 on
+  mouse-leave/blur. This was deliberate, not just a preference: `.group:hover
+  .arrow` is a higher-specificity selector than a plain `.arrow:hover`, so a
+  pure-CSS version would have kept the arrow stuck at the dimmer "area
+  hover" opacity even when the cursor is directly over it — confirmed by
+  testing the broken CSS-only version first. Arrows also moved from the
+  previous pass's inter-banner-seam position to the carousel viewport's
+  outer left/right edges, per this pass's explicit instruction.
+- **Right column**: confirmed critical-advisory heading/description were
+  already 18px/14px from v2; bumped "Needs your attention" and
+  "Announcements" headings from 16px to 18px for consistency across all
+  three sections. Order unchanged (advisory → attention → announcements).
+- **Activity/recent transactions**: stat values and transaction
+  names/amounts brought down from 18px bold to 16px semibold (closer to the
+  new target than v2's size), supporting labels (dates, tracking numbers,
+  "Bookings"/"Est. total handled") bumped from ~11–12px to 14px.
+- `npm run typecheck` and `npm run build` clean (same pre-existing
+  chunk-size warning only).
+- **Verified live in the browser** at 1024, 1180, 1280, 1366, 1440, and
+  1920px (mobile re-confirmed pixel-identical at 375px) — computed
+  dimensions/font sizes pulled via `getComputedStyle`/`getBoundingClientRect`
+  rather than trusting the authored classes, exactly per the request's
+  explicit instruction. **Not committed** — screenshots delivered at
+  1366px/1440px, per the request ("Do not commit, push, or deploy yet").
+
 ## Basic Account home — desktop visual refinement pass v2, against a reference mockup (2026-11-17)
 
 Follow-up to the layout refinement pass directly below, this time driven by an
