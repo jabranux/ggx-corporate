@@ -3,6 +3,47 @@
 > Lightweight resume/checkpoint file. Detailed June 2026 history was archived to
 > `docs/archive/session_log_2026-06.md`.
 
+## Basic Account home — desktop dashboard layout refinement pass (2026-11-17)
+
+Initial desktop layout pass on `BasicHome.tsx` per an explicit request —
+reorganize desktop content hierarchy and card density without a full
+redesign. Mobile composition is untouched (confirmed live at 375px).
+
+- **Feature shortcuts** (`BasicServiceShortcuts.tsx`): `BasicPrimaryShortcuts`/
+  `BasicSecondaryShortcuts` gained `lg:`-scoped horizontal-card styling —
+  icon chip left, label right — replacing the stacked icon-over-label tiles
+  at desktop widths only (mobile classes untouched). Primary is a 4-up grid,
+  secondary a 3-up grid (wraps to 2 rows at 6 items). Labels wrap (no
+  `line-clamp`/truncation — tried `line-clamp-2` first, reverted after it
+  produced a mid-word ellipsis on "Same Day Delivery" at 1280px; multi-line
+  wrap without truncation matches this component's existing "labels never
+  truncate" rule).
+- **Desktop composition** (`BasicHome.tsx`): content order changed to
+  welcome → main features → more features → promo carousel → activity →
+  recent transactions (previously promo carousel sat right after welcome,
+  pushing primary actions down). Supporting column changed from an even
+  1/3 grid split to a fixed `320px` rail (`lg:grid-cols-[minmax(0,1fr)_320px]`)
+  and reordered to Needs your attention → Personalize (KYC invite) →
+  service advisories (critical alerts) → announcements — `BasicAttentionNeeded`
+  is now also rendered on desktop (previously mobile-only).
+- **Referral promo moved into the carousel**: `lib/basicPromotions.ts`'s
+  `referrals` entry switched from `placements: ['featured']` to
+  `['carousel']` (gained `label`/`headline`/`bannerClassName`, no `image`
+  asset — renders text-only in the banner, which the component already
+  supports). The now-unused `'featured'` placement and
+  `BasicPromotions.tsx`'s `BasicFeaturedPromo` component were removed
+  (nothing referenced them afterward).
+- `npm run typecheck` and `npm run build` clean. Full suite **276/276**
+  passing (`npm test`); 27 pre-existing Docker-dependent cancellations
+  (unrelated, same cause as prior sessions).
+- **Verified live in the browser** at 1024px/1280px/1440px (desktop) and
+  375px (mobile) via the existing `ggx.auth` Basic quick-login session, port
+  18020: card grids/carousel/right-rail render correctly with no horizontal
+  overflow at any desktop width, referral slide appears correctly in the
+  carousel, and the mobile tree is pixel-identical to before this pass.
+- Committed (`662d9b5`) and pushed to both `origin`/jabranux and
+  `james`/jamesabran per explicit request.
+
 ## Basic Account home — mobile UI refinement, KYC reset hardening, booking-draft audit (2026-11-16)
 
 Third pass on the Basic home mobile experience, plus two reported form-state
