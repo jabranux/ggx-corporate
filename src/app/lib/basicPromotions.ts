@@ -1,19 +1,17 @@
 /**
- * Promotional content for the Basic home's carousel + desktop featured
- * placement. Structured mock content for now (spec §4/§5) — a dedicated
- * `placements` field keeps the carousel and the desktop featured slot from
- * repeating the same message, and keeps this swappable for a future
- * campaigns/promotions API without touching the rendering components
- * (`components/basic-account/BasicPromotions.tsx`).
+ * Promotional content for the Basic home's carousel (mobile and desktop share
+ * the same single placement — the desktop supporting column no longer has a
+ * separate featured slot; referral promotion now lives here too). Structured
+ * mock content for now (spec §4/§5), swappable for a future campaigns API
+ * without touching the rendering component (`components/basic-account/BasicPromotions.tsx`).
  *
- * Carousel entries additionally carry `label`/`headline`/`image`/
- * `bannerClassName` for the mobile home's larger, campaign-style banner
- * treatment (spec §5: "visually distinct from ordinary dashboard cards") —
- * `title`/`body`/`icon` stay the source of truth for the desktop featured
- * card, which is unchanged by this pass. `image` reuses the legacy `/basic`
- * module's own illustrated artwork (never imported from that module's
- * components — just the same static assets), matching how service shortcuts
- * already reuse them.
+ * Entries carry `label`/`headline`/`image`/`bannerClassName` for the
+ * campaign-style banner treatment (spec §5: "visually distinct from ordinary
+ * dashboard cards"); `image` reuses the legacy `/basic` module's own
+ * illustrated artwork (never imported from that module's components — just
+ * the same static assets), matching how service shortcuts already reuse
+ * them. `image` is optional — a slide without one (e.g. referrals) just
+ * renders without the trailing illustration.
  */
 import type { ComponentType } from 'react';
 import { IconTag, IconBolt, IconGift, IconUserPlus } from '@tabler/icons-react';
@@ -21,7 +19,7 @@ import iconPacksBanner from '../../assets/basic/icon-packs-banner.png';
 import iconSdd from '../../assets/basic/icon-sdd.png';
 import iconRewardsBanner from '../../assets/basic/icon-rewards.png';
 
-export type PromoPlacement = 'carousel' | 'featured';
+export type PromoPlacement = 'carousel';
 
 export interface BasicPromotion {
   id: string;
@@ -87,13 +85,16 @@ export const PROMOTIONS: BasicPromotion[] = [
   },
   {
     id: 'referrals',
-    placements: ['featured'],
+    placements: ['carousel'],
     icon: IconUserPlus,
     iconClassName: 'bg-emerald-50 text-emerald-600',
     title: 'Invite a fellow seller',
     body: 'Give them a welcome voucher and earn referral rewards when they book their first delivery.',
     cta: 'Refer and earn',
     href: '/dashboard/referrals',
+    label: 'Referrals',
+    headline: 'Invite a fellow seller.',
+    bannerClassName: 'bg-gradient-to-br from-emerald-600 via-emerald-500 to-teal-400',
   },
 ];
 

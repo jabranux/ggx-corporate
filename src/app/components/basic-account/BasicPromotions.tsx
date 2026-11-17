@@ -1,6 +1,5 @@
 import { useCallback, useRef, useState } from 'react';
 import { useNavigate } from 'react-router';
-import { IconArrowRight } from '@tabler/icons-react';
 import { getPromotionsFor } from '../../lib/basicPromotions';
 import { cn } from '../../lib/utils';
 
@@ -88,35 +87,5 @@ export function BasicPromoCarousel() {
         </div>
       )}
     </div>
-  );
-}
-
-/**
- * Desktop-only featured promotion for the supporting column (spec §1/§4) —
- * a distinct placement from the carousel, drawing from promotions tagged
- * `featured` only, so the same message never repeats in both spots.
- */
-export function BasicFeaturedPromo() {
-  const navigate = useNavigate();
-  const featured = getPromotionsFor('featured')[0];
-  if (!featured) return null;
-  const Icon = featured.icon;
-
-  return (
-    <button
-      onClick={() => navigate(featured.href)}
-      className="flex w-full flex-col items-start gap-3 rounded-2xl border border-gray-100 bg-white p-4 text-left cursor-pointer shadow-sm hover:shadow transition-shadow"
-    >
-      <div className={cn('w-10 h-10 rounded-lg flex items-center justify-center', featured.iconClassName)}>
-        <Icon className="w-5 h-5" />
-      </div>
-      <div>
-        <p className="text-sm font-semibold text-gray-900 leading-snug">{featured.title}</p>
-        <p className="text-xs text-gray-500 leading-snug mt-1">{featured.body}</p>
-      </div>
-      <span className="inline-flex items-center gap-1 text-xs font-medium text-blue-600">
-        {featured.cta} <IconArrowRight className="w-3 h-3" />
-      </span>
-    </button>
   );
 }

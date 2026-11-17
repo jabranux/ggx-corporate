@@ -4,7 +4,7 @@ import { IconArrowRight, IconBell } from '@tabler/icons-react';
 import { useAuth } from '../../contexts/AuthContext';
 import { BasicKycModal } from '../../components/basic-account/BasicKycModal';
 import { BasicKycInviteCard } from '../../components/basic-account/BasicKycInviteCard';
-import { BasicPromoCarousel, BasicFeaturedPromo } from '../../components/basic-account/BasicPromotions';
+import { BasicPromoCarousel } from '../../components/basic-account/BasicPromotions';
 import { BasicCriticalAlerts, BasicAnnouncementsPanel } from '../../components/basic-account/BasicAnnouncements';
 import { BasicAttentionNeeded } from '../../components/basic-account/BasicAttentionNeeded';
 import { BasicPrimaryShortcuts, BasicSecondaryShortcuts } from '../../components/basic-account/BasicServiceShortcuts';
@@ -40,9 +40,9 @@ import { getUnreadCount } from '../../services/notificationService';
  * BOTTOM on mobile so they never push the primary services below the fold;
  * only critical advisories get a near-top placement. None of the
  * conditional sections reserve space when empty — each returns `null`
- * outright. Desktop keeps its own, unchanged composition (own header bell,
- * KYC/featured promo/announcements in a supporting column, promo carousel
- * near the top) rather than reusing this order — this pass is mobile-only.
+ * outright. Desktop keeps its own header bell and a distinct, narrower
+ * supporting column (desktop layout refinement pass), but follows the same
+ * principle of never reserving space for an empty conditional section.
  */
 export function BasicHome() {
   const { user } = useAuth();
@@ -168,22 +168,29 @@ export function BasicHome() {
         <BasicAnnouncementsPanel />
       </div>
 
-      {/* ── Desktop: main content + supporting column (spec §1) ── */}
-      <div className="hidden lg:grid lg:grid-cols-3 lg:gap-6 lg:items-start">
-        <div className="lg:col-span-2 space-y-6">
+      {/* ── Desktop: main content + a narrower supporting column (desktop
+          layout refinement pass). Content hierarchy: welcome → main
+          features → more features → promo carousel → activity → recent
+          transactions, so booking and other primary actions sit right under
+          the welcome message instead of being pushed down by promotional
+          content. The supporting column is a fixed, narrower width (not an
+          even 1/3 split) so it reads as a purposeful rail of short cards
+          rather than a second, under-filled main column. */}
+      <div className="hidden lg:grid lg:grid-cols-[minmax(0,1fr)_320px] lg:gap-6 lg:items-start">
+        <div className="space-y-6">
           {welcome}
-          <BasicPromoCarousel />
-          <div className="space-y-5">
+          <div className="space-y-4">
             {primarySection}
             {secondarySection}
           </div>
+          <BasicPromoCarousel />
           {activitySection}
           {transactionsSection}
         </div>
 
-        <div className="lg:col-span-1 space-y-5">
+        <div className="space-y-4">
+          <BasicAttentionNeeded />
           {kycInviteCard}
-          <BasicFeaturedPromo />
           <BasicCriticalAlerts />
           <BasicAnnouncementsPanel />
         </div>
