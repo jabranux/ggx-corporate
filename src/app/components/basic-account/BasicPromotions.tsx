@@ -1,5 +1,6 @@
 import { useCallback, useRef, useState } from 'react';
 import { useNavigate } from 'react-router';
+import { IconChevronLeft, IconChevronRight } from '@tabler/icons-react';
 import { getPromotionsFor } from '../../lib/basicPromotions';
 import { cn } from '../../lib/utils';
 
@@ -12,6 +13,12 @@ import { cn } from '../../lib/utils';
  * + pagination dots. Realistic mobile proportions — one banner is capped at a
  * fixed height (~25% taller than the previous pass, per a follow-up refinement
  * request), not an oversized hero, so it never dominates the page.
+ *
+ * Desktop (`lg:`+, desktop visual refinement pass) shows one full banner at
+ * ~68% of the carousel's width with the next banner partially visible (a true
+ * multi-banner carousel, not a single full-width slide that changes), plus
+ * arrow navigation alongside the existing dots. Mobile keeps its full-width,
+ * one-slide-at-a-time behavior untouched.
  */
 export function BasicPromoCarousel() {
   const navigate = useNavigate();
@@ -26,17 +33,24 @@ export function BasicPromoCarousel() {
     setActive(Math.min(Math.max(idx, 0), slides.length - 1));
   }, [slides.length]);
 
+  const scrollByBanner = useCallback((dir: 1 | -1) => {
+    const el = scrollRef.current;
+    if (!el) return;
+    el.scrollBy({ left: dir * el.clientWidth * 0.68, behavior: 'smooth' });
+  }, []);
+
   if (slides.length === 0) return null;
 
   return (
-    <div>
+    <div className="relative">
       <div
         ref={scrollRef}
         onScroll={handleScroll}
-        className="flex overflow-x-auto scrollbar-none snap-x snap-mandatory"
+        className="flex overflow-x-auto scrollbar-none [&::-webkit-scrollbar]:hidden snap-x snap-mandatory lg:gap-4 lg:snap-proximity"
+        style={{ scrollbarWidth: 'none' }}
       >
         {slides.map((slide) => (
-          <div key={slide.id} className="w-full flex-shrink-0 snap-start px-0.5">
+          <div key={slide.id} className="w-full flex-shrink-0 snap-start px-0.5 lg:w-[68%] lg:px-0">
             <button
               onClick={() => navigate(slide.href)}
               className={cn(
@@ -76,15 +90,31 @@ export function BasicPromoCarousel() {
         ))}
       </div>
       {slides.length > 1 && (
-        <div className="mt-2.5 flex items-center justify-center gap-1.5">
-          {slides.map((slide, i) => (
-            <span
-              key={slide.id}
-              className="block h-1.5 rounded-full bg-blue-600 transition-all"
-              style={{ width: i === active ? 18 : 6, opacity: i === active ? 1 : 0.3 }}
-            />
-          ))}
-        </div>
+        <>
+          <button
+            onClick={() => scrollByBanner(-1)}
+            aria-label="Previous promotion"
+            className="hidden lg:flex absolute z-20 left-3 top-1/2 -translate-y-1/2 h-9 w-9 items-center justify-center rounded-full bg-white/90 text-gray-700 shadow-md hover:bg-white cursor-pointer transition-colors"
+          >
+            <IconChevronLeft className="h-5 w-5" />
+          </button>
+          <button
+            onClick={() => scrollByBanner(1)}
+            aria-label="Next promotion"
+            className="hidden lg:flex absolute z-20 right-[calc(32%+0.75rem)] top-1/2 -translate-y-1/2 h-9 w-9 items-center justify-center rounded-full bg-white/90 text-gray-700 shadow-md hover:bg-white cursor-pointer transition-colors"
+          >
+            <IconChevronRight className="h-5 w-5" />
+          </button>
+          <div className="mt-2.5 flex items-center justify-center gap-1.5">
+            {slides.map((slide, i) => (
+              <span
+                key={slide.id}
+                className="block h-1.5 rounded-full bg-blue-600 transition-all"
+                style={{ width: i === active ? 18 : 6, opacity: i === active ? 1 : 0.3 }}
+              />
+            ))}
+          </div>
+        </>
       )}
     </div>
   );

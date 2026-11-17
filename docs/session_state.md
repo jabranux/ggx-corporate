@@ -3,6 +3,78 @@
 > Lightweight resume/checkpoint file. Detailed June 2026 history was archived to
 > `docs/archive/session_log_2026-06.md`.
 
+## Basic Account home — desktop visual refinement pass v2, against a reference mockup (2026-11-17)
+
+Follow-up to the layout refinement pass directly below, this time driven by an
+explicit reference mockup/spec rather than open-ended reorganization — desktop
+only (`<lg:hidden/>` mobile tree untouched, confirmed live at 375px with the
+same background change applied). Not committed yet per the request.
+
+- **Background/surfaces**: dashboard root (`BasicHome.tsx`'s outer wrapper,
+  both trees) is now `bg-[#F3F6FA]` (`min-h-full` so it covers short pages)
+  with white cards — applied to mobile too, per the request's explicit "not a
+  desktop-only change." Several desktop card borders switched from
+  `border-gray-100` to `border-slate-200` (`#E2E8F0`) to read as a visible,
+  intentional outline against the new tinted background (`BasicServiceShortcuts.tsx`,
+  `BasicActivitySection.tsx`).
+- **1440px max-width, 340px right rail**: the desktop grid
+  (`BasicHome.tsx`) is now `mx-auto max-w-[1440px]`, column template
+  `[minmax(0,1fr)_300px]` at `lg:` (1024–1439px) widening to `_340px` at a
+  custom 1440px breakpoint (see next bullet for why not `xl:`/1280px).
+  Verified centered via computed `getBoundingClientRect` math at 1920px (not
+  just by eye — the sidebar's fixed 256px width makes a correctly-centered
+  1440px column look off-center in a scaled-down screenshot).
+- **Primary shortcuts 2×2**: `BasicPrimaryShortcuts` desktop treatment changed
+  from a 4-up single row to a 2×2 grid, scaled responsively — 56px icon/16px
+  label at `lg:` (1024–1439px), the spec's 80px icon/20px label past 1440px —
+  rather than one fixed large size, which produced character-by-character
+  wrapped labels at 1024px (this app's "no overflow at 1024px+" rule).
+- **Secondary shortcuts, 1440px breakpoint (not `xl:`)**: `BasicSecondaryShortcuts`
+  is 2-up at `lg:`, 5-up only past a **custom 1440px** arbitrary-media variant
+  (`[@media(min-width:1440px)]:`), not Tailwind's default `xl:`/1280px or even
+  a `min-[1400px]:` attempt — both still forced an ugly mid-word break
+  ("Storefro"/"nt") on single-word labels with no natural break point, because
+  the main column hasn't reached its full width until the 1440px cap and
+  340px rail both apply. (Also discovered `min-[1400px]:` bracket arbitrary
+  breakpoints don't compile in this project's Tailwind v4 setup at all — no
+  rule is generated — while the fully-explicit `[@media(min-width:Npx)]:`
+  form does; used that form throughout instead.)
+- **"More features" reordered into the main column**: heading + View all →
+  KYC/personalize card (now full-width, un-nested, `BasicKycInviteCard`'s
+  non-compact variant gained `lg:` text/padding bumps) → secondary cards —
+  moved out of the supporting column entirely, per the mockup.
+- **Promo carousel partial-next-banner** (`BasicPromotions.tsx`, desktop
+  only): slides are `lg:w-[68%]` instead of full-width, so the next banner
+  peeks in; added arrow buttons. Two real bugs found and fixed during live
+  verification: (1) `scrollbar-none` compiles to nothing in this project's
+  Tailwind v4 build (confirmed via `document.styleSheets` — no rule contains
+  it anywhere, a pre-existing gap affecting every other `scrollbar-none`
+  usage in the codebase too, left alone elsewhere as out of scope) — worked
+  around locally with an inline `scrollbarWidth: 'none'` style plus
+  `[&::-webkit-scrollbar]:hidden`; (2) the arrow buttons were unclickable —
+  a slide's banner image (`relative z-10`) stacked above them since neither
+  the slide `<button>` nor the arrows had an explicit z-index of their own,
+  so the arrows lost the implicit stacking comparison despite being later in
+  DOM order — fixed by giving both arrow buttons `z-20`.
+- **Right column reordered**: critical advisory (now `BasicCriticalAlerts
+  variant="expanded"` — a new always-expanded desktop rendering, no
+  toggle/collapse, `#FFF7E6` background, 18px title — added alongside the
+  existing mobile `compact` toggle behavior, untouched) → "Needs your
+  attention" (title/description `lg:` size bumps) → announcements (same).
+- `npm run typecheck` and `npm run build` clean (same pre-existing chunk-size
+  warning only).
+- **Verified live in the browser** at 1024px, 1280px, 1400px, 1440px, 1920px,
+  2560px (ultrawide), 768px (tablet, confirmed falls through to the
+  unmodified `<lg` mobile tree with no overflow), and 375px (mobile,
+  background change only) via the same localStorage `ggx.auth` session-swap
+  workaround prior sessions documented, on a third dev-server port (18030→18031
+  autoport, since two other sessions' servers already held 18010/18020) —
+  confirmed no horizontal overflow at any width
+  (`document.body.scrollWidth`), the carousel's real click-driven (not just
+  programmatic) scroll-by-banner behavior, and the 1440px column's centering
+  via exact margin math. **Not committed** — screenshots delivered, per the
+  request ("Do not commit, push, or deploy yet").
+
 ## Basic Account home — desktop dashboard layout refinement pass (2026-11-17)
 
 Initial desktop layout pass on `BasicHome.tsx` per an explicit request —

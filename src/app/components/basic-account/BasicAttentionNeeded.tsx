@@ -16,14 +16,14 @@ function PrimaryAttentionRow({ item }: { item: BasicAttentionItem }) {
   return (
     <button
       onClick={() => navigate(item.href)}
-      className="flex w-full items-start gap-3 px-3 py-3 text-left cursor-pointer active:bg-gray-50 transition-colors"
+      className="flex w-full items-start gap-3 px-3 py-3 lg:px-4 lg:py-3.5 text-left cursor-pointer active:bg-gray-50 transition-colors"
     >
       <div className="flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-full bg-amber-100">
         <Icon className="h-4.5 w-4.5 text-amber-600" />
       </div>
       <div className="min-w-0 flex-1">
-        <p className="text-sm font-semibold text-gray-900 leading-snug">{item.title}</p>
-        <p className="mt-0.5 text-xs leading-snug text-gray-500">{item.detail}</p>
+        <p className="text-sm lg:text-[15px] font-semibold text-gray-900 leading-snug">{item.title}</p>
+        <p className="mt-0.5 text-xs lg:text-sm leading-snug text-gray-500">{item.detail}</p>
       </div>
       <IconChevronRight className="mt-1 h-4 w-4 flex-shrink-0 text-gray-400" />
     </button>
@@ -49,12 +49,12 @@ function CombinedSecondaryRow({
   return (
     <button
       onClick={onOpenAll}
-      className="flex w-full items-center gap-3 px-3 py-2.5 text-left cursor-pointer active:bg-gray-50 transition-colors"
+      className="flex w-full items-center gap-3 px-3 py-2.5 lg:px-4 lg:py-3 text-left cursor-pointer active:bg-gray-50 transition-colors"
     >
       <div className="flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-full bg-gray-100">
         <Icon className="h-3.5 w-3.5 text-gray-500" />
       </div>
-      <p className="min-w-0 flex-1 truncate text-sm font-medium text-gray-700">
+      <p className="min-w-0 flex-1 truncate text-sm lg:text-[15px] font-medium text-gray-700">
         {item.title}
         {moreCount > 0 && <span className="font-semibold text-blue-600"> +{moreCount} more</span>}
       </p>
@@ -110,8 +110,8 @@ export function BasicAttentionNeeded() {
   return (
     <div>
       <div className="overflow-hidden rounded-2xl border border-blue-100 bg-white shadow-sm">
-        <div className="flex items-center justify-between px-3 pt-2.5 pb-0.5">
-          <h3 className="text-sm font-semibold text-gray-900">Needs your attention</h3>
+        <div className="flex items-center justify-between px-3 pt-2.5 pb-0.5 lg:px-4 lg:pt-3.5 lg:pb-1">
+          <h3 className="text-sm lg:text-base font-semibold text-gray-900">Needs your attention</h3>
           <span className="flex-shrink-0 rounded-full bg-amber-100 px-2 py-0.5 text-[11px] font-semibold text-amber-700">
             {items.length} pending
           </span>

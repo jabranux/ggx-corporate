@@ -44,8 +44,8 @@ export function BasicKycInviteCard({ onPersonalize, onDismiss, compact = false }
         <IconSparkles className="w-4.5 h-4.5 text-blue-600" />
       </div>
       <div className="min-w-0 flex-1">
-        <p className="text-sm font-semibold text-blue-900 leading-snug">Personalize your GGX experience</p>
-        <p className="text-xs text-blue-700 mt-0.5 leading-snug">
+        <p className="text-sm lg:text-base font-semibold text-blue-900 leading-snug">Personalize your GGX experience</p>
+        <p className="text-xs lg:text-sm text-blue-700 mt-0.5 leading-snug">
           Answer 4 quick questions so we can show you the most useful services first.
         </p>
         {compact ? (
@@ -59,7 +59,7 @@ export function BasicKycInviteCard({ onPersonalize, onDismiss, compact = false }
 
   if (!compact) {
     return (
-      <div className="relative rounded-xl bg-blue-50 px-4 py-3.5 pr-10">
+      <div className="relative rounded-xl bg-blue-50 px-4 py-3.5 pr-10 lg:px-5 lg:py-4 lg:pr-12">
         {dismissButton}
         {body}
       </div>

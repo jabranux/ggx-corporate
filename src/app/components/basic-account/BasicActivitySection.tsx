@@ -39,25 +39,25 @@ export function BasicActivityOverview({ bookings }: BasicActivityOverviewProps) 
   const totalSpend = last7Days.reduce((sum, b) => sum + (b.total || 0) + (b.codAmount || 0), 0);
 
   return (
-    <div className="rounded-2xl border border-gray-100 bg-white p-3 shadow-sm">
+    <div className="rounded-2xl border border-gray-100 lg:border-slate-200 bg-white p-3 lg:p-4 shadow-sm">
       <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-3">Activity — last 7 days</p>
       <div className="flex flex-wrap gap-6">
         <div className="flex items-center gap-2.5">
-          <div className="w-8 h-8 rounded-lg bg-blue-50 flex items-center justify-center flex-shrink-0">
-            <IconPackage className="w-4 h-4 text-blue-600" />
+          <div className="w-8 h-8 lg:w-10 lg:h-10 rounded-lg bg-blue-50 flex items-center justify-center flex-shrink-0">
+            <IconPackage className="w-4 h-4 lg:w-5 lg:h-5 text-blue-600" />
           </div>
           <div>
-            <p className="text-base font-bold text-gray-900 leading-none">{last7Days.length}</p>
-            <p className="text-[11px] text-gray-500 leading-none mt-0.5">Bookings</p>
+            <p className="text-base lg:text-lg font-bold text-gray-900 leading-none">{last7Days.length}</p>
+            <p className="text-[11px] lg:text-xs text-gray-500 leading-none mt-0.5">Bookings</p>
           </div>
         </div>
         <div className="flex items-center gap-2.5">
-          <div className="w-8 h-8 rounded-lg bg-emerald-50 flex items-center justify-center flex-shrink-0">
-            <IconReceipt2 className="w-4 h-4 text-emerald-600" />
+          <div className="w-8 h-8 lg:w-10 lg:h-10 rounded-lg bg-emerald-50 flex items-center justify-center flex-shrink-0">
+            <IconReceipt2 className="w-4 h-4 lg:w-5 lg:h-5 text-emerald-600" />
           </div>
           <div>
-            <p className="text-base font-bold text-gray-900 leading-none">{peso(totalSpend)}</p>
-            <p className="text-[11px] text-gray-500 leading-none mt-0.5">Est. total handled</p>
+            <p className="text-base lg:text-lg font-bold text-gray-900 leading-none">{peso(totalSpend)}</p>
+            <p className="text-[11px] lg:text-xs text-gray-500 leading-none mt-0.5">Est. total handled</p>
           </div>
         </div>
       </div>
@@ -81,12 +81,12 @@ export function BasicRecentTransactions({ bookings }: BasicRecentTransactionsPro
   const recent = bookings.slice(0, 5);
 
   return (
-    <div className="rounded-2xl border border-gray-100 bg-white shadow-sm overflow-hidden">
-      <div className="flex items-center justify-between px-3 pt-3 pb-1">
-        <h3 className="text-sm font-semibold text-gray-900">Recent transactions</h3>
+    <div className="rounded-2xl border border-gray-100 lg:border-slate-200 bg-white shadow-sm overflow-hidden">
+      <div className="flex items-center justify-between px-3 pt-3 pb-1 lg:px-4 lg:pt-4">
+        <h3 className="text-sm lg:text-base font-semibold text-gray-900">Recent transactions</h3>
         <button
           onClick={() => navigate('/dashboard/transactions')}
-          className="flex items-center gap-1 text-xs font-medium text-blue-600 hover:text-blue-700 cursor-pointer"
+          className="flex items-center gap-1 text-xs lg:text-sm font-medium text-blue-600 hover:text-blue-700 cursor-pointer"
         >
           View all <IconArrowRight className="w-3 h-3" />
         </button>
@@ -104,17 +104,17 @@ export function BasicRecentTransactions({ bookings }: BasicRecentTransactionsPro
             <button
               key={b.id}
               onClick={() => navigate('/dashboard/book-delivery/success', { state: { bookingId: b.id } })}
-              className="flex w-full items-center gap-3 px-3 py-3 text-left active:bg-gray-50 transition-colors cursor-pointer"
+              className="flex w-full items-center gap-3 px-3 py-3 lg:px-4 lg:py-3.5 text-left active:bg-gray-50 transition-colors cursor-pointer"
             >
               <div className="w-9 h-9 rounded-lg bg-blue-50 flex items-center justify-center flex-shrink-0">
                 <IconPackage className="w-4 h-4 text-blue-600" />
               </div>
               <div className="min-w-0 flex-1">
-                <p className="text-sm font-medium text-gray-900 truncate">{b.recipientName ?? 'Recipient'}</p>
+                <p className="text-sm lg:text-[15px] font-medium text-gray-900 truncate">{b.recipientName ?? 'Recipient'}</p>
                 <p className="text-xs text-gray-400 truncate">{b.trackingNumber}</p>
               </div>
               <div className="flex-shrink-0 text-right">
-                <p className="text-sm font-semibold text-gray-900">{peso(b.total)}</p>
+                <p className="text-sm lg:text-[15px] font-semibold text-gray-900">{peso(b.total)}</p>
                 <p className="text-[11px] text-gray-400">{new Date(b.confirmedAt).toLocaleDateString('en-PH', { month: 'short', day: 'numeric' })}</p>
               </div>
             </button>

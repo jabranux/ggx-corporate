@@ -19,11 +19,34 @@ function formatDate(iso: string): string {
  * body — rather than a permanently-expanded `Alert`, per the mobile card-
  * styling pass ("critical service advisories should be compact with
  * expandable details"). Each item expands independently.
+ *
+ * `variant="expanded"` (desktop visual refinement pass) drops the toggle
+ * entirely and always shows the full advisory — the right column's top
+ * section, where the spec calls for a fully expanded, prominent warning
+ * card rather than a collapsed strip.
  */
-export function BasicCriticalAlerts() {
+export function BasicCriticalAlerts({ variant = 'compact' }: { variant?: 'compact' | 'expanded' } = {}) {
   const critical = getCriticalAnnouncements();
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
   if (critical.length === 0) return null;
+
+  if (variant === 'expanded') {
+    return (
+      <div className="space-y-3">
+        {critical.map((a) => (
+          <div key={a.id} className="rounded-2xl bg-[#FFF7E6] shadow-sm px-4 py-4">
+            <div className="flex items-start gap-3">
+              <IconAlertTriangle className="h-5 w-5 flex-shrink-0 text-amber-600 mt-0.5" />
+              <div className="min-w-0 flex-1">
+                <p className="text-lg font-semibold text-amber-900 leading-snug">{a.title}</p>
+                <p className="mt-1 text-sm leading-snug text-amber-800">{a.body}</p>
+              </div>
+            </div>
+          </div>
+        ))}
+      </div>
+    );
+  }
 
   const toggle = (id: string) => {
     setExpanded((prev) => {
@@ -76,12 +99,12 @@ export function BasicAnnouncementsPanel() {
   return (
     <div>
       <div className="overflow-hidden rounded-2xl border border-gray-100 bg-white shadow-sm">
-        <div className="flex items-center justify-between px-3 pt-3 pb-1">
-          <h3 className="text-sm font-semibold text-gray-900">Announcements</h3>
+        <div className="flex items-center justify-between px-3 pt-3 pb-1 lg:px-4 lg:pt-4">
+          <h3 className="text-sm lg:text-base font-semibold text-gray-900">Announcements</h3>
           {regular.length > visibleRegular.length && (
             <button
               onClick={() => setViewAllOpen(true)}
-              className="text-xs font-medium text-blue-600 hover:text-blue-700 cursor-pointer"
+              className="text-xs lg:text-sm font-medium text-blue-600 hover:text-blue-700 cursor-pointer"
             >
               View all
             </button>
@@ -89,11 +112,11 @@ export function BasicAnnouncementsPanel() {
         </div>
         <div className="divide-y divide-gray-100">
           {visibleRegular.map((a) => (
-            <div key={a.id} className="flex items-start gap-3 px-3 py-3">
+            <div key={a.id} className="flex items-start gap-3 px-3 py-3 lg:px-4 lg:py-3.5">
               <IconBellRinging className="w-4 h-4 text-gray-400 flex-shrink-0 mt-0.5" />
               <div className="min-w-0 flex-1">
-                <p className="text-sm font-medium text-gray-900 leading-snug">{a.title}</p>
-                <p className="text-xs text-gray-500 leading-snug mt-0.5">{a.body}</p>
+                <p className="text-sm lg:font-semibold font-medium text-gray-900 leading-snug">{a.title}</p>
+                <p className="text-xs lg:text-[13px] text-gray-500 leading-snug mt-0.5">{a.body}</p>
               </div>
               <span className="text-[11px] text-gray-400 flex-shrink-0 mt-0.5">{formatDate(a.date)}</span>
             </div>

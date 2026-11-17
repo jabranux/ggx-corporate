@@ -123,7 +123,6 @@ export function BasicHome() {
   );
 
   const primarySection = <BasicPrimaryShortcuts items={primary} />;
-  const secondarySection = <BasicSecondaryShortcuts items={secondary} />;
   const activitySection = <BasicActivityOverview bookings={bookings} />;
   const transactionsSection = <BasicRecentTransactions bookings={bookings} />;
 
@@ -149,8 +148,29 @@ export function BasicHome() {
     </div>
   );
 
+  // Desktop "More features" section (desktop visual refinement pass): a
+  // section heading + View all, then the KYC/personalize card full-width in
+  // the main column, then the secondary feature cards underneath — mirrors
+  // the mobile group's ordering but un-nested (no shared card wrapper), to
+  // match the reference layout's spacing between these as separate blocks.
+  const desktopMoreFeaturesGroup = (
+    <div className="space-y-4">
+      <div className="flex items-center justify-between">
+        <h3 className="text-lg font-semibold text-gray-900">More features</h3>
+        <button
+          onClick={() => navigate('/dashboard/services')}
+          className="flex items-center gap-1 text-sm font-medium text-blue-600 hover:text-blue-700 cursor-pointer"
+        >
+          View all <IconArrowRight className="w-3.5 h-3.5" />
+        </button>
+      </div>
+      {kycInviteCard}
+      <BasicSecondaryShortcuts items={secondary} showHeader={false} />
+    </div>
+  );
+
   return (
-    <div className="p-4 lg:p-6">
+    <div className="min-h-full bg-[#F3F6FA] p-4 lg:p-6">
       {/* ── Mobile / tablet: single-column, action-oriented stack (<lg) ──
           `space-y-4` (tightened from `space-y-5`) so the now-more-compact
           reminders/KYC sections pull the promo banner higher up common
@@ -168,30 +188,32 @@ export function BasicHome() {
         <BasicAnnouncementsPanel />
       </div>
 
-      {/* ── Desktop: main content + a narrower supporting column (desktop
-          layout refinement pass). Content hierarchy: welcome → main
-          features → more features → promo carousel → activity → recent
-          transactions, so booking and other primary actions sit right under
-          the welcome message instead of being pushed down by promotional
-          content. The supporting column is a fixed, narrower width (not an
-          even 1/3 split) so it reads as a purposeful rail of short cards
-          rather than a second, under-filled main column. */}
-      <div className="hidden lg:grid lg:grid-cols-[minmax(0,1fr)_320px] lg:gap-6 lg:items-start">
+      {/* ── Desktop: main content + a narrower supporting column, centered
+          within a 1440px max-width (desktop visual refinement pass). Content
+          hierarchy: welcome → main features (2×2, more prominent) → more
+          features heading → KYC card → secondary feature cards → promo
+          carousel → activity → recent transactions. The supporting column
+          leads with the fully-expanded critical advisory, then "Needs your
+          attention", then announcements — KYC has moved into the main
+          column so this column is now purely operational/informational.
+          The right column is 300px at `lg:` (1024–1439px) and the spec's
+          preferred 340px at the 1440px max-width itself — a fixed 340px at
+          1024px would leave too little room for the main column's larger
+          2×2 cards and 5-up secondary row (see `BasicServiceShortcuts.tsx`
+          for why this matches its own breakpoint exactly). */}
+      <div className="hidden lg:grid lg:mx-auto lg:max-w-[1440px] lg:grid-cols-[minmax(0,1fr)_300px] [@media(min-width:1440px)]:grid-cols-[minmax(0,1fr)_340px] lg:gap-6 lg:items-start">
         <div className="space-y-6">
           {welcome}
-          <div className="space-y-4">
-            {primarySection}
-            {secondarySection}
-          </div>
+          {primarySection}
+          {desktopMoreFeaturesGroup}
           <BasicPromoCarousel />
           {activitySection}
           {transactionsSection}
         </div>
 
         <div className="space-y-4">
+          <BasicCriticalAlerts variant="expanded" />
           <BasicAttentionNeeded />
-          {kycInviteCard}
-          <BasicCriticalAlerts />
           <BasicAnnouncementsPanel />
         </div>
       </div>
