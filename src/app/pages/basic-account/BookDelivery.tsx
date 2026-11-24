@@ -448,8 +448,10 @@ export function BookDelivery() {
         variant="destructive"
       />
 
-      {uxVariant === 'accordion' ? (
-        // Temporary prototyping variant — entirely separate single-page UI
+      {uxVariant === 'accordion' && !isDesktop ? (
+        // Temporary prototyping variant — mobile-only (desktop never shows
+        // the switcher at all, see below, and always renders the Wizard
+        // tree regardless of `uxVariant`). Entirely separate single-page UI
         // with its own local state, including its own copy of the UX
         // switcher in its header (see `BookingAccordionFlow.tsx`'s own
         // docblock for why this isn't the Wizard tree below with a flag).
@@ -504,12 +506,12 @@ export function BookDelivery() {
         // Upload, Support Tickets, Address Book: `text-3xl font-bold` title
         // + `text-gray-600 mt-1` subtitle in one `<div>`, no back control).
         <div className="mx-auto w-full max-w-[1280px]">
-          <div className="mb-6 flex items-start justify-between gap-3">
-            <div>
-              <h1 className="text-3xl font-bold text-gray-900">Book a delivery</h1>
-              <p className="text-gray-600 mt-1">Enter your delivery details to book a shipment.</p>
-            </div>
-            <BookingUxSwitcher value={uxVariant} onChange={setUxVariant} className="flex-shrink-0 mt-1" />
+          {/* No UX switcher on desktop — the Accordion variant is a mobile-only
+              prototype (see the `uxVariant === 'accordion' && !isDesktop` guard
+              above); desktop always renders this Wizard tree. */}
+          <div className="mb-6">
+            <h1 className="text-3xl font-bold text-gray-900">Book a delivery</h1>
+            <p className="text-gray-600 mt-1">Enter your delivery details to book a shipment.</p>
           </div>
           <div className="grid grid-cols-[7fr_3fr] gap-6 items-start">
             <div className="space-y-4 min-w-0">
