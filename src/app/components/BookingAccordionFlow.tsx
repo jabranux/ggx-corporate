@@ -69,12 +69,16 @@ import { isPickupDateSelectable, estimateDeliveryDateRange } from '../lib/basicP
 import { classifyRegion } from '../lib/checkoutEstimates';
 import { computeBookingTotals } from '../lib/basicBookingTotals';
 import { getBasicPouchSize, type BasicPouchSizeKey } from '../lib/basicPouchSizes';
+import { getBasicItemCategoryLabel, type BasicItemCategory } from '../lib/basicItemCategories';
 import { EMPTY_MERCHANDISE_COD, type BookingDraft, type FirstMile, type ItemProtectionTier, type FeePayer, type SenderPaymentMethod, type MerchandiseCod } from '../lib/basicBookingDraft';
 import type { Address } from './AddressBook';
 import type { DeliveryServiceType } from '../services/transactionService';
 
 interface ItemFields {
+  /** Derived, never typed directly except for the "Others" category — see `deriveItemDescription` below. */
   itemDescription: string;
+  /** Accordion-only "What are you sending?" selection — the Wizard has no equivalent field. */
+  category: BasicItemCategory | null;
   pouchSize: BasicPouchSizeKey;
   declaredValue: string;
   itemProtectionTier: ItemProtectionTier;
@@ -83,11 +87,25 @@ interface ItemFields {
 
 const EMPTY_ITEM_FIELDS: ItemFields = {
   itemDescription: '',
+  category: null,
   pouchSize: 'small',
   declaredValue: '',
   itemProtectionTier: 'free',
   merchandiseCod: EMPTY_MERCHANDISE_COD,
 };
+
+/**
+ * The booking's `itemDescription` is the selected category's label, or the
+ * typed text for "Others" — see `BookingItemDetailsSection.tsx`'s module
+ * docblock. Switching TO "Others" starts from a blank field rather than
+ * carrying over the previous category's label (which would otherwise sit in
+ * the text field looking like something the user typed); switching AWAY
+ * from "Others" always overwrites whatever was typed with the new
+ * category's label.
+ */
+function categoryChangePatch(category: BasicItemCategory): Pick<ItemFields, 'category' | 'itemDescription'> {
+  return { category, itemDescription: category === 'others' ? '' : getBasicItemCategoryLabel(category) };
+}
 
 interface RecipientEntry {
   id: string;
@@ -111,6 +129,7 @@ function shortDate(iso: string): string {
 }
 
 function itemFieldsValid(f: ItemFields): boolean {
+  const categoryValid = Boolean(f.category) && (f.category !== 'others' || Boolean(f.itemDescription.trim()));
   const declaredValueNum = Number(f.declaredValue);
   const declaredValueValid = f.merchandiseCod.enabled
     || f.itemProtectionTier === 'free'
@@ -119,7 +138,7 @@ function itemFieldsValid(f: ItemFields): boolean {
   const codAmountNum = Number(f.merchandiseCod.amount);
   const codValid = !f.merchandiseCod.enabled
     || (f.merchandiseCod.amount.trim() !== '' && Number.isFinite(codAmountNum) && codAmountNum >= 0);
-  return Boolean(f.itemDescription.trim()) && declaredValueValid && codValid;
+  return categoryValid && declaredValueValid && codValid;
 }
 
 function AddressLine({ address, placeholder }: { address: Address | null; placeholder: string }) {
@@ -593,9 +612,12 @@ export function BookingAccordionFlow({ accountId, uxVariant, onUxVariantChange, 
           <div className="space-y-3">
             {!multi ? (
               <BookingItemDetailsSection
+                bare
                 firstMile={firstMile}
                 itemDescription={sharedItemDetails.itemDescription}
                 onItemDescriptionChange={(v) => updateSharedItem({ itemDescription: v })}
+                category={sharedItemDetails.category}
+                onCategoryChange={(c) => updateSharedItem(categoryChangePatch(c))}
                 pouchSize={sharedItemDetails.pouchSize}
                 onPouchSizeChange={(v) => updateSharedItem({ pouchSize: v })}
                 declaredValue={sharedItemDetails.declaredValue}
@@ -610,9 +632,12 @@ export function BookingAccordionFlow({ accountId, uxVariant, onUxVariantChange, 
               <>
                 <p className="text-xs text-gray-500">Shared details — applies to all unless customized below.</p>
                 <BookingItemDetailsSection
+                  bare
                   firstMile={firstMile}
                   itemDescription={sharedItemDetails.itemDescription}
                   onItemDescriptionChange={(v) => updateSharedItem({ itemDescription: v })}
+                  category={sharedItemDetails.category}
+                  onCategoryChange={(c) => updateSharedItem(categoryChangePatch(c))}
                   pouchSize={sharedItemDetails.pouchSize}
                   onPouchSizeChange={(v) => updateSharedItem({ pouchSize: v })}
                   declaredValue={sharedItemDetails.declaredValue}
@@ -653,9 +678,12 @@ export function BookingAccordionFlow({ accountId, uxVariant, onUxVariantChange, 
                           {isCustomizing && (
                             <div className="mt-3 border-t border-gray-100 pt-3">
                               <BookingItemDetailsSection
+                                bare
                                 firstMile={firstMile}
                                 itemDescription={effective.itemDescription}
                                 onItemDescriptionChange={(v) => updateRecipientOverride(r.id, { itemDescription: v })}
+                                category={effective.category}
+                                onCategoryChange={(c) => updateRecipientOverride(r.id, categoryChangePatch(c))}
                                 pouchSize={effective.pouchSize}
                                 onPouchSizeChange={(v) => updateRecipientOverride(r.id, { pouchSize: v })}
                                 declaredValue={effective.declaredValue}

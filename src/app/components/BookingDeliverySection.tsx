@@ -106,8 +106,8 @@ export function BookingDeliverySection({
       <CardContent className="p-4 space-y-3">
         <div className="grid grid-cols-2 gap-2">
           {([
-            { key: 'pickup' as FirstMile, label: 'Rider Pickup', icon: IconTruckDelivery, description: 'We collect your parcel from your pickup address.' },
-            { key: 'dropoff' as FirstMile, label: 'Drop-off', icon: IconBuildingStore, description: 'Bring your parcel to a participating drop-off location.' },
+            { key: 'pickup' as FirstMile, label: 'Rider Pickup', icon: IconTruckDelivery, description: 'We pick up your parcel.' },
+            { key: 'dropoff' as FirstMile, label: 'Drop-off', icon: IconBuildingStore, description: 'Drop off at a location.' },
           ]).map(({ key, label, icon: Icon, description }) => {
             const selected = firstMile === key;
             return (
