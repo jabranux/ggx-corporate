@@ -51,7 +51,7 @@
  */
 const MULTI_RECIPIENT_ENABLED = false;
 import { useEffect, useMemo, useState, type ReactNode } from 'react';
-import { IconPlus, IconTrash, IconCircleCheckFilled, IconTruckDelivery, IconBuildingStore } from '@tabler/icons-react';
+import { IconPlus, IconTrash, IconCircleCheckFilled, IconTruckDelivery, IconBuildingStore, IconChevronLeft } from '@tabler/icons-react';
 import { Card, CardContent } from './ui/Card';
 import { Button } from './ui/Button';
 import { Badge } from './ui/Badge';
@@ -191,13 +191,15 @@ export interface BookingAccordionFlowProps {
   accountId: string;
   uxVariant: BookingUxVariant;
   onUxVariantChange: (v: BookingUxVariant) => void;
+  /** This variant has no wizard steps to walk back through (every section stays reachable), so Back always means "leave the page" — the caller owns the actual unsaved-work confirmation/navigation, same as it does for the Wizard's own header Back. */
+  onBack: () => void;
   /** Mirrors `BookDelivery.tsx`'s own exit-guard arming — called on every real user edit (never on the background pickup-address prefill). */
   onDirty: () => void;
   /** Called once a booking is successfully confirmed, so the page-level exit guard stops treating the (now-submitted) data as unsaved work. */
   onConfirmed: () => void;
 }
 
-export function BookingAccordionFlow({ accountId, uxVariant, onUxVariantChange, onDirty, onConfirmed }: BookingAccordionFlowProps) {
+export function BookingAccordionFlow({ accountId, uxVariant, onUxVariantChange, onBack, onDirty, onConfirmed }: BookingAccordionFlowProps) {
   const [openSection, setOpenSection] = useState<0 | 1 | 2>(0);
 
   const [pickupAddress, setPickupAddress] = useState<Address | null>(null);
@@ -487,6 +489,7 @@ export function BookingAccordionFlow({ accountId, uxVariant, onUxVariantChange, 
               ))}
             </div>
             <Button className="mt-4 w-full" onClick={resetAll}>Book another delivery</Button>
+            <Button className="mt-2 w-full" variant="outline" onClick={onBack}>Back to dashboard</Button>
           </CardContent>
         </Card>
       </div>
@@ -496,7 +499,17 @@ export function BookingAccordionFlow({ accountId, uxVariant, onUxVariantChange, 
   return (
     <div className="mx-auto w-full max-w-2xl pb-28">
       <div className="mb-4 flex items-center justify-between gap-3">
-        <h1 className="text-lg font-semibold text-gray-900 lg:text-2xl lg:font-bold">Book a delivery</h1>
+        <div className="flex min-w-0 items-center gap-2">
+          <button
+            type="button"
+            onClick={onBack}
+            aria-label="Back"
+            className="flex-shrink-0 -ml-1.5 flex h-8 w-8 items-center justify-center rounded-md text-gray-500 hover:bg-gray-100 hover:text-gray-700"
+          >
+            <IconChevronLeft className="h-5 w-5" />
+          </button>
+          <h1 className="truncate text-lg font-semibold text-gray-900 lg:text-2xl lg:font-bold">Book a delivery</h1>
+        </div>
         <BookingUxSwitcher value={uxVariant} onChange={onUxVariantChange} className="flex-shrink-0" />
       </div>
 

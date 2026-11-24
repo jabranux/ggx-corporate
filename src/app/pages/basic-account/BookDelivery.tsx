@@ -325,6 +325,18 @@ export function BookDelivery() {
     setStep((s) => Math.max(0, s - 1));
   };
 
+  // Accordion's own back control — unlike the Wizard, it has no steps to
+  // walk back through (every section stays reachable at once), so Back
+  // always means "leave the page," gated the same way the Wizard's own
+  // step-0 Back is: confirm first only if something's actually unsaved.
+  const handleAccordionBack = () => {
+    if (touchedRef.current) {
+      setShowExitConfirm(true);
+      return;
+    }
+    navigate('/dashboard');
+  };
+
   const handleConfirmExit = () => {
     setShowExitConfirm(false);
     // Must clear this before navigating — `useUploadExitGuard`'s blocker
@@ -459,6 +471,7 @@ export function BookDelivery() {
           accountId={accountId}
           uxVariant={uxVariant}
           onUxVariantChange={setUxVariant}
+          onBack={handleAccordionBack}
           onDirty={() => { touchedRef.current = true; }}
           onConfirmed={() => { touchedRef.current = false; }}
         />
