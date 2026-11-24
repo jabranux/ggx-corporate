@@ -7,6 +7,12 @@
  * separate steps, with no progress bar, and adds optional multiple-recipient
  * support that the Wizard variant does not have.
  *
+ * Each section is its OWN `Card` (not one big card holding all three) so the
+ * flow reads as a lightweight, scannable alternative to the Wizard rather
+ * than a wizard crammed into one container — see the 2026-11-24 refinement
+ * note below for the rest of that pass's intent (compact copy, no duplicate
+ * validation text, no nested card-in-card in Review).
+ *
  * Kept entirely self-contained with its own local state (never
  * `useBookingDraft`/`BookingDraft`) so this experiment can be iterated on
  * freely without risking the production Wizard flow it's being compared
@@ -31,16 +37,27 @@
  * is untouched — every branch here still keys off `recipients.length`, not
  * the flag, so flipping it back to `true` re-enables the full experience
  * with no further changes.
+ *
+ * 2026-11-24 density/copy pass (same day, follow-up product request): split
+ * the single big card into one card per section with spacing between them;
+ * removed the duplicate red validation line under each section's own
+ * Continue button (the sticky bottom bar's reason is now the one place that
+ * shows it); shortened collapsed-section summaries to short "A → B · date" /
+ * "pouch · COD status" / "total" strings; and flattened Review & Payment
+ * from three stacked nested cards into plain divided rows so it doesn't read
+ * as cards-inside-a-card. None of this touches the Wizard, which still
+ * renders its own copies of `BookingAddressSection` / `BookingItemDetailsSection`
+ * directly (not through this file).
  */
 const MULTI_RECIPIENT_ENABLED = false;
-import { useEffect, useMemo, useRef, useState } from 'react';
-import { IconPlus, IconTrash, IconCircleCheckFilled, IconPackage, IconTruckDelivery, IconBuildingStore } from '@tabler/icons-react';
+import { useEffect, useMemo, useState, type ReactNode } from 'react';
+import { IconPlus, IconTrash, IconCircleCheckFilled, IconTruckDelivery, IconBuildingStore } from '@tabler/icons-react';
 import { Card, CardContent } from './ui/Card';
 import { Button } from './ui/Button';
 import { Badge } from './ui/Badge';
 import { AccordionItem } from './ui/Accordion';
 import { BookingUxSwitcher, type BookingUxVariant } from './BookingUxSwitcher';
-import { BookingAddressSection, AddressRouteRail, isCompleteAddress } from './BookingAddressSection';
+import { BookingAddressSection, isCompleteAddress } from './BookingAddressSection';
 import { BookingDeliverySection } from './BookingDeliverySection';
 import { BookingItemDetailsSection } from './BookingItemDetailsSection';
 import { BookingFeeBreakdownContent } from './BookingFeeBreakdownContent';
@@ -87,6 +104,12 @@ function fmtPHP(n: number): string {
   return `₱${n.toLocaleString('en-PH', { minimumFractionDigits: 2 })}`;
 }
 
+/** Short "Nov 26" form for collapsed summaries — manual y/m/d split (not `new Date(iso)`) to avoid a UTC-midnight day-shift in negative-offset timezones, same reasoning as `deliveryEstimateLabelFor` below. */
+function shortDate(iso: string): string {
+  const [y, m, d] = iso.split('-').map(Number);
+  return new Date(y, m - 1, d).toLocaleDateString('en-PH', { month: 'short', day: 'numeric' });
+}
+
 function itemFieldsValid(f: ItemFields): boolean {
   const declaredValueNum = Number(f.declaredValue);
   const declaredValueValid = f.merchandiseCod.enabled
@@ -106,6 +129,42 @@ function AddressLine({ address, placeholder }: { address: Address | null; placeh
       <p className="text-sm font-medium text-gray-900 truncate">{address.name} · {address.mobileNumber}</p>
       <p className="text-xs text-gray-500 truncate">{[address.barangay, address.city, address.province].filter(Boolean).join(', ')}</p>
     </div>
+  );
+}
+
+/** One collapsible section, its own `Card` — see this file's module docblock for why. */
+function SectionCard({
+  open,
+  onOpenChange,
+  title,
+  summary,
+  children,
+}: {
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  title: string;
+  /** Short collapsed-state summary, e.g. "Jamie Cruz → Maria Santos · Nov 26" — omitted while expanded. */
+  summary: string;
+  children: ReactNode;
+}) {
+  return (
+    <Card>
+      <CardContent className="px-4 py-0">
+        <AccordionItem
+          className="border-b-0"
+          open={open}
+          onOpenChange={onOpenChange}
+          title={
+            <div className="min-w-0 flex-1 text-left">
+              <span>{title}</span>
+              {!open && <p className="mt-0.5 truncate text-xs font-normal text-gray-500">{summary}</p>}
+            </div>
+          }
+        >
+          {children}
+        </AccordionItem>
+      </CardContent>
+    </Card>
   );
 }
 
@@ -229,6 +288,9 @@ export function BookingAccordionFlow({ accountId, uxVariant, onUxVariantChange, 
   const section1Valid = recipients.every((r) => itemFieldsValid(effectiveItemFor(r)));
 
   const canConfirm = section0Valid && section1Valid;
+  // Single source of truth for "why can't I confirm yet" — shown ONLY in the
+  // sticky bottom bar (not repeated under each section's own Continue button
+  // too, which is what the 2026-11-24 copy pass asked to stop doing).
   const confirmBlockReason = !pickupComplete
     ? 'Choose a complete pickup address to continue.'
     : !recipientsAddressComplete
@@ -349,21 +411,26 @@ export function BookingAccordionFlow({ accountId, uxVariant, onUxVariantChange, 
     getDefaultBookingAddresses(accountId).then(({ pickup }) => { if (pickup) setPickupAddress(pickup); });
   };
 
-  // ---- Compact collapsed summaries ----
+  // ---- Compact collapsed-section summaries ("A → B · date", "pouch · COD status", "total") ----
   const pickupDeliverySummary = useMemo(() => {
-    const parts: string[] = [pickupAddress ? pickupAddress.name : 'Pickup not set'];
-    parts.push(multi ? `→ ${recipients.filter((r) => r.address).length}/${recipients.length} recipients` : `→ ${recipients[0]?.address?.name ?? 'Recipient not set'}`);
-    parts.push(firstMile === 'dropoff' ? 'Drop-off' : pickupDate ? new Date(pickupDate).toLocaleDateString('en-PH', { month: 'short', day: 'numeric' }) : 'Pickup date not set');
-    return parts.join(' · ');
+    const pickupName = pickupAddress?.name ?? 'Pickup';
+    const recipientPart = multi
+      ? `${recipients.filter((r) => r.address).length}/${recipients.length} recipients`
+      : (recipients[0]?.address?.name ?? 'Recipient');
+    const datePart = firstMile === 'dropoff' ? 'Drop-off' : (pickupDate ? shortDate(pickupDate) : undefined);
+    return `${pickupName} → ${recipientPart}${datePart ? ` · ${datePart}` : ''}`;
   }, [pickupAddress, recipients, multi, firstMile, pickupDate]);
 
   const itemDetailsSummary = useMemo(() => {
+    const pouch = getBasicPouchSize(sharedItemDetails.pouchSize);
     if (!multi) {
-      return sharedItemDetails.itemDescription ? `${sharedItemDetails.itemDescription} · ${getBasicPouchSize(sharedItemDetails.pouchSize).label}` : 'Not set';
+      const codText = sharedItemDetails.merchandiseCod.enabled
+        ? `COD ${fmtPHP(Number(sharedItemDetails.merchandiseCod.amount) || 0)}`
+        : 'No COD';
+      return `${pouch.label} · ${codText}`;
     }
     const customized = recipients.filter((r) => r.itemOverride).length;
-    const base = sharedItemDetails.itemDescription || 'Shared item details';
-    return customized > 0 ? `${base} · ${customized} customized` : base;
+    return customized > 0 ? `${pouch.label} shared · ${customized} customized` : `${pouch.label} shared`;
   }, [multi, sharedItemDetails, recipients]);
 
   const addressSection = (
@@ -409,139 +476,139 @@ export function BookingAccordionFlow({ accountId, uxVariant, onUxVariantChange, 
 
   return (
     <div className="mx-auto w-full max-w-2xl pb-28">
-      <div className="mb-4 flex items-start justify-between gap-3">
-        <div>
-          <h1 className="text-lg font-semibold text-gray-900 lg:text-2xl lg:font-bold">Book a delivery</h1>
-          <p className="mt-0.5 text-xs text-gray-500 lg:text-sm">Accordion preview — complete each section below.</p>
-        </div>
+      <div className="mb-4 flex items-center justify-between gap-3">
+        <h1 className="text-lg font-semibold text-gray-900 lg:text-2xl lg:font-bold">Book a delivery</h1>
         <BookingUxSwitcher value={uxVariant} onChange={onUxVariantChange} className="flex-shrink-0" />
       </div>
 
-      <Card>
-        <CardContent className="px-4 py-0">
-          <AccordionItem
-            open={openSection === 0}
-            onOpenChange={(o) => setOpenSection(o ? 0 : openSection)}
-            title={
-              <div className="min-w-0 flex-1 text-left">
-                <span>Pickup &amp; Delivery</span>
-                {openSection !== 0 && <p className="mt-0.5 truncate text-xs font-normal text-gray-500">{pickupDeliverySummary}</p>}
-              </div>
-            }
-          >
-            <div className="space-y-3">
-              {!multi ? (
-                <>
-                  {addressSection}
-                  {MULTI_RECIPIENT_ENABLED && (
-                    <button
-                      type="button"
-                      onClick={addRecipient}
-                      className="flex items-center gap-1.5 text-sm font-semibold text-blue-600"
-                    >
-                      <IconPlus className="h-3.5 w-3.5" /> Add another recipient
-                    </button>
-                  )}
-                </>
-              ) : (
-                <>
-                  <Card>
-                    <CardContent className="p-3">
-                      <div className="flex items-start justify-between gap-2">
-                        <div className="min-w-0 flex-1">
-                          <p className="mb-1 text-xs font-semibold text-gray-500 uppercase tracking-wide">Pickup address</p>
-                          <AddressLine address={pickupAddress} placeholder="Not set" />
-                        </div>
-                        <Button size="sm" variant="outline" onClick={() => setPicker({ kind: 'pickup' })}>
-                          {pickupAddress ? 'Change' : 'Set'}
-                        </Button>
+      <div className="space-y-3">
+        <SectionCard
+          open={openSection === 0}
+          onOpenChange={(o) => setOpenSection(o ? 0 : openSection)}
+          title="Pickup & Delivery"
+          summary={pickupDeliverySummary}
+        >
+          <div className="space-y-3">
+            {!multi ? (
+              <>
+                {addressSection}
+                {MULTI_RECIPIENT_ENABLED && (
+                  <button
+                    type="button"
+                    onClick={addRecipient}
+                    className="flex items-center gap-1.5 text-sm font-semibold text-blue-600"
+                  >
+                    <IconPlus className="h-3.5 w-3.5" /> Add another recipient
+                  </button>
+                )}
+              </>
+            ) : (
+              <>
+                <Card>
+                  <CardContent className="p-3">
+                    <div className="flex items-start justify-between gap-2">
+                      <div className="min-w-0 flex-1">
+                        <p className="mb-1 text-xs font-semibold text-gray-500 uppercase tracking-wide">Pickup address</p>
+                        <AddressLine address={pickupAddress} placeholder="Not set" />
                       </div>
-                    </CardContent>
-                  </Card>
+                      <Button size="sm" variant="outline" onClick={() => setPicker({ kind: 'pickup' })}>
+                        {pickupAddress ? 'Change' : 'Set'}
+                      </Button>
+                    </div>
+                  </CardContent>
+                </Card>
 
-                  <div className="space-y-2">
-                    {recipients.map((r, i) => (
-                      <Card key={r.id}>
-                        <CardContent className="p-3">
-                          <div className="flex items-start justify-between gap-2">
-                            <div className="min-w-0 flex-1">
-                              <div className="mb-1 flex items-center gap-1.5">
-                                <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide">Recipient {i + 1}</p>
-                                {r.address && (
-                                  <Badge variant={labelColors[r.address.label] || 'default'} className="text-[10px] px-1.5 py-0 capitalize">
-                                    {getDisplayLabel(r.address)}
-                                  </Badge>
-                                )}
-                              </div>
-                              <AddressLine address={r.address} placeholder="Tap to add" />
-                            </div>
-                            <div className="flex flex-shrink-0 items-center gap-1.5">
-                              <Button size="sm" variant="outline" onClick={() => setPicker({ kind: 'recipient', recipientId: r.id })}>
-                                {r.address ? 'Change' : 'Set'}
-                              </Button>
-                              {recipients.length > 1 && (
-                                <button
-                                  type="button"
-                                  onClick={() => removeRecipient(r.id)}
-                                  aria-label={`Remove recipient ${i + 1}`}
-                                  className="flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-md text-gray-400 hover:bg-red-50 hover:text-red-600"
-                                >
-                                  <IconTrash className="h-4 w-4" />
-                                </button>
+                <div className="space-y-2">
+                  {recipients.map((r, i) => (
+                    <Card key={r.id}>
+                      <CardContent className="p-3">
+                        <div className="flex items-start justify-between gap-2">
+                          <div className="min-w-0 flex-1">
+                            <div className="mb-1 flex items-center gap-1.5">
+                              <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide">Recipient {i + 1}</p>
+                              {r.address && (
+                                <Badge variant={labelColors[r.address.label] || 'default'} className="text-[10px] px-1.5 py-0 capitalize">
+                                  {getDisplayLabel(r.address)}
+                                </Badge>
                               )}
                             </div>
+                            <AddressLine address={r.address} placeholder="Tap to add" />
                           </div>
-                        </CardContent>
-                      </Card>
-                    ))}
-                  </div>
+                          <div className="flex flex-shrink-0 items-center gap-1.5">
+                            <Button size="sm" variant="outline" onClick={() => setPicker({ kind: 'recipient', recipientId: r.id })}>
+                              {r.address ? 'Change' : 'Set'}
+                            </Button>
+                            {recipients.length > 1 && (
+                              <button
+                                type="button"
+                                onClick={() => removeRecipient(r.id)}
+                                aria-label={`Remove recipient ${i + 1}`}
+                                className="flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-md text-gray-400 hover:bg-red-50 hover:text-red-600"
+                              >
+                                <IconTrash className="h-4 w-4" />
+                              </button>
+                            )}
+                          </div>
+                        </div>
+                      </CardContent>
+                    </Card>
+                  ))}
+                </div>
 
-                  {MULTI_RECIPIENT_ENABLED && (
-                    <button
-                      type="button"
-                      onClick={addRecipient}
-                      className="flex items-center gap-1.5 text-sm font-semibold text-blue-600"
-                    >
-                      <IconPlus className="h-3.5 w-3.5" /> Add recipient
-                    </button>
-                  )}
-                </>
-              )}
-
-              <BookingDeliverySection
-                accountId={accountId}
-                recipientAddress={recipients[0]?.address ?? null}
-                firstMile={firstMile}
-                onFirstMileChange={(v) => { setFirstMile(v); markDirty(); }}
-                serviceType={serviceType}
-                onServiceTypeChange={(v) => { setServiceType(v); markDirty(); }}
-                pickupDate={pickupDate}
-                onPickupDateChange={(v) => { setPickupDate(v); markDirty(); }}
-              />
-
-              <div>
-                {confirmBlockReason && openSection === 0 && !section0Valid && (
-                  <p className="mb-2 text-xs text-red-600">{confirmBlockReason}</p>
+                {MULTI_RECIPIENT_ENABLED && (
+                  <button
+                    type="button"
+                    onClick={addRecipient}
+                    className="flex items-center gap-1.5 text-sm font-semibold text-blue-600"
+                  >
+                    <IconPlus className="h-3.5 w-3.5" /> Add recipient
+                  </button>
                 )}
-                <Button className="w-full sm:w-auto" disabled={!section0Valid} onClick={() => setOpenSection(1)}>
-                  Continue
-                </Button>
-              </div>
-            </div>
-          </AccordionItem>
+              </>
+            )}
 
-          <AccordionItem
-            open={openSection === 1}
-            onOpenChange={(o) => setOpenSection(o ? 1 : openSection)}
-            title={
-              <div className="min-w-0 flex-1 text-left">
-                <span>Item Details</span>
-                {openSection !== 1 && <p className="mt-0.5 truncate text-xs font-normal text-gray-500">{itemDetailsSummary}</p>}
-              </div>
-            }
-          >
-            <div className="space-y-3">
-              {!multi ? (
+            <BookingDeliverySection
+              accountId={accountId}
+              recipientAddress={recipients[0]?.address ?? null}
+              firstMile={firstMile}
+              onFirstMileChange={(v) => { setFirstMile(v); markDirty(); }}
+              serviceType={serviceType}
+              onServiceTypeChange={(v) => { setServiceType(v); markDirty(); }}
+              pickupDate={pickupDate}
+              onPickupDateChange={(v) => { setPickupDate(v); markDirty(); }}
+            />
+
+            <Button className="w-full sm:w-auto" disabled={!section0Valid} onClick={() => setOpenSection(1)}>
+              Continue
+            </Button>
+          </div>
+        </SectionCard>
+
+        <SectionCard
+          open={openSection === 1}
+          onOpenChange={(o) => setOpenSection(o ? 1 : openSection)}
+          title="Item Details"
+          summary={itemDetailsSummary}
+        >
+          <div className="space-y-3">
+            {!multi ? (
+              <BookingItemDetailsSection
+                firstMile={firstMile}
+                itemDescription={sharedItemDetails.itemDescription}
+                onItemDescriptionChange={(v) => updateSharedItem({ itemDescription: v })}
+                pouchSize={sharedItemDetails.pouchSize}
+                onPouchSizeChange={(v) => updateSharedItem({ pouchSize: v })}
+                declaredValue={sharedItemDetails.declaredValue}
+                onDeclaredValueChange={(v) => updateSharedItem({ declaredValue: v })}
+                codEnabled={sharedItemDetails.merchandiseCod.enabled}
+                codAmount={sharedItemDetails.merchandiseCod.amount}
+                onCodChange={(enabled, amount) => updateSharedItem({ merchandiseCod: { enabled, amount } })}
+                itemProtectionTier={sharedItemDetails.itemProtectionTier}
+                onItemProtectionTierChange={(v) => updateSharedItem({ itemProtectionTier: v })}
+              />
+            ) : (
+              <>
+                <p className="text-xs text-gray-500">Shared details — applies to all unless customized below.</p>
                 <BookingItemDetailsSection
                   firstMile={firstMile}
                   itemDescription={sharedItemDetails.itemDescription}
@@ -556,167 +623,118 @@ export function BookingAccordionFlow({ accountId, uxVariant, onUxVariantChange, 
                   itemProtectionTier={sharedItemDetails.itemProtectionTier}
                   onItemProtectionTierChange={(v) => updateSharedItem({ itemProtectionTier: v })}
                 />
-              ) : (
-                <>
-                  <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide">Shared item details</p>
-                  <p className="text-xs text-gray-500 -mt-1">Applies to every recipient unless customized below.</p>
-                  <BookingItemDetailsSection
-                    firstMile={firstMile}
-                    itemDescription={sharedItemDetails.itemDescription}
-                    onItemDescriptionChange={(v) => updateSharedItem({ itemDescription: v })}
-                    pouchSize={sharedItemDetails.pouchSize}
-                    onPouchSizeChange={(v) => updateSharedItem({ pouchSize: v })}
-                    declaredValue={sharedItemDetails.declaredValue}
-                    onDeclaredValueChange={(v) => updateSharedItem({ declaredValue: v })}
-                    codEnabled={sharedItemDetails.merchandiseCod.enabled}
-                    codAmount={sharedItemDetails.merchandiseCod.amount}
-                    onCodChange={(enabled, amount) => updateSharedItem({ merchandiseCod: { enabled, amount } })}
-                    itemProtectionTier={sharedItemDetails.itemProtectionTier}
-                    onItemProtectionTierChange={(v) => updateSharedItem({ itemProtectionTier: v })}
-                  />
 
-                  <p className="pt-1 text-xs font-semibold text-gray-500 uppercase tracking-wide">Per-recipient customization</p>
-                  <div className="space-y-2">
-                    {recipients.map((r, i) => {
-                      const effective = effectiveItemFor(r);
-                      const pouch = getBasicPouchSize(effective.pouchSize);
-                      const isCustomizing = customizingId === r.id;
-                      return (
-                        <Card key={r.id}>
-                          <CardContent className="p-3">
-                            <div className="flex items-start justify-between gap-2">
-                              <div className="min-w-0 flex-1">
-                                <p className="text-sm font-medium text-gray-900 truncate">{r.address?.name ?? `Recipient ${i + 1}`}</p>
-                                <p className="text-xs text-gray-500 truncate">
-                                  {effective.itemDescription || 'No description'} · {pouch.label}
-                                  {r.itemOverride && <span className="ml-1 font-medium text-blue-600">· customized</span>}
-                                </p>
-                              </div>
-                              <div className="flex flex-shrink-0 gap-1.5">
-                                {r.itemOverride && (
-                                  <Button size="sm" variant="outline" onClick={() => resetOverride(r.id)}>Reset</Button>
-                                )}
-                                <Button size="sm" variant="outline" onClick={() => setCustomizingId(isCustomizing ? null : r.id)}>
-                                  {isCustomizing ? 'Close' : 'Customize'}
-                                </Button>
-                              </div>
+                <p className="pt-1 text-xs font-semibold text-gray-500 uppercase tracking-wide">Per recipient</p>
+                <div className="space-y-2">
+                  {recipients.map((r, i) => {
+                    const effective = effectiveItemFor(r);
+                    const pouch = getBasicPouchSize(effective.pouchSize);
+                    const isCustomizing = customizingId === r.id;
+                    return (
+                      <Card key={r.id}>
+                        <CardContent className="p-3">
+                          <div className="flex items-start justify-between gap-2">
+                            <div className="min-w-0 flex-1">
+                              <p className="text-sm font-medium text-gray-900 truncate">{r.address?.name ?? `Recipient ${i + 1}`}</p>
+                              <p className="text-xs text-gray-500 truncate">
+                                {pouch.label}
+                                {r.itemOverride && <span className="ml-1 font-medium text-blue-600">· customized</span>}
+                              </p>
                             </div>
-                            {isCustomizing && (
-                              <div className="mt-3 border-t border-gray-100 pt-3">
-                                <BookingItemDetailsSection
-                                  firstMile={firstMile}
-                                  itemDescription={effective.itemDescription}
-                                  onItemDescriptionChange={(v) => updateRecipientOverride(r.id, { itemDescription: v })}
-                                  pouchSize={effective.pouchSize}
-                                  onPouchSizeChange={(v) => updateRecipientOverride(r.id, { pouchSize: v })}
-                                  declaredValue={effective.declaredValue}
-                                  onDeclaredValueChange={(v) => updateRecipientOverride(r.id, { declaredValue: v })}
-                                  codEnabled={effective.merchandiseCod.enabled}
-                                  codAmount={effective.merchandiseCod.amount}
-                                  onCodChange={(enabled, amount) => updateRecipientOverride(r.id, { merchandiseCod: { enabled, amount } })}
-                                  itemProtectionTier={effective.itemProtectionTier}
-                                  onItemProtectionTierChange={(v) => updateRecipientOverride(r.id, { itemProtectionTier: v })}
-                                />
-                              </div>
-                            )}
-                          </CardContent>
-                        </Card>
-                      );
-                    })}
-                  </div>
-                </>
-              )}
+                            <div className="flex flex-shrink-0 gap-1.5">
+                              {r.itemOverride && (
+                                <Button size="sm" variant="outline" onClick={() => resetOverride(r.id)}>Reset</Button>
+                              )}
+                              <Button size="sm" variant="outline" onClick={() => setCustomizingId(isCustomizing ? null : r.id)}>
+                                {isCustomizing ? 'Close' : 'Customize'}
+                              </Button>
+                            </div>
+                          </div>
+                          {isCustomizing && (
+                            <div className="mt-3 border-t border-gray-100 pt-3">
+                              <BookingItemDetailsSection
+                                firstMile={firstMile}
+                                itemDescription={effective.itemDescription}
+                                onItemDescriptionChange={(v) => updateRecipientOverride(r.id, { itemDescription: v })}
+                                pouchSize={effective.pouchSize}
+                                onPouchSizeChange={(v) => updateRecipientOverride(r.id, { pouchSize: v })}
+                                declaredValue={effective.declaredValue}
+                                onDeclaredValueChange={(v) => updateRecipientOverride(r.id, { declaredValue: v })}
+                                codEnabled={effective.merchandiseCod.enabled}
+                                codAmount={effective.merchandiseCod.amount}
+                                onCodChange={(enabled, amount) => updateRecipientOverride(r.id, { merchandiseCod: { enabled, amount } })}
+                                itemProtectionTier={effective.itemProtectionTier}
+                                onItemProtectionTierChange={(v) => updateRecipientOverride(r.id, { itemProtectionTier: v })}
+                              />
+                            </div>
+                          )}
+                        </CardContent>
+                      </Card>
+                    );
+                  })}
+                </div>
+              </>
+            )}
 
-              <div>
-                {!section1Valid && (
-                  <p className="mb-2 text-xs text-red-600">
-                    {multi ? 'Finish item details for every recipient to continue.' : 'Finish item details to continue.'}
-                  </p>
-                )}
-                <Button className="w-full sm:w-auto" disabled={!section1Valid} onClick={() => setOpenSection(2)}>
-                  Continue
-                </Button>
-              </div>
+            <Button className="w-full sm:w-auto" disabled={!section1Valid} onClick={() => setOpenSection(2)}>
+              Continue
+            </Button>
+          </div>
+        </SectionCard>
+
+        <SectionCard
+          open={openSection === 2}
+          onOpenChange={(o) => setOpenSection(o ? 2 : openSection)}
+          title="Review & Payment"
+          summary={`${fmtPHP(grandTotal)} total`}
+        >
+          {/* Plain divided rows, not stacked cards-in-a-card — see this file's
+              2026-11-24 density-pass note in the module docblock. */}
+          <div className="divide-y divide-gray-100">
+            <div className="py-3">
+              <p className="truncate text-sm font-medium text-gray-900">
+                {pickupAddress?.name ?? 'Pickup not set'} → {recipients[0]?.address?.name ?? 'Recipient not set'}
+              </p>
+              <p className="mt-0.5 flex items-center gap-1 text-xs text-gray-500">
+                {firstMile === 'pickup' ? <IconTruckDelivery className="h-3 w-3" /> : <IconBuildingStore className="h-3 w-3" />}
+                {firstMile === 'pickup' ? 'Rider Pickup' : 'Drop-off'}
+                {firstMile === 'pickup' && pickupDate ? ` · ${shortDate(pickupDate)}` : ''}
+              </p>
             </div>
-          </AccordionItem>
 
-          <AccordionItem
-            open={openSection === 2}
-            onOpenChange={(o) => setOpenSection(o ? 2 : openSection)}
-            title={
-              <div className="min-w-0 flex-1 text-left">
-                <span>Review &amp; Payment</span>
-                {openSection !== 2 && <p className="mt-0.5 truncate text-xs font-normal text-gray-500">{fmtPHP(grandTotal)} total</p>}
-              </div>
-            }
-          >
-            <div className="space-y-3">
-              <Card>
-                <CardContent className="p-3">
-                  <div className="flex gap-3">
-                    <AddressRouteRail />
-                    <div className="min-w-0 flex-1">
-                      <p className="mb-0.5 text-xs font-semibold text-gray-500 uppercase tracking-wide">Pickup</p>
-                      <AddressLine address={pickupAddress} placeholder="Not set" />
-                      <div className="my-2 flex items-center gap-1.5">
-                        <Badge variant="outline" className="inline-flex items-center gap-1.5 border-blue-200 bg-blue-50 px-2 py-0.5 text-xs font-semibold text-blue-700">
-                          {firstMile === 'pickup' ? <IconTruckDelivery className="h-3 w-3" /> : <IconBuildingStore className="h-3 w-3" />}
-                          {firstMile === 'pickup' ? 'Rider Pickup' : 'Drop-off'}
-                        </Badge>
-                      </div>
-                      <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide">
-                        {recipients.length > 1 ? `${recipients.length} recipients` : 'Recipient'}
-                      </p>
-                    </div>
+            {perRecipient.map(({ recipient, totals }, i) => {
+              const effective = effectiveItemFor(recipient);
+              const pouch = getBasicPouchSize(effective.pouchSize);
+              return (
+                <div key={recipient.id} className="py-3 flex items-center justify-between gap-3">
+                  <div className="min-w-0">
+                    {multi && <p className="text-[11px] text-gray-400">Shipment {i + 1} of {recipients.length}</p>}
+                    <p className="truncate text-sm text-gray-700">
+                      {pouch.label}{effective.merchandiseCod.enabled ? ` · COD ${fmtPHP(Number(effective.merchandiseCod.amount) || 0)}` : ''}
+                    </p>
                   </div>
-                </CardContent>
-              </Card>
+                  <span className="flex-shrink-0 text-sm font-semibold text-gray-900">{fmtPHP(totals.total)}</span>
+                </div>
+              );
+            })}
 
-              {perRecipient.map(({ recipient, totals }, i) => {
-                const effective = effectiveItemFor(recipient);
-                const pouch = getBasicPouchSize(effective.pouchSize);
-                return (
-                  <Card key={recipient.id}>
-                    <CardContent className="p-3">
-                      <div className="flex items-center justify-between gap-2">
-                        <p className="text-xs font-semibold text-gray-400 uppercase tracking-wide">
-                          {recipients.length > 1 ? `Shipment ${i + 1} of ${recipients.length}` : 'Shipment'}
-                        </p>
-                        <span className="text-sm font-semibold text-gray-900">{fmtPHP(totals.total)}</span>
-                      </div>
-                      <div className="mt-1.5 flex items-center gap-3">
-                        <div className="flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-md bg-gray-50">
-                          <IconPackage className="h-5 w-5 text-gray-400" />
-                        </div>
-                        <div className="min-w-0 flex-1">
-                          <AddressLine address={recipient.address} placeholder="Recipient not set" />
-                          <p className="mt-0.5 truncate text-xs text-gray-500">{effective.itemDescription || 'No description'} · {pouch.label}</p>
-                        </div>
-                      </div>
-                    </CardContent>
-                  </Card>
-                );
-              })}
-
-              <div className="rounded-lg border border-gray-200 bg-white p-3">
-                <h3 className="mb-3 text-sm font-semibold text-gray-900">Fees &amp; payment</h3>
-                <BookingFeeBreakdownContent
-                  draft={summaryDraft}
-                  onChange={(patch) => {
-                    if (patch.feePayer !== undefined) setFeePayer(patch.feePayer);
-                    if (patch.senderPaymentMethod !== undefined) setSenderPaymentMethod(patch.senderPaymentMethod);
-                    if (patch.voucherCode !== undefined) setVoucherCode(patch.voucherCode);
-                    if (patch.voucherDiscount !== undefined) setVoucherDiscount(patch.voucherDiscount);
-                    markDirty();
-                  }}
-                  totals={summaryTotals}
-                  showFinalTotal
-                />
-              </div>
+            <div className="py-3">
+              <BookingFeeBreakdownContent
+                draft={summaryDraft}
+                onChange={(patch) => {
+                  if (patch.feePayer !== undefined) setFeePayer(patch.feePayer);
+                  if (patch.senderPaymentMethod !== undefined) setSenderPaymentMethod(patch.senderPaymentMethod);
+                  if (patch.voucherCode !== undefined) setVoucherCode(patch.voucherCode);
+                  if (patch.voucherDiscount !== undefined) setVoucherDiscount(patch.voucherDiscount);
+                  markDirty();
+                }}
+                totals={summaryTotals}
+                showFinalTotal
+              />
             </div>
-          </AccordionItem>
-        </CardContent>
-      </Card>
+          </div>
+        </SectionCard>
+      </div>
 
       {multi && picker && (
         <BookingAddressPickerDrawer
@@ -742,7 +760,7 @@ export function BookingAccordionFlow({ accountId, uxVariant, onUxVariantChange, 
       >
         <div className="mx-auto flex max-w-2xl items-center justify-between gap-3">
           <div className="min-w-0">
-            <p className="text-[11px] text-gray-500">Total shipping charge{recipients.length > 1 ? ` · ${recipients.length} shipments` : ''}</p>
+            <p className="text-[11px] text-gray-500">Total{recipients.length > 1 ? ` · ${recipients.length} shipments` : ''}</p>
             <p className="text-base font-bold text-gray-900">{fmtPHP(grandTotal)}</p>
           </div>
           <Button className="flex-shrink-0" onClick={handleConfirm} disabled={!canConfirm}>
