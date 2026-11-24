@@ -10,7 +10,6 @@ import { cn } from '../lib/utils';
 import { ConfirmDialog } from '../components/ui/Dialog';
 import { useAuth } from '../contexts/AuthContext';
 import { JourneyProvider } from '../contexts/JourneyContext';
-import { JourneyShell } from '../components/journeys/JourneyShell';
 import { useNotificationViewer } from '../data/notifications';
 import { getUnreadCount } from '../services/notificationService';
 import { BasicBottomNav } from '../components/basic-account/BasicBottomNav';
@@ -329,7 +328,11 @@ export function BasicCorporateLayout() {
         confirmIcon={<IconLogout className="w-3.5 h-3.5 mr-1.5" />}
       />
 
-      <JourneyShell />
+      {/* Floating "UX Journeys" pill is Business+-only (`RootLayout` still
+          renders `JourneyShell`) — hidden for the entire Basic account per
+          explicit product instruction. `JourneyProvider` stays, since
+          `useJourney()` is still called unconditionally by shared routes
+          (e.g. `AdminRoute`) mounted under this shell. */}
     </div>
     </JourneyProvider>
   );

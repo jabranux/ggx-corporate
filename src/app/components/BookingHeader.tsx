@@ -10,6 +10,7 @@
  * Sticky within the scrolling page body (not fixed to the viewport) so it
  * stays visible while scrolling a step's content without covering it.
  */
+import type { ReactNode } from 'react';
 import { IconChevronLeft } from '@tabler/icons-react';
 import { cn } from '../lib/utils';
 
@@ -18,9 +19,11 @@ export const BOOKING_STEP_LABELS = ['Pickup & Delivery', 'Item Details', 'Review
 export interface BookingHeaderProps {
   step: number;
   onBack: () => void;
+  /** Optional control rendered at the header's top-right (e.g. the Wizard/Accordion UX switcher) — purely additive, no layout change when omitted. */
+  rightSlot?: ReactNode;
 }
 
-export function BookingHeader({ step, onBack }: BookingHeaderProps) {
+export function BookingHeader({ step, onBack, rightSlot }: BookingHeaderProps) {
   return (
     <div className="sticky top-0 z-30 -mx-4 -mt-4 bg-white/95 backdrop-blur-sm border-b border-gray-200 px-4 pt-2 pb-2.5">
       <div className="flex items-center gap-2">
@@ -32,7 +35,8 @@ export function BookingHeader({ step, onBack }: BookingHeaderProps) {
         >
           <IconChevronLeft className="h-5 w-5" />
         </button>
-        <h1 className="text-[15px] font-semibold text-gray-900">Book a delivery</h1>
+        <h1 className="flex-1 text-[15px] font-semibold text-gray-900">Book a delivery</h1>
+        {rightSlot}
       </div>
       <div>
         <div className="mt-2 flex gap-1" role="progressbar" aria-valuemin={1} aria-valuemax={BOOKING_STEP_LABELS.length} aria-valuenow={step + 1}>

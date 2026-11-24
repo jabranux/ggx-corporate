@@ -69,6 +69,8 @@ import { BookingPaymentSummaryBar } from '../../components/BookingPaymentSummary
 import { BookingReviewSummary } from '../../components/BookingReviewSummary';
 import { BookingFeeBreakdownContent } from '../../components/BookingFeeBreakdownContent';
 import { BookingHeader } from '../../components/BookingHeader';
+import { BookingUxSwitcher, type BookingUxVariant } from '../../components/BookingUxSwitcher';
+import { BookingAccordionFlow } from '../../components/BookingAccordionFlow';
 
 const REVIEW_STEP = 2;
 
@@ -80,6 +82,14 @@ export function BookDelivery() {
   const [step, setStep] = useState(0);
   const [editReturn, setEditReturn] = useState(false);
   const [showExitConfirm, setShowExitConfirm] = useState(false);
+
+  // Temporary prototyping switch comparing this Wizard flow against the
+  // experimental Accordion variant (`BookingAccordionFlow.tsx`) — never
+  // persisted, always starts on Wizard (see `BookingUxSwitcher.tsx`'s own
+  // header comment). Deliberately NOT part of `draft`/`useBookingDraft`: the
+  // two variants keep entirely separate local state so neither can leak
+  // into or break the other.
+  const [uxVariant, setUxVariant] = useState<BookingUxVariant>('wizard');
 
   // Only blocks navigation once the user has actually changed something —
   // opening the page with prefilled defaults must never trap Back/sidebar
@@ -438,11 +448,31 @@ export function BookDelivery() {
         variant="destructive"
       />
 
+      {uxVariant === 'accordion' ? (
+        // Temporary prototyping variant — entirely separate single-page UI
+        // with its own local state, including its own copy of the UX
+        // switcher in its header (see `BookingAccordionFlow.tsx`'s own
+        // docblock for why this isn't the Wizard tree below with a flag).
+        <BookingAccordionFlow
+          accountId={accountId}
+          uxVariant={uxVariant}
+          onUxVariantChange={setUxVariant}
+          onDirty={() => { touchedRef.current = true; }}
+          onConfirmed={() => { touchedRef.current = false; }}
+        />
+      ) : (
+      <>
       {/* `BookingHeader`'s sticky compact bar + step progress is mobile-only
           (see its own docblock). Desktop's title/subtitle render below,
           inside the same max-width container as the booking content — see
           that block's own comment. */}
-      {!isDesktop && <BookingHeader step={step} onBack={handleHeaderBack} />}
+      {!isDesktop && (
+        <BookingHeader
+          step={step}
+          onBack={handleHeaderBack}
+          rightSlot={<BookingUxSwitcher value={uxVariant} onChange={setUxVariant} />}
+        />
+      )}
 
       {/* Switched on the same `isDesktop` JS flag the header's Back/Exit
           action already uses (not a CSS `lg:`/`hidden` pair) — deliberately
@@ -474,9 +504,12 @@ export function BookDelivery() {
         // Upload, Support Tickets, Address Book: `text-3xl font-bold` title
         // + `text-gray-600 mt-1` subtitle in one `<div>`, no back control).
         <div className="mx-auto w-full max-w-[1280px]">
-          <div className="mb-6">
-            <h1 className="text-3xl font-bold text-gray-900">Book a delivery</h1>
-            <p className="text-gray-600 mt-1">Enter your delivery details to book a shipment.</p>
+          <div className="mb-6 flex items-start justify-between gap-3">
+            <div>
+              <h1 className="text-3xl font-bold text-gray-900">Book a delivery</h1>
+              <p className="text-gray-600 mt-1">Enter your delivery details to book a shipment.</p>
+            </div>
+            <BookingUxSwitcher value={uxVariant} onChange={setUxVariant} className="flex-shrink-0 mt-1" />
           </div>
           <div className="grid grid-cols-[7fr_3fr] gap-6 items-start">
             <div className="space-y-4 min-w-0">
@@ -563,6 +596,8 @@ export function BookDelivery() {
             </div>
           )}
         </>
+      )}
+      </>
       )}
     </div>
   );
