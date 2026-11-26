@@ -51,7 +51,8 @@
  */
 const MULTI_RECIPIENT_ENABLED = false;
 import { useEffect, useMemo, useState, type ReactNode } from 'react';
-import { IconPlus, IconTrash, IconCircleCheckFilled, IconTruckDelivery, IconBuildingStore, IconChevronLeft, IconChevronDown, IconCheck, IconPencil } from '@tabler/icons-react';
+import { useNavigate } from 'react-router';
+import { IconPlus, IconTrash, IconTruckDelivery, IconBuildingStore, IconChevronLeft, IconChevronDown, IconCheck, IconPencil } from '@tabler/icons-react';
 import { Card, CardContent } from './ui/Card';
 import { Button } from './ui/Button';
 import { Badge } from './ui/Badge';
@@ -65,7 +66,7 @@ import { BookingFeeBreakdownContent } from './BookingFeeBreakdownContent';
 import { BookingAddressPickerDrawer } from './BookingAddressPickerDrawer';
 import { labelColors, getDisplayLabel } from './AddressDisplayCard';
 import { getDefaultBookingAddresses } from '../services/basicBookingPreferencesService';
-import { recordBookingConfirmation, type BasicBookingHistoryEntry } from '../lib/basicBookingHistory';
+import { recordBookingConfirmation } from '../lib/basicBookingHistory';
 import { isPickupDateSelectable, estimateDeliveryDateRange } from '../lib/basicPickupScheduling';
 import { classifyRegion } from '../lib/checkoutEstimates';
 import { computeBookingTotals } from '../lib/basicBookingTotals';
@@ -250,6 +251,7 @@ export interface BookingAccordionFlowProps {
 }
 
 export function BookingAccordionFlow({ accountId, uxVariant, onUxVariantChange, onBack, onDirty, onConfirmed }: BookingAccordionFlowProps) {
+  const navigate = useNavigate();
   const [openSection, setOpenSection] = useState<0 | 1 | 2>(0);
   // Brief, self-dismissing hint shown when a restricted section header is
   // tapped (e.g. "Complete Pickup & Delivery first.") — never a permanent
@@ -280,8 +282,6 @@ export function BookingAccordionFlow({ accountId, uxVariant, onUxVariantChange, 
   const [pickupFormOpen, setPickupFormOpen] = useState(false);
   // Multi-mode picker drawer.
   const [picker, setPicker] = useState<{ kind: 'pickup' | 'recipient'; recipientId?: string } | null>(null);
-
-  const [confirmedEntries, setConfirmedEntries] = useState<BasicBookingHistoryEntry[] | null>(null);
 
   const multi = recipients.length > 1;
   const addressFormOpen = multi ? Boolean(picker) : (recipientFormOpen || pickupFormOpen);
@@ -508,29 +508,18 @@ export function BookingAccordionFlow({ accountId, uxVariant, onUxVariantChange, 
     codAmount: sumCod,
   };
 
+  // Navigates to the exact same Booking Confirmation screen the Wizard uses
+  // (`BookDeliverySuccess.tsx`) rather than rendering its own inline success
+  // view, so the two flows end in an identical place (2026-11-27 request).
+  // Only the first recorded entry is shown — multi-recipient confirmation is
+  // currently unreachable anyway (`MULTI_RECIPIENT_ENABLED`); re-enabling it
+  // would need that screen's own multi-shipment handling, not a local one here.
   const handleConfirm = () => {
     if (!canConfirm) return;
     const entries = perRecipient.map(({ recipient, draft, totals }) =>
       recordBookingConfirmation(accountId, draft, totals.total, totals.codAmount, deliveryEstimateLabelFor(recipient.address)));
-    setConfirmedEntries(entries);
     onConfirmed();
-  };
-
-  const resetAll = () => {
-    setConfirmedEntries(null);
-    setOpenSection(0);
-    setPickupAddress(null);
-    setFirstMile('pickup');
-    setServiceType('standard');
-    setPickupDate(null);
-    setRecipients([{ id: newRecipientId(), address: null, itemOverride: null }]);
-    setSharedItemDetails(EMPTY_ITEM_FIELDS);
-    setCustomizingId(null);
-    setFeePayer('sender');
-    setSenderPaymentMethod('cash_pickup');
-    setVoucherCode('');
-    setVoucherDiscount(0);
-    getDefaultBookingAddresses(accountId).then(({ pickup }) => { if (pickup) setPickupAddress(pickup); });
+    navigate('/dashboard/book-delivery/success', { state: { bookingId: entries[0].id } });
   };
 
   // ---- Compact collapsed-section summaries ("A → B · date", "pouch · COD status", "total") ----
@@ -567,35 +556,6 @@ export function BookingAccordionFlow({ accountId, uxVariant, onUxVariantChange, 
       onDirty={markDirty}
     />
   );
-
-  if (confirmedEntries) {
-    return (
-      <div className="mx-auto w-full max-w-2xl">
-        <Card>
-          <CardContent className="p-5 text-center">
-            <IconCircleCheckFilled className="mx-auto mb-2 h-10 w-10 text-green-500" />
-            <h2 className="text-lg font-semibold text-gray-900">
-              {confirmedEntries.length === 1 ? 'Booking confirmed' : `${confirmedEntries.length} shipments confirmed`}
-            </h2>
-            <p className="mt-1 text-sm text-gray-500">Sample tracking numbers for this demo booking:</p>
-            <div className="mt-3 space-y-2 text-left">
-              {confirmedEntries.map((e) => (
-                <div key={e.id} className="flex items-center justify-between rounded-lg border border-gray-200 px-3 py-2">
-                  <div className="min-w-0">
-                    <p className="text-sm font-medium text-gray-900 truncate">{e.recipientName ?? 'Recipient'}</p>
-                    <p className="text-xs text-gray-500">{e.trackingNumber}</p>
-                  </div>
-                  <span className="flex-shrink-0 text-sm font-semibold text-gray-900">{fmtPHP(e.total)}</span>
-                </div>
-              ))}
-            </div>
-            <Button className="mt-4 w-full" onClick={resetAll}>Book another delivery</Button>
-            <Button className="mt-2 w-full" variant="outline" onClick={onBack}>Back to dashboard</Button>
-          </CardContent>
-        </Card>
-      </div>
-    );
-  }
 
   return (
     <div className="mx-auto w-full max-w-2xl pb-28">
