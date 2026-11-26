@@ -56,7 +56,7 @@ import { Card, CardContent } from './ui/Card';
 import { Button } from './ui/Button';
 import { Badge } from './ui/Badge';
 import { BookingUxSwitcher, type BookingUxVariant } from './BookingUxSwitcher';
-import { bookingSectionTone, bookingSectionToneCardClassName, type BookingSectionTone } from '../lib/bookingSectionTone';
+import { bookingSectionToneCardClassName, type BookingSectionTone } from '../lib/bookingSectionTone';
 import { cn } from '../lib/utils';
 import { BookingAddressSection, isCompleteAddress } from './BookingAddressSection';
 import { BookingDeliverySection } from './BookingDeliverySection';
@@ -247,6 +247,15 @@ export interface BookingAccordionFlowProps {
 
 export function BookingAccordionFlow({ accountId, uxVariant, onUxVariantChange, onBack, onDirty, onConfirmed }: BookingAccordionFlowProps) {
   const [openSection, setOpenSection] = useState<0 | 1 | 2>(0);
+  // Brief, self-dismissing hint shown when a restricted section header is
+  // tapped (e.g. "Complete Pickup & Delivery first.") — never a permanent
+  // badge/icon, see `requestOpenSection` below.
+  const [restrictedNotice, setRestrictedNotice] = useState<string | null>(null);
+  useEffect(() => {
+    if (!restrictedNotice) return;
+    const timer = setTimeout(() => setRestrictedNotice(null), 2500);
+    return () => clearTimeout(timer);
+  }, [restrictedNotice]);
 
   const [pickupAddress, setPickupAddress] = useState<Address | null>(null);
   const [firstMile, setFirstMile] = useState<FirstMile>('pickup');
@@ -366,6 +375,30 @@ export function BookingAccordionFlow({ accountId, uxVariant, onUxVariantChange, 
   const sectionValid: [boolean, boolean, boolean] = [section0Valid, section1Valid, canConfirm];
   const sectionTone = (index: 0 | 1 | 2): BookingSectionTone =>
     openSection === index ? 'current' : (sectionValid[index] ? 'completed' : 'pending');
+
+  // ---- Sequential progression (2026-11-26 follow-up) ----
+  // A section can only be opened once every section strictly before it is
+  // valid — this alone covers every required case: section 0 has no
+  // predecessor so it's always reopenable; reopening/editing a later
+  // completed section stays allowed as long as everything before it still
+  // holds; and breaking an earlier section while editing it immediately
+  // re-restricts every section after it again (nothing here depends on
+  // "visited" state, only live validity).
+  const sectionTitle: [string, string, string] = ['Pickup & Delivery', 'Item Details', 'Review & Payment'];
+  const firstInvalidBefore = (index: 0 | 1 | 2): number => {
+    for (let i = 0; i < index; i++) {
+      if (!sectionValid[i]) return i;
+    }
+    return -1;
+  };
+  const requestOpenSection = (index: 0 | 1 | 2) => {
+    const blocker = firstInvalidBefore(index);
+    if (blocker === -1) {
+      setOpenSection(index);
+      return;
+    }
+    setRestrictedNotice(`Complete ${sectionTitle[blocker]} first.`);
+  };
 
   // Single source of truth for "why can't I confirm yet" — shown ONLY in the
   // sticky bottom bar (not repeated under each section's own Continue button
@@ -574,7 +607,7 @@ export function BookingAccordionFlow({ accountId, uxVariant, onUxVariantChange, 
       <div className="space-y-3">
         <SectionCard
           open={openSection === 0}
-          onOpenChange={(o) => setOpenSection(o ? 0 : openSection)}
+          onOpenChange={(o) => { if (o) requestOpenSection(0); }}
           title="Pickup & Delivery"
           summary={pickupDeliverySummary}
           tone={sectionTone(0)}
@@ -670,7 +703,7 @@ export function BookingAccordionFlow({ accountId, uxVariant, onUxVariantChange, 
               onPickupDateChange={(v) => { setPickupDate(v); markDirty(); }}
             />
 
-            <Button variant="outline" className="w-full text-gray-900" disabled={!section0Valid} onClick={() => setOpenSection(1)}>
+            <Button variant="outline" className="w-full text-gray-900" disabled={!section0Valid} onClick={() => requestOpenSection(1)}>
               Continue
             </Button>
           </div>
@@ -678,7 +711,7 @@ export function BookingAccordionFlow({ accountId, uxVariant, onUxVariantChange, 
 
         <SectionCard
           open={openSection === 1}
-          onOpenChange={(o) => setOpenSection(o ? 1 : openSection)}
+          onOpenChange={(o) => { if (o) requestOpenSection(1); }}
           title="Item Details"
           summary={itemDetailsSummary}
           tone={sectionTone(1)}
@@ -779,7 +812,7 @@ export function BookingAccordionFlow({ accountId, uxVariant, onUxVariantChange, 
               </>
             )}
 
-            <Button variant="outline" className="w-full text-gray-900" disabled={!section1Valid} onClick={() => setOpenSection(2)}>
+            <Button variant="outline" className="w-full text-gray-900" disabled={!section1Valid} onClick={() => requestOpenSection(2)}>
               Continue
             </Button>
           </div>
@@ -787,7 +820,7 @@ export function BookingAccordionFlow({ accountId, uxVariant, onUxVariantChange, 
 
         <SectionCard
           open={openSection === 2}
-          onOpenChange={(o) => setOpenSection(o ? 2 : openSection)}
+          onOpenChange={(o) => { if (o) requestOpenSection(2); }}
           title="Review & Payment"
           summary={`${fmtPHP(grandTotal)} total`}
           tone={sectionTone(2)}
@@ -857,6 +890,17 @@ export function BookingAccordionFlow({ accountId, uxVariant, onUxVariantChange, 
             markDirty();
           }}
         />
+      )}
+
+      {/* Brief, self-dismissing hint for a blocked section tap (see
+          `requestOpenSection`) — never a persistent badge/icon, just a toast
+          that clears itself after a couple of seconds. */}
+      {restrictedNotice && (
+        <div className="fixed inset-x-0 bottom-20 z-50 flex justify-center px-4" role="status" aria-live="polite">
+          <div className="rounded-full bg-gray-900 px-4 py-2 text-xs font-medium text-white shadow-lg">
+            {restrictedNotice}
+          </div>
+        </div>
       )}
 
       <div

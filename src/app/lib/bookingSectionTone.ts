@@ -1,9 +1,9 @@
 /**
- * Shared state/color mapping for the Basic single-booking flow's "current /
- * completed / pending" section treatment (mobile Accordion step indicators
- * + desktop section cards) — one source of truth so the same blue/green/grey
- * palette reads identically on both layouts, per the 2026-11-26 visual
- * refinement request.
+ * Shared color mapping for the Basic single-booking flow's mobile Accordion
+ * "current / completed / pending" section treatment (step indicators + card
+ * border/background) — see `BookingAccordionFlow.tsx`. Desktop reverted to
+ * its original neutral cards on 2026-11-26 (product request), so this is
+ * mobile-only now.
  */
 export type BookingSectionTone = 'current' | 'completed' | 'pending';
 
@@ -19,11 +19,4 @@ export function bookingSectionToneCardClassName(tone?: BookingSectionTone): stri
     default:
       return '';
   }
-}
-
-/** First-incomplete-is-current progression shared by both layouts: earlier valid sections read as completed, the first invalid one is current, anything after it is pending. */
-export function bookingSectionTone(index: number, firstIncompleteIndex: number): BookingSectionTone {
-  if (firstIncompleteIndex === -1 || index < firstIncompleteIndex) return 'completed';
-  if (index === firstIncompleteIndex) return 'current';
-  return 'pending';
 }

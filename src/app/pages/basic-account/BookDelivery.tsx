@@ -71,7 +71,6 @@ import { BookingFeeBreakdownContent } from '../../components/BookingFeeBreakdown
 import { BookingHeader } from '../../components/BookingHeader';
 import { BookingUxSwitcher, type BookingUxVariant } from '../../components/BookingUxSwitcher';
 import { BookingAccordionFlow } from '../../components/BookingAccordionFlow';
-import { bookingSectionTone } from '../../lib/bookingSectionTone';
 
 const REVIEW_STEP = 2;
 
@@ -257,20 +256,6 @@ export function BookDelivery() {
       : 'Enter a valid Cash on Delivery amount (0 or greater).',
   ];
 
-  // Desktop-only current/completed/pending coloring for the three continuous
-  // sections (Pickup & Delivery — the address + delivery cards together —
-  // then Item Details, then the sticky Review & Payment panel): same
-  // first-incomplete-is-current progression as the mobile Accordion's step
-  // indicators, just applied to always-visible cards instead of collapsed
-  // ones — see `bookingSectionTone.ts`.
-  const desktopFirstIncomplete = [stepValid[0], stepValid[1], canConfirm].findIndex((v) => !v);
-  const addressDeliveryTone = bookingSectionTone(0, desktopFirstIncomplete);
-  const itemTone = bookingSectionTone(1, desktopFirstIncomplete);
-  // Review & Payment is never shown as "completed" while this page is still
-  // up (confirming navigates away entirely) — once reachable, it's "current"
-  // (ready to confirm), same as the Accordion's own Review section.
-  const reviewTone = canConfirm ? 'current' : bookingSectionTone(2, desktopFirstIncomplete);
-
   const handleConfirm = () => {
     // Recompute pickup-date eligibility fresh (using the real current time)
     // rather than trusting `canConfirm`/`pickupDateStale` as captured by
@@ -398,10 +383,6 @@ export function BookDelivery() {
       onRecipientFormOpenChange={setRecipientFormOpen}
       onPickupFormOpenChange={setPickupFormOpen}
       onDirty={() => { touchedRef.current = true; }}
-      // Desktop-only section coloring (see the `bookingSectionTone` block
-      // above) — `undefined` on mobile, where the Wizard's own cards must
-      // stay exactly as before.
-      tone={isDesktop ? addressDeliveryTone : undefined}
     />
   );
 
@@ -415,7 +396,6 @@ export function BookDelivery() {
       onServiceTypeChange={(v) => updateDraft({ serviceType: v })}
       pickupDate={draft.pickupDate}
       onPickupDateChange={(v) => updateDraft({ pickupDate: v })}
-      tone={isDesktop ? addressDeliveryTone : undefined}
     />
   );
 
@@ -433,7 +413,6 @@ export function BookDelivery() {
       onCodChange={(enabled, amount) => updateDraft({ merchandiseCod: { enabled, amount } })}
       itemProtectionTier={draft.itemProtectionTier}
       onItemProtectionTierChange={(v) => updateDraft({ itemProtectionTier: v })}
-      tone={isDesktop ? itemTone : undefined}
     />
   );
 
@@ -567,7 +546,6 @@ export function BookDelivery() {
                 confirmDisabled={!canConfirm}
                 blockingReason={confirmBlockReason}
                 deliveryEstimateLabel={deliveryEstimateLabel}
-                tone={reviewTone}
               />
             </div>
           </div>
