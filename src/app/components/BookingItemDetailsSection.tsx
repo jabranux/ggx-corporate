@@ -43,6 +43,7 @@ import { BASIC_POUCH_SIZES, type BasicPouchSizeKey } from '../lib/basicPouchSize
 import { BASIC_ITEM_CATEGORIES, type BasicItemCategory } from '../lib/basicItemCategories';
 import type { ItemProtectionTier, FirstMile } from '../lib/basicBookingDraft';
 import { cn } from '../lib/utils';
+import { bookingSectionToneCardClassName, type BookingSectionTone } from '../lib/bookingSectionTone';
 
 export interface BookingItemDetailsSectionProps {
   /** Gates the packaging-instructions note below — a rider only brings a pouch/waybill when there's a rider pickup to bring it on. */
@@ -63,6 +64,8 @@ export interface BookingItemDetailsSectionProps {
   onCategoryChange?: (v: BasicItemCategory) => void;
   /** Renders without this component's own `Card` — the caller's own container already serves that role. */
   bare?: boolean;
+  /** Desktop-only current/completed/pending section coloring (see `bookingSectionTone.ts`) — omit to keep the plain default card; no-op when `bare`. */
+  tone?: BookingSectionTone;
 }
 
 function fmtPHP(n: number): string {
@@ -85,6 +88,7 @@ export function BookingItemDetailsSection({
   category,
   onCategoryChange,
   bare,
+  tone,
 }: BookingItemDetailsSectionProps) {
   const useCategoryChips = category !== undefined;
   const [descriptionTouched, setDescriptionTouched] = useState(false);
@@ -292,7 +296,7 @@ export function BookingItemDetailsSection({
 
   if (bare) return <div className="space-y-3">{body}</div>;
   return (
-    <Card>
+    <Card className={bookingSectionToneCardClassName(tone)}>
       <CardContent className="p-4 space-y-3">{body}</CardContent>
     </Card>
   );

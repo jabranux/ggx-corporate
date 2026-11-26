@@ -36,6 +36,7 @@ import { labelColors, getDisplayLabel } from './AddressDisplayCard';
 import { LocationCascadeFields } from './LocationCascadeFields';
 import type { Address } from './AddressBook';
 import { listAddresses, createAddress } from '../services/addressBookService';
+import { bookingSectionToneCardClassName, type BookingSectionTone } from '../lib/bookingSectionTone';
 
 export interface BookingAddressSectionProps {
   accountId: string;
@@ -59,6 +60,8 @@ export interface BookingAddressSectionProps {
    * not only once a save actually commits.
    */
   onDirty?: () => void;
+  /** Desktop-only current/completed/pending section coloring (see `bookingSectionTone.ts`) — omit to keep the plain default card. */
+  tone?: BookingSectionTone;
 }
 
 const EMPTY_NEW_ADDRESS = { name: '', mobileNumber: '', province: '', city: '', barangay: '', otherDetails: '' };
@@ -89,6 +92,7 @@ export function BookingAddressSection({
   onRecipientFormOpenChange,
   onPickupFormOpenChange,
   onDirty,
+  tone,
 }: BookingAddressSectionProps) {
   const [addresses, setAddresses] = useState<Address[]>([]);
 
@@ -259,7 +263,7 @@ export function BookingAddressSection({
   const recentAddresses = addresses.slice(0, 3);
 
   return (
-    <Card>
+    <Card className={bookingSectionToneCardClassName(tone)}>
       <CardContent className="p-4">
         <div className="flex gap-3">
           <AddressRouteRail />

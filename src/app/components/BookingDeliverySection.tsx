@@ -19,6 +19,7 @@ import type { Address } from './AddressBook';
 import type { FirstMile } from '../lib/basicBookingDraft';
 import type { DeliveryServiceType } from '../services/transactionService';
 import { cn } from '../lib/utils';
+import { bookingSectionToneCardClassName, type BookingSectionTone } from '../lib/bookingSectionTone';
 
 export interface BookingDeliverySectionProps {
   accountId: string;
@@ -29,6 +30,8 @@ export interface BookingDeliverySectionProps {
   onServiceTypeChange: (v: DeliveryServiceType) => void;
   pickupDate: string | null;
   onPickupDateChange: (v: string) => void;
+  /** Desktop-only current/completed/pending section coloring (see `bookingSectionTone.ts`) — omit to keep the plain default card. */
+  tone?: BookingSectionTone;
 }
 
 function toIsoDate(date: Date): string {
@@ -47,6 +50,7 @@ export function BookingDeliverySection({
   onServiceTypeChange,
   pickupDate,
   onPickupDateChange,
+  tone,
 }: BookingDeliverySectionProps) {
   const [metroOnly, setMetroOnly] = useState(false);
   const [note, setNote] = useState<string | undefined>(undefined);
@@ -102,7 +106,7 @@ export function BookingDeliverySection({
   }, [serviceType, pickupDate, region]);
 
   return (
-    <Card>
+    <Card className={bookingSectionToneCardClassName(tone)}>
       <CardContent className="p-4 space-y-3">
         <div className="grid grid-cols-2 gap-2">
           {([

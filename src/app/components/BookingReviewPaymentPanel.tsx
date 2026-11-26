@@ -16,6 +16,7 @@ import { BookingFeeBreakdownContent } from './BookingFeeBreakdownContent';
 import { BookingScheduleSummary } from './BookingScheduleSummary';
 import { computeBookingTotals } from '../lib/basicBookingTotals';
 import type { BookingDraft } from '../lib/basicBookingDraft';
+import { bookingSectionToneCardClassName, type BookingSectionTone } from '../lib/bookingSectionTone';
 
 function fmtPHP(n: number): string {
   return `₱${n.toLocaleString('en-PH', { minimumFractionDigits: 2 })}`;
@@ -30,13 +31,15 @@ export interface BookingReviewPaymentPanelProps {
   blockingReason?: string;
   /** Already-computed delivery estimate, shared verbatim with the Delivery section and the mobile Review step. */
   deliveryEstimateLabel?: string;
+  /** Desktop-only current/completed/pending section coloring (see `bookingSectionTone.ts`) — omit to keep the plain default card. */
+  tone?: BookingSectionTone;
 }
 
-export function BookingReviewPaymentPanel({ draft, onChange, onConfirm, confirmDisabled, blockingReason, deliveryEstimateLabel }: BookingReviewPaymentPanelProps) {
+export function BookingReviewPaymentPanel({ draft, onChange, onConfirm, confirmDisabled, blockingReason, deliveryEstimateLabel, tone }: BookingReviewPaymentPanelProps) {
   const totals = computeBookingTotals(draft);
 
   return (
-    <Card>
+    <Card className={bookingSectionToneCardClassName(tone)}>
       <CardContent className="p-4 space-y-3">
         <h2 className="text-base font-semibold text-gray-900">Review &amp; Payment</h2>
 

@@ -51,12 +51,13 @@
  */
 const MULTI_RECIPIENT_ENABLED = false;
 import { useEffect, useMemo, useState, type ReactNode } from 'react';
-import { IconPlus, IconTrash, IconCircleCheckFilled, IconTruckDelivery, IconBuildingStore, IconChevronLeft } from '@tabler/icons-react';
+import { IconPlus, IconTrash, IconCircleCheckFilled, IconTruckDelivery, IconBuildingStore, IconChevronLeft, IconChevronDown, IconCheck } from '@tabler/icons-react';
 import { Card, CardContent } from './ui/Card';
 import { Button } from './ui/Button';
 import { Badge } from './ui/Badge';
-import { AccordionItem } from './ui/Accordion';
 import { BookingUxSwitcher, type BookingUxVariant } from './BookingUxSwitcher';
+import { bookingSectionTone, bookingSectionToneCardClassName, type BookingSectionTone } from '../lib/bookingSectionTone';
+import { cn } from '../lib/utils';
 import { BookingAddressSection, isCompleteAddress } from './BookingAddressSection';
 import { BookingDeliverySection } from './BookingDeliverySection';
 import { BookingItemDetailsSection } from './BookingItemDetailsSection';
@@ -151,12 +152,48 @@ function AddressLine({ address, placeholder }: { address: Address | null; placeh
   );
 }
 
-/** One collapsible section, its own `Card` — see this file's module docblock for why. */
+/**
+ * Small circular step indicator (20px) before each section title — solid
+ * blue + step number while current, solid green + checkmark once completed,
+ * grey-outlined step number while pending. See `bookingSectionTone.ts`.
+ */
+function StepIndicator({ tone, step }: { tone: BookingSectionTone; step: number }) {
+  if (tone === 'completed') {
+    return (
+      <span className="flex h-5 w-5 flex-shrink-0 items-center justify-center rounded-full bg-green-500 text-white">
+        <IconCheck className="h-3.5 w-3.5" strokeWidth={3} />
+      </span>
+    );
+  }
+  if (tone === 'current') {
+    return (
+      <span className="flex h-5 w-5 flex-shrink-0 items-center justify-center rounded-full bg-blue-600 text-[11px] font-semibold text-white">
+        {step}
+      </span>
+    );
+  }
+  return (
+    <span className="flex h-5 w-5 flex-shrink-0 items-center justify-center rounded-full border border-gray-300 text-[11px] font-semibold text-gray-400">
+      {step}
+    </span>
+  );
+}
+
+/**
+ * One collapsible section, its own `Card` — see this file's module docblock
+ * for why. Reimplemented as a plain toggle header (rather than the shared
+ * `AccordionItem`) so the header band itself can carry the current/
+ * completed/pending tint full-bleed to the card's edges while the expanded
+ * content underneath stays plain white — see the 2026-11-26 visual
+ * refinement request this was built for.
+ */
 function SectionCard({
   open,
   onOpenChange,
   title,
   summary,
+  tone,
+  step,
   children,
 }: {
   open: boolean;
@@ -164,25 +201,34 @@ function SectionCard({
   title: string;
   /** Short collapsed-state summary, e.g. "Jamie Cruz → Maria Santos · Nov 26" — omitted while expanded. */
   summary: string;
+  tone: BookingSectionTone;
+  /** 1-based step number shown inside the indicator while not completed. */
+  step: number;
   children: ReactNode;
 }) {
   return (
-    <Card>
-      <CardContent className="px-4 py-0">
-        <AccordionItem
-          className="border-b-0"
-          open={open}
-          onOpenChange={onOpenChange}
-          title={
-            <div className="min-w-0 flex-1 text-left">
-              <span>{title}</span>
-              {!open && <p className="mt-0.5 truncate text-xs font-normal text-gray-500">{summary}</p>}
-            </div>
-          }
-        >
+    <Card className={bookingSectionToneCardClassName(tone)}>
+      <button
+        type="button"
+        aria-expanded={open}
+        onClick={() => onOpenChange(!open)}
+        className={cn(
+          'flex w-full items-center gap-3 rounded-t-xl px-4 py-3 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary',
+          !open && 'rounded-b-xl',
+        )}
+      >
+        <StepIndicator tone={tone} step={step} />
+        <div className="min-w-0 flex-1">
+          <span className="text-sm font-medium text-gray-900">{title}</span>
+          {!open && <p className="mt-0.5 truncate text-xs font-normal text-gray-500">{summary}</p>}
+        </div>
+        <IconChevronDown className={cn('h-4 w-4 flex-shrink-0 text-gray-500 transition-transform', open && 'rotate-180')} />
+      </button>
+      {open && (
+        <CardContent className="rounded-b-xl bg-white px-4 pb-4 pt-0">
           {children}
-        </AccordionItem>
-      </CardContent>
+        </CardContent>
+      )}
     </Card>
   );
 }
@@ -309,6 +355,18 @@ export function BookingAccordionFlow({ accountId, uxVariant, onUxVariantChange, 
   const section1Valid = recipients.every((r) => itemFieldsValid(effectiveItemFor(r)));
 
   const canConfirm = section0Valid && section1Valid;
+
+  // ---- Section tone (current/completed/pending) for the step indicators ----
+  // The open section is always "current" regardless of its own validity
+  // (including a completed section reopened for editing — it reverts to the
+  // focused/blue treatment while expanded, per the 2026-11-26 request); a
+  // closed section is "completed" once genuinely valid, else "pending".
+  // Never derived from "has this section been visited" — only real form
+  // validity.
+  const sectionValid: [boolean, boolean, boolean] = [section0Valid, section1Valid, canConfirm];
+  const sectionTone = (index: 0 | 1 | 2): BookingSectionTone =>
+    openSection === index ? 'current' : (sectionValid[index] ? 'completed' : 'pending');
+
   // Single source of truth for "why can't I confirm yet" — shown ONLY in the
   // sticky bottom bar (not repeated under each section's own Continue button
   // too, which is what the 2026-11-24 copy pass asked to stop doing).
@@ -519,6 +577,8 @@ export function BookingAccordionFlow({ accountId, uxVariant, onUxVariantChange, 
           onOpenChange={(o) => setOpenSection(o ? 0 : openSection)}
           title="Pickup & Delivery"
           summary={pickupDeliverySummary}
+          tone={sectionTone(0)}
+          step={1}
         >
           <div className="space-y-3">
             {!multi ? (
@@ -610,7 +670,7 @@ export function BookingAccordionFlow({ accountId, uxVariant, onUxVariantChange, 
               onPickupDateChange={(v) => { setPickupDate(v); markDirty(); }}
             />
 
-            <Button className="w-full sm:w-auto" disabled={!section0Valid} onClick={() => setOpenSection(1)}>
+            <Button variant="outline" className="w-full text-gray-900" disabled={!section0Valid} onClick={() => setOpenSection(1)}>
               Continue
             </Button>
           </div>
@@ -621,6 +681,8 @@ export function BookingAccordionFlow({ accountId, uxVariant, onUxVariantChange, 
           onOpenChange={(o) => setOpenSection(o ? 1 : openSection)}
           title="Item Details"
           summary={itemDetailsSummary}
+          tone={sectionTone(1)}
+          step={2}
         >
           <div className="space-y-3">
             {!multi ? (
@@ -717,7 +779,7 @@ export function BookingAccordionFlow({ accountId, uxVariant, onUxVariantChange, 
               </>
             )}
 
-            <Button className="w-full sm:w-auto" disabled={!section1Valid} onClick={() => setOpenSection(2)}>
+            <Button variant="outline" className="w-full text-gray-900" disabled={!section1Valid} onClick={() => setOpenSection(2)}>
               Continue
             </Button>
           </div>
@@ -728,6 +790,8 @@ export function BookingAccordionFlow({ accountId, uxVariant, onUxVariantChange, 
           onOpenChange={(o) => setOpenSection(o ? 2 : openSection)}
           title="Review & Payment"
           summary={`${fmtPHP(grandTotal)} total`}
+          tone={sectionTone(2)}
+          step={3}
         >
           {/* Plain divided rows, not stacked cards-in-a-card — see this file's
               2026-11-24 density-pass note in the module docblock. */}
