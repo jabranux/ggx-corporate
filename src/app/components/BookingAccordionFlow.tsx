@@ -51,7 +51,7 @@
  */
 const MULTI_RECIPIENT_ENABLED = false;
 import { useEffect, useMemo, useState, type ReactNode } from 'react';
-import { IconPlus, IconTrash, IconCircleCheckFilled, IconTruckDelivery, IconBuildingStore, IconChevronLeft, IconChevronDown, IconCheck } from '@tabler/icons-react';
+import { IconPlus, IconTrash, IconCircleCheckFilled, IconTruckDelivery, IconBuildingStore, IconChevronLeft, IconChevronDown, IconCheck, IconPencil } from '@tabler/icons-react';
 import { Card, CardContent } from './ui/Card';
 import { Button } from './ui/Button';
 import { Badge } from './ui/Badge';
@@ -222,7 +222,11 @@ function SectionCard({
           <span className="text-sm font-medium text-gray-900">{title}</span>
           {!open && <p className="mt-0.5 truncate text-xs font-normal text-gray-500">{summary}</p>}
         </div>
-        <IconChevronDown className={cn('h-4 w-4 flex-shrink-0 text-gray-500 transition-transform', open && 'rotate-180')} />
+        {tone === 'completed' && !open ? (
+          <IconPencil className="h-4 w-4 flex-shrink-0 text-gray-500" />
+        ) : (
+          <IconChevronDown className={cn('h-4 w-4 flex-shrink-0 text-gray-500 transition-transform', open && 'rotate-180')} />
+        )}
       </button>
       {open && (
         <CardContent className="rounded-b-xl bg-white px-4 pb-4 pt-0">
@@ -371,10 +375,16 @@ export function BookingAccordionFlow({ accountId, uxVariant, onUxVariantChange, 
   // focused/blue treatment while expanded, per the 2026-11-26 request); a
   // closed section is "completed" once genuinely valid, else "pending".
   // Never derived from "has this section been visited" — only real form
-  // validity.
+  // validity. Review & Payment (index 2) is the one exception: it never
+  // shows the green "completed" treatment while still on this page — being
+  // valid only means Confirm Booking is enabled, not that the section is
+  // done, since confirming is what actually completes it (2026-11-26
+  // follow-up request).
   const sectionValid: [boolean, boolean, boolean] = [section0Valid, section1Valid, canConfirm];
-  const sectionTone = (index: 0 | 1 | 2): BookingSectionTone =>
-    openSection === index ? 'current' : (sectionValid[index] ? 'completed' : 'pending');
+  const sectionTone = (index: 0 | 1 | 2): BookingSectionTone => {
+    if (index === 2) return openSection === 2 ? 'current' : 'pending';
+    return openSection === index ? 'current' : (sectionValid[index] ? 'completed' : 'pending');
+  };
 
   // ---- Sequential progression (2026-11-26 follow-up) ----
   // A section can only be opened once every section strictly before it is
