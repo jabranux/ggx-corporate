@@ -57,10 +57,14 @@ import { useBookingDraft } from '../../hooks/useBookingDraft';
 import { useUploadExitGuard } from '../../hooks/useUploadExitGuard';
 import { getDefaultBookingAddresses } from '../../services/basicBookingPreferencesService';
 import { recordBookingConfirmation } from '../../lib/basicBookingHistory';
-import { isPickupDateSelectable, estimateDeliveryDateRange } from '../../lib/basicPickupScheduling';
+import {
+  isPickupDateSelectable, estimateDeliveryDateRange,
+  STANDARD_PICKUP_CUTOFF_HOUR, SAME_DAY_PICKUP_CUTOFF_HOUR,
+} from '../../lib/basicPickupScheduling';
 import { classifyRegion } from '../../lib/checkoutEstimates';
 import { computeBookingTotals } from '../../lib/basicBookingTotals';
 import type { BookingDraft } from '../../lib/basicBookingDraft';
+import type { DeliveryServiceType } from '../../services/transactionService';
 import { BookingAddressSection, isCompleteAddress } from '../../components/BookingAddressSection';
 import { BookingDeliverySection } from '../../components/BookingDeliverySection';
 import { BookingItemDetailsSection } from '../../components/BookingItemDetailsSection';
@@ -74,7 +78,21 @@ import { BookingAccordionFlow } from '../../components/BookingAccordionFlow';
 
 const REVIEW_STEP = 2;
 
-export function BookDelivery() {
+export interface BookDeliveryProps {
+  /**
+   * Locks the whole flow to one service type — set by `SameDayDeliveryPage.tsx`
+   * (Single mode) to render SDD's own dedicated single-booking flow, reusing
+   * this exact component rather than duplicating it (see
+   * `BookingDeliverySection.tsx`'s matching prop doc for what "locked" means
+   * downstream). Omitted for the regular Standard Delivery route, which is
+   * entirely unaffected.
+   */
+  serviceTypeLock?: DeliveryServiceType;
+  /** Set when rendered inline inside another page's own padded container (SDD's Single mode) instead of as its own routed page — skips this component's own outer page padding so the two don't stack. */
+  embedded?: boolean;
+}
+
+export function BookDelivery({ serviceTypeLock, embedded = false }: BookDeliveryProps = {}) {
   const navigate = useNavigate();
   const { user } = useAuth();
   const accountId = user?.accountId ?? 'basic';
@@ -82,14 +100,32 @@ export function BookDelivery() {
   const [step, setStep] = useState(0);
   const [editReturn, setEditReturn] = useState(false);
   const [showExitConfirm, setShowExitConfirm] = useState(false);
+  const [serviceable, setServiceable] = useState(true);
 
   // Temporary prototyping switch comparing this Wizard flow against the
   // experimental Accordion variant (`BookingAccordionFlow.tsx`) — never
   // persisted, always starts on Wizard (see `BookingUxSwitcher.tsx`'s own
   // header comment). Deliberately NOT part of `draft`/`useBookingDraft`: the
   // two variants keep entirely separate local state so neither can leak
-  // into or break the other.
-  const [uxVariant, setUxVariant] = useState<BookingUxVariant>('wizard');
+  // into or break the other. SDD's locked flow is Accordion-only (the
+  // "latest accordion design" per spec, no Wizard/Accordion choice to make)
+  // and never shows the switcher control — see the mobile render branch below.
+  const [uxVariant, setUxVariant] = useState<BookingUxVariant>(serviceTypeLock ? 'accordion' : 'wizard');
+
+  // Seed the draft's service type once a lock is set (mount only — a lock
+  // never changes for the lifetime of this component instance) and
+  // re-correct it after every reset below, since `resetDraft()` always
+  // returns to `INITIAL_BOOKING_DRAFT`'s plain 'standard' default.
+  useEffect(() => {
+    if (!serviceTypeLock) return;
+    setDraft((prev) => (prev.serviceType === serviceTypeLock ? prev : { ...prev, serviceType: serviceTypeLock }));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [serviceTypeLock]);
+
+  const resetBookingDraft = useCallback(() => {
+    resetDraft();
+    if (serviceTypeLock) setDraft({ serviceType: serviceTypeLock });
+  }, [resetDraft, setDraft, serviceTypeLock]);
 
   // Only blocks navigation once the user has actually changed something —
   // opening the page with prefilled defaults must never trap Back/sidebar
@@ -204,25 +240,30 @@ export function BookDelivery() {
     || (draft.merchandiseCod.amount.trim() !== '' && Number.isFinite(codAmountNum) && codAmountNum >= 0);
 
   const addressesComplete = isCompleteAddress(draft.pickupAddress) && isCompleteAddress(draft.recipientAddress);
-  // A pickup date is only ever needed for a Rider Pickup under Standard
-  // service — On-Demand is immediate, and Drop-off has no rider to schedule
-  // at all (the user picks a drop-off location instead, with no date to
-  // choose). When required, it must still be eligible right now — a date
-  // chosen earlier in the session (or restored from a saved draft) can go
-  // stale if left open past midnight or the pickup cutoff, so this isn't
-  // just a non-empty check.
-  const pickupDateRequired = draft.firstMile === 'pickup' && draft.serviceType === 'standard';
+  // A pickup date is only ever needed for a Rider Pickup under Standard or
+  // Same-Day service — On-Demand is immediate, and Drop-off has no rider to
+  // schedule at all (the user picks a drop-off location instead, with no
+  // date to choose). When required, it must still be eligible right now — a
+  // date chosen earlier in the session (or restored from a saved draft) can
+  // go stale if left open past midnight or the pickup cutoff, so this isn't
+  // just a non-empty check. Same-Day's cutoff is earlier than Standard's
+  // (`SAME_DAY_PICKUP_CUTOFF_HOUR` vs `STANDARD_PICKUP_CUTOFF_HOUR`).
+  const pickupDateRequired = draft.firstMile === 'pickup' && (draft.serviceType === 'standard' || draft.serviceType === 'same_day');
+  const pickupCutoffHour = draft.serviceType === 'same_day' ? SAME_DAY_PICKUP_CUTOFF_HOUR : STANDARD_PICKUP_CUTOFF_HOUR;
   const pickupDateSet = Boolean(draft.pickupDate);
-  const pickupDateStale = pickupDateRequired && pickupDateSet && !isPickupDateSelectable(draft.pickupDate!);
+  const pickupDateStale = pickupDateRequired && pickupDateSet && !isPickupDateSelectable(draft.pickupDate!, pickupCutoffHour);
   const pickupDateComplete = !pickupDateRequired || (pickupDateSet && !pickupDateStale);
   const itemDetailsValid = Boolean(draft.itemDescription.trim()) && declaredValueValid && codValid;
 
-  const canConfirm = Boolean(addressesComplete && pickupDateComplete && !addressFormOpen && itemDetailsValid);
+  const canConfirm = Boolean(addressesComplete && pickupDateComplete && !addressFormOpen && itemDetailsValid
+    && (!serviceTypeLock || serviceable));
 
   const confirmBlockReason = !addressesComplete
     ? 'Choose a complete pickup address and recipient to continue.'
     : addressFormOpen
     ? 'Save the address you’re editing to continue.'
+    : (serviceTypeLock && !serviceable)
+    ? 'Same-Day Delivery isn’t available for this recipient’s address.'
     : pickupDateStale
     ? 'Your selected pickup date is no longer available — choose another.'
     : !pickupDateComplete
@@ -264,8 +305,8 @@ export function BookDelivery() {
     // between. If it just went stale, force a render so the blocking
     // reason/disabled state catch up immediately instead of silently
     // no-op'ing with no feedback.
-    const stillPickupDateEligible = draft.firstMile !== 'pickup' || draft.serviceType !== 'standard'
-      || (Boolean(draft.pickupDate) && isPickupDateSelectable(draft.pickupDate!));
+    const stillPickupDateEligible = draft.firstMile !== 'pickup' || !pickupDateRequired
+      || (Boolean(draft.pickupDate) && isPickupDateSelectable(draft.pickupDate!, pickupCutoffHour));
     if (!canConfirm || !stillPickupDateEligible) {
       if (!stillPickupDateEligible) {
         updateDraft({ pickupDate: draft.pickupDate });
@@ -281,7 +322,7 @@ export function BookDelivery() {
     // so revisiting/refreshing never shows a different booking's details.
     const entry = recordBookingConfirmation(accountId, draft, totals.total, totals.codAmount, deliveryEstimateLabel);
     touchedRef.current = false;
-    resetDraft();
+    resetBookingDraft();
     navigate('/dashboard/book-delivery/success', { state: { bookingId: entry.id } });
   };
 
@@ -348,7 +389,7 @@ export function BookDelivery() {
     // relying only on the page unmounting — leaving via this confirmation
     // must behave identically to leaving via the `exitGuard` blocker below
     // (which also never re-enters this draft).
-    resetDraft();
+    resetBookingDraft();
     navigate('/dashboard');
   };
 
@@ -357,7 +398,7 @@ export function BookDelivery() {
     // pickup-specific scheduling info, same as the date selector itself.
     if (draft.firstMile === 'dropoff') return undefined;
     if (draft.serviceType === 'on_demand') return 'Within 40 minutes of pickup';
-    if (draft.serviceType !== 'standard' || !draft.pickupDate) return undefined;
+    if ((draft.serviceType !== 'standard' && draft.serviceType !== 'same_day') || !draft.pickupDate) return undefined;
     const region = draft.recipientAddress?.province ? classifyRegion(draft.recipientAddress.province) : 'unknown';
     const [y, m, d] = draft.pickupDate.split('-').map(Number);
     return estimateDeliveryDateRange(new Date(y, m - 1, d), draft.serviceType, region).label;
@@ -396,6 +437,8 @@ export function BookDelivery() {
       onServiceTypeChange={(v) => updateDraft({ serviceType: v })}
       pickupDate={draft.pickupDate}
       onPickupDateChange={(v) => updateDraft({ pickupDate: v })}
+      lockedServiceType={serviceTypeLock}
+      onServiceabilityChange={setServiceable}
     />
   );
 
@@ -428,7 +471,7 @@ export function BookDelivery() {
   );
 
   return (
-    <div className="p-4 lg:p-6">
+    <div className={embedded ? undefined : 'p-4 lg:p-6'}>
       {exitGuard.state === 'blocked' && (
         <ConfirmDialog
           open
@@ -439,7 +482,7 @@ export function BookDelivery() {
             // draft just as explicitly as leaving via the header's own
             // exit confirmation does.
             touchedRef.current = false;
-            resetDraft();
+            resetBookingDraft();
             exitGuard.proceed();
           }}
           title="Leave this booking?"
@@ -474,18 +517,21 @@ export function BookDelivery() {
           onBack={handleAccordionBack}
           onDirty={() => { touchedRef.current = true; }}
           onConfirmed={() => { touchedRef.current = false; }}
+          lockedServiceType={serviceTypeLock}
         />
       ) : (
       <>
       {/* `BookingHeader`'s sticky compact bar + step progress is mobile-only
           (see its own docblock). Desktop's title/subtitle render below,
           inside the same max-width container as the booking content — see
-          that block's own comment. */}
+          that block's own comment. The Wizard/Accordion switcher doesn't
+          apply to SDD's locked flow (Accordion-only, see above), so its slot
+          is omitted rather than shown with nothing to switch to. */}
       {!isDesktop && (
         <BookingHeader
           step={step}
           onBack={handleHeaderBack}
-          rightSlot={<BookingUxSwitcher value={uxVariant} onChange={setUxVariant} />}
+          rightSlot={serviceTypeLock ? undefined : <BookingUxSwitcher value={uxVariant} onChange={setUxVariant} />}
         />
       )}
 
@@ -523,8 +569,14 @@ export function BookDelivery() {
               prototype (see the `uxVariant === 'accordion' && !isDesktop` guard
               above); desktop always renders this Wizard tree. */}
           <div className="mb-6">
-            <h1 className="text-3xl font-bold text-gray-900">Book a delivery</h1>
-            <p className="text-gray-600 mt-1">Enter your delivery details to book a shipment.</p>
+            <h1 className="text-3xl font-bold text-gray-900">
+              {serviceTypeLock === 'same_day' ? 'Book a Same-Day Delivery' : 'Book a delivery'}
+            </h1>
+            <p className="text-gray-600 mt-1">
+              {serviceTypeLock === 'same_day'
+                ? 'Same-day pickup and delivery for Metro Manila addresses.'
+                : 'Enter your delivery details to book a shipment.'}
+            </p>
           </div>
           <div className="grid grid-cols-[7fr_3fr] gap-6 items-start">
             <div className="space-y-4 min-w-0">

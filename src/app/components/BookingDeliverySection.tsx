@@ -1,9 +1,15 @@
 /**
  * Delivery step for the GGX Basic single-booking flow: pickup vs drop-off,
- * service type via the shared `CheckoutDeliveryOptions` component (Standard +
- * On-Demand only — Same-day is not offered for Basic single bookings), and
- * pickup-date scheduling for Standard. Entitlement/geography gating comes
- * from the mock `serviceabilityService` (NOT production validation).
+ * service type via the shared `CheckoutDeliveryOptions` component, and
+ * pickup-date scheduling for Standard/Same-Day. Entitlement/geography gating
+ * comes from the mock `serviceabilityService` (NOT production validation).
+ *
+ * Same-Day is offered only through the dedicated SDD single-booking flow
+ * (`lockedServiceType="same_day"`, set by `BookDelivery.tsx`/
+ * `BookingAccordionFlow.tsx` when rendered from `SameDayDeliveryPage.tsx`'s
+ * Single mode) — never as a third option alongside Standard/On-Demand in the
+ * regular Standard Delivery flow, where `lockedServiceType` is omitted and
+ * behavior is unchanged from before SDD existed as a single-booking service.
  */
 import { useEffect, useMemo, useState } from 'react';
 import { IconTruckDelivery, IconBuildingStore, IconBolt, IconMapPin, IconCircleCheckFilled, IconCalendarEvent } from '@tabler/icons-react';
@@ -13,7 +19,10 @@ import { CheckoutDeliveryOptions } from './CheckoutDeliveryOptions';
 import { checkServiceability } from '../services/serviceabilityService';
 import { getFeatureStateSync } from '../services/featureEnablementService';
 import { classifyRegion } from '../lib/checkoutEstimates';
-import { getEligiblePickupDates, estimateDeliveryDateRange } from '../lib/basicPickupScheduling';
+import {
+  getEligiblePickupDates, estimateDeliveryDateRange,
+  STANDARD_PICKUP_CUTOFF_HOUR, SAME_DAY_PICKUP_CUTOFF_HOUR,
+} from '../lib/basicPickupScheduling';
 import { DROPOFF_LOCATIONS } from '../data/dropoffLocations';
 import type { Address } from './AddressBook';
 import type { FirstMile } from '../lib/basicBookingDraft';
@@ -29,6 +38,18 @@ export interface BookingDeliverySectionProps {
   onServiceTypeChange: (v: DeliveryServiceType) => void;
   pickupDate: string | null;
   onPickupDateChange: (v: string) => void;
+  /**
+   * Locks the service type to a single value (currently only ever
+   * `'same_day'`) — hides the Standard/On-Demand picker entirely (Standard
+   * Delivery must never be selectable from the SDD flow, per spec) while
+   * still showing the serviceability-gated `CheckoutDeliveryOptions` card so
+   * an out-of-coverage recipient sees why. When set, a non-metro recipient is
+   * never silently downgraded to Standard (the unlocked flow's own fallback)
+   * — `onServiceabilityChange` reports `false` instead, so the caller can
+   * block Confirm.
+   */
+  lockedServiceType?: DeliveryServiceType;
+  onServiceabilityChange?: (serviceable: boolean) => void;
 }
 
 function toIsoDate(date: Date): string {
@@ -47,6 +68,8 @@ export function BookingDeliverySection({
   onServiceTypeChange,
   pickupDate,
   onPickupDateChange,
+  lockedServiceType,
+  onServiceabilityChange,
 }: BookingDeliverySectionProps) {
   const [metroOnly, setMetroOnly] = useState(false);
   const [note, setNote] = useState<string | undefined>(undefined);
@@ -54,49 +77,60 @@ export function BookingDeliverySection({
 
   // On-Demand is an enabled-only capability for Basic (same gate
   // `BulkSpreadsheet.tsx` checks via `getFeatureStateSync('on_demand', ...)`
-  // for Business+) — never offered by default. Same-day is not offered at
-  // all for Basic single bookings (product decision), independent of
-  // entitlement or geography.
+  // for Business+) — never offered by default. A locked service type (SDD's
+  // single-booking flow) replaces the whole picker with that one option.
   const onDemandEnabled = getFeatureStateSync('on_demand', accountId).enabled;
   const allowedOptions = useMemo<DeliveryServiceType[]>(
-    () => (onDemandEnabled ? ['standard', 'on_demand'] : ['standard']),
-    [onDemandEnabled],
+    () => (lockedServiceType ? [lockedServiceType] : (onDemandEnabled ? ['standard', 'on_demand'] : ['standard'])),
+    [lockedServiceType, onDemandEnabled],
   );
 
   useEffect(() => {
     if (!recipientAddress?.province) {
       setMetroOnly(false);
       setNote(undefined);
+      onServiceabilityChange?.(true);
       return;
     }
     let active = true;
     checkServiceability({ address: recipientAddress, serviceType }).then((res) => {
       if (!active) return;
       const effectiveAvailable = res.availableServiceTypes.filter((t) => allowedOptions.includes(t));
-      setMetroOnly(effectiveAvailable.includes('on_demand'));
+      setMetroOnly(effectiveAvailable.includes('on_demand') || effectiveAvailable.includes('same_day'));
       setNote(res.reason);
-      // The previously selected service type can become unavailable when the
-      // recipient address changes (e.g. On-Demand selected for Metro Manila,
-      // then the recipient moves to Cebu) or when entitlement doesn't cover
-      // it — fall back automatically instead of leaving an unavailable
-      // selection confirmable.
       if (!effectiveAvailable.includes(serviceType)) {
-        onServiceTypeChange('standard');
+        if (lockedServiceType) {
+          // Never silently fall back to Standard here — it must not become
+          // selectable inside the locked SDD flow. Report unserviceable
+          // instead so the caller blocks Confirm with a clear reason.
+          onServiceabilityChange?.(false);
+        } else {
+          // The previously selected service type can become unavailable when
+          // the recipient address changes (e.g. On-Demand selected for Metro
+          // Manila, then the recipient moves to Cebu) or when entitlement
+          // doesn't cover it — fall back automatically instead of leaving an
+          // unavailable selection confirmable.
+          onServiceTypeChange('standard');
+        }
+      } else {
+        onServiceabilityChange?.(true);
       }
     });
     return () => { active = false; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [recipientAddress, serviceType, allowedOptions]);
+  }, [recipientAddress, serviceType, allowedOptions, lockedServiceType]);
 
   const region = recipientAddress?.province ? classifyRegion(recipientAddress.province) : 'unknown';
+
+  const pickupCutoffHour = serviceType === 'same_day' ? SAME_DAY_PICKUP_CUTOFF_HOUR : STANDARD_PICKUP_CUTOFF_HOUR;
 
   // Not memoized with an empty dep array: that would freeze "today"/cutoff
   // eligibility at this component's first mount. Recomputing each render is
   // cheap (a handful of date objects) and keeps the chips correct if the
   // page is left open across midnight or the (mock) cutoff hour.
-  const eligibleDates = getEligiblePickupDates(5);
+  const eligibleDates = getEligiblePickupDates(5, pickupCutoffHour);
   const deliveryEstimate = useMemo(() => {
-    if (serviceType !== 'standard' || !pickupDate) return null;
+    if ((serviceType !== 'standard' && serviceType !== 'same_day') || !pickupDate) return null;
     const [y, m, d] = pickupDate.split('-').map(Number);
     return estimateDeliveryDateRange(new Date(y, m - 1, d), serviceType, region);
   }, [serviceType, pickupDate, region]);
@@ -132,10 +166,12 @@ export function BookingDeliverySection({
           })}
         </div>
 
-        {/* Only shown when there's a real choice to make — with a single
-            allowed option (the common case: On-Demand gated off), a
-            selectable "Standard Delivery" card is just noise. */}
-        {allowedOptions.length > 1 && (
+        {/* Shown when there's a real choice to make (On-Demand enabled), or
+            when locked to a single option that still needs to surface
+            serviceability (e.g. SDD disabled with a clear reason outside
+            Metro Manila) — only the common unlocked single-option case (On-
+            Demand gated off, plain Standard) skips it as noise. */}
+        {(allowedOptions.length > 1 || lockedServiceType) && (
           <CheckoutDeliveryOptions
             options={allowedOptions}
             value={serviceType}
@@ -184,7 +220,7 @@ export function BookingDeliverySection({
               )}
             </Drawer>
           </div>
-        ) : serviceType === 'standard' ? (
+        ) : (serviceType === 'standard' || serviceType === 'same_day') ? (
           <div className="pt-1">
             <p className="mb-1.5 flex items-center gap-1.5 text-sm font-medium text-gray-700">
               <IconCalendarEvent className="w-4 h-4 text-gray-400" />
@@ -215,7 +251,10 @@ export function BookingDeliverySection({
                 );
               })}
             </div>
-            <p className="mt-1 text-xs text-gray-500">Pickup dates exclude Sundays and public holidays.</p>
+            <p className="mt-1 text-xs text-gray-500">
+              Pickup dates exclude Sundays and public holidays.
+              {serviceType === 'same_day' && ` Same-day booking cutoff is ${SAME_DAY_PICKUP_CUTOFF_HOUR > 12 ? SAME_DAY_PICKUP_CUTOFF_HOUR - 12 : SAME_DAY_PICKUP_CUTOFF_HOUR}:00 PM.`}
+            </p>
             {deliveryEstimate && <p className="mt-1 text-xs text-gray-600">{deliveryEstimate.label}</p>}
           </div>
         ) : (

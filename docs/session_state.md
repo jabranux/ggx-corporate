@@ -3,6 +3,122 @@
 > Lightweight resume/checkpoint file. Detailed June 2026 history was archived to
 > `docs/archive/session_log_2026-06.md`.
 
+## Same-Day Delivery prototype switch + enhanced SDD experience, Basic account (2026-11-27)
+
+Implemented the full SDD (Same-Day Delivery) feature request: a stakeholder
+prototype switch (Lead | Single | Bulk, default Lead) plus three real
+destinations behind it, replacing the previous single-state "apply and wait"
+placeholder at `/dashboard/same-day-delivery`.
+
+- **Prototype switch** — new `lib/basicSameDayMode.ts` (localStorage, keyed by
+  account id, default `'lead'`) + `components/SameDayModeSwitcher.tsx`
+  (same visual pattern as the existing Standard Delivery `BookingUxSwitcher`,
+  but persisted — it has to survive navigating away and back, since it drives
+  where the home shortcut and catalog send the user). Lives on
+  `SameDayDeliveryPage.tsx`; also reachable from `BulkUploader.tsx` via a
+  small banner when arrived through Bulk mode (otherwise unreachable once
+  redirected there).
+- **Lead mode**: `SameDayDeliveryPage.tsx` rewritten — compact promo (hero
+  headline/value-prop/coverage/3 selling points, reusing the existing
+  `icon-sdd.png` asset + the SDD carousel card's own gradient) + the full
+  6-field official lead-gen form side by side (`lg:grid-cols-2`; mobile keeps
+  the form high in DOM/visual order via `order-1`/`order-2`). Content,
+  copy, and BOTH dropdowns' exact options were taken from GGX's real
+  published form (gogoxpress.com/same-day-delivery, fetched and inspected
+  live, not guessed) — average-daily-shipment buckets (1-5/6-10/11-15/16-20/
+  more than 20) and the 17-NCR-city + "Outside Metro Manila" pickup-location
+  list now live in `lib/basicSameDayEnrollment.ts`, replacing the old ad hoc
+  4-field form. Prefill sources: full name/email from `AuthUser`, business
+  name from `accountName` (no separate registered "business name" field
+  exists — see flags below), average daily shipment from KYC's `dailyOrders`
+  **only on an exact `'1-5'` match** (KYC's wider buckets don't line up with
+  the official ones, so a guess would show a number the seller never gave —
+  left blank otherwise, per spec), main pickup location matched from the
+  default pickup address's city against the official NCR list. Account id is
+  stored on the application record, never a form field. "Learn more" opens
+  the real GGX page in a new `components/InAppBrowserDrawer.tsx` (full-screen
+  iframe overlay, not a navigation) — **gogoxpress.com blocks iframe
+  embedding** (confirmed live: overlay chrome renders, iframe body stays
+  blank), so it currently only works as a visible "open in a new tab" escape
+  hatch; the "never lose form state" requirement is still met regardless,
+  since the overlay never unmounts the page underneath. The existing
+  not_enrolled → pending → (rejected → reapply) status machine
+  (`basicSameDayEnrollment.ts`) is preserved as-is, just restyled.
+- **Single mode**: reuses `BookDelivery.tsx`/`BookingAccordionFlow.tsx`
+  directly (new optional `serviceTypeLock`/`embedded` props) rather than a
+  duplicate flow — locks the service-type picker to Same-Day (Standard is
+  never selectable), forces Accordion on mobile with the Wizard/Accordion
+  switcher hidden (not applicable to SDD), keeps the existing two-column
+  layout on desktop unchanged in structure. SDD's own pickup-date cutoff
+  (1:00 PM, sourced from GGX's published SLA table on the same page — see
+  `SAME_DAY_PICKUP_CUTOFF_HOUR` in `lib/basicPickupScheduling.ts`) now gates
+  which pickup dates are offered; the delivery ETA is computed as a new
+  `estimateDeliveryDateRange` branch — always the same date as the chosen
+  pickup (today or an advance-booked date), never a multi-day range. Metro-
+  Manila-only serviceability was already modeled generically in
+  `serviceabilityService.ts`/`checkoutEstimates.ts` for `same_day` before
+  this session (coverage, fee surcharge ₱70, "Within the day" label all
+  pre-existed) — `BookingDeliverySection.tsx` gained a `lockedServiceType` +
+  `onServiceabilityChange` prop pair so a non-metro recipient blocks Confirm
+  with a clear reason instead of silently falling back to Standard (which
+  the unlocked flow still does, unchanged). Verified end-to-end live: full
+  booking through Confirm, delivery ETA both for today and an advance Nov 28
+  pickup date, shared `BookDeliverySuccess` confirmation screen (no changes
+  needed there).
+- **Bulk mode**: `resolveServiceHref` (`lib/basicServiceCatalog.ts`) routes
+  straight to `/dashboard/bulk-uploader?serviceMode=same-day` (skips the SDD
+  page entirely); `BulkUploader.tsx` reads that query param and auto-selects
+  its existing Same-Day mode (unchanged SDD-specific bulk behavior — found a
+  **real bug while testing**: the banner's "switch back to Lead/Single"
+  control first wrote to `uploadAccount.accountId`, a Business+ Main/
+  Subaccount-scope value, not the signed-in Basic account's own id the SDD
+  mode store is keyed by — switching modes from that banner silently wrote
+  to the wrong key and the SDD page's own redirect effect bounced straight
+  back to Bulk. Fixed to use `user?.accountId`.
+- **Badge**: `resolveServiceBadge` now checks the prototype mode first —
+  Single/Bulk drop the "Join" badge entirely (simulated approval); Lead falls
+  through to the pre-existing enrollment-status logic unchanged. Verified
+  live on the Basic dashboard home for all three modes.
+- `npm run typecheck` and `npm run build` clean (same pre-existing chunk-size
+  warning only). Full suite **276/276** passing (`npm test`); 27 pre-existing
+  Docker-dependent cancellations (same cause as prior sessions).
+- **Verified live in the browser** (desktop 1024px + mobile 375px, same
+  `ggx.auth` localStorage session-swap workaround, port 18020): all three
+  modes and their destinations, Join badge presence/absence, Lead form
+  prefill/editability/submission (pending state, accountId on the stored
+  record, no mutation of the real address/KYC/profile records), Learn More
+  overlay open/close with form state intact, Single mode's full booking
+  flow through Confirm with correct ETA/cutoff on both an immediate and an
+  advance pickup date, Bulk mode's auto-selected Same-Day upload + the
+  banner round-trip back to Lead (after the accountId fix above), and
+  Standard Delivery (`/dashboard/book-delivery`, both Wizard and Accordion,
+  desktop and mobile) confirmed pixel-for-pixel unchanged.
+- **Flags / open questions for product** (per the task's own instruction to
+  surface these rather than invent answers):
+  1. No registered "mobile number" or standalone "business name" field
+     exists anywhere in the account model (`AuthUser`) — mobile is prefilled
+     from the default pickup address's own `mobileNumber` instead (a
+     reasonable proxy, not a real registered-profile field); business name
+     is prefilled from `accountName`, which doubles as both "account name"
+     and "business name" today.
+  2. **Two different SDD booking cutoffs now exist in this codebase**: the
+     Single-booking flow added this session uses 1:00 PM (GGX's own
+     published SDD SLA); the pre-existing Bulk Uploader's Same-Day mode
+     (untouched, per spec "retain existing behavior") displays "10:00 AM."
+     Neither was invented new this session, but they contradict each other —
+     needs a product decision on which is authoritative.
+  3. First-mile is left as Rider Pickup **and** Drop-off for SDD (unchanged
+     from the generic component) — GGX's own published SDD page only
+     describes a pickup/hub-routed model with no drop-off mention. Not
+     restricted this session (no explicit instruction to do so, and removing
+     it would be inventing a rule), but worth confirming with product.
+  4. SDD's real weight/dimension cap (10kg, 51×39×10.16cm per the official
+     page) isn't separately enforced — the existing pouch-size picker's
+     largest tier already tops out at 10kg coincidentally, but this isn't a
+     deliberate SDD-specific validation rule.
+- Not committed yet — see this session's final report for the commit
+  decision.
+
 ## Basic Account home — desktop sizing/typography corrective pass v3 (2026-11-17)
 
 Focused corrective pass on top of the v2 mockup pass directly below — layout,

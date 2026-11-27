@@ -1,5 +1,5 @@
 import { useRef, useState, useEffect } from 'react';
-import { useNavigate } from 'react-router';
+import { useNavigate, useSearchParams } from 'react-router';
 import {
   IconUpload, IconDownload, IconFileSpreadsheet, IconMapPin, IconClock,
   IconLink, IconX, IconTruckDelivery, IconBuildingStore,
@@ -30,6 +30,8 @@ import { useAuth } from '../contexts/AuthContext';
 import { useJourney } from '../contexts/JourneyContext';
 import { useModuleAccessContext } from '../hooks/useModuleAccess';
 import { getFeatureStateSync } from '../services/featureEnablementService';
+import { SameDayModeSwitcher } from '../components/SameDayModeSwitcher';
+import { setSameDayMode } from '../lib/basicSameDayMode';
 
 /** Page-level service mode (chosen for the whole batch, not per row). */
 const MODE_LABELS: Record<'standard' | 'same-day' | 'on-demand', string> = {
@@ -75,6 +77,7 @@ type Step = 'form' | 'mapping' | 'fast-processing' | 'background-processing';
 
 export function BulkUploader() {
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
   const fileInputRef = useRef<HTMLInputElement>(null);
   const { getCurrentAccountName, getCurrentAccountId, currentAccount } = useSubAccounts();
   const { user } = useAuth();
@@ -123,6 +126,17 @@ export function BulkUploader() {
     setJourneySimResult(false);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isJourneyP2]);
+
+  // Arrived from the SDD prototype's Bulk mode (`basicServiceCatalog.ts`'s
+  // `resolveServiceHref` routes "Same Day Delivery" here with this query
+  // param when the switch is set to Bulk) — auto-select Same-Day so the user
+  // never has to pick the mode themselves, per spec ("Retain the existing
+  // SDD-specific Bulk Uploader behavior... automatically selected").
+  const fromSddPrototype = searchParams.get('serviceMode') === 'same-day';
+  useEffect(() => {
+    if (fromSddPrototype) setUploadMode('same-day');
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [fromSddPrototype]);
 
   const [selectedFile, setSelectedFile] = useState<{ name: string; size: string } | null>(null);
   const [pendingUploadId, setPendingUploadId] = useState<string | null>(null);
@@ -332,6 +346,30 @@ export function BulkUploader() {
           </Button>
         </div>
       </div>
+
+      {/* Reachable only when opened via the SDD prototype's Bulk mode — the
+          switch otherwise lives on `SameDayDeliveryPage.tsx`; this is just a
+          way back to Lead/Single without losing the prototype control
+          entirely once Bulk redirects here. */}
+      {fromSddPrototype && (
+        <div className="flex items-center justify-between gap-3 rounded-lg border border-orange-200 bg-orange-50 px-4 py-2.5">
+          <p className="text-sm text-orange-800">Opened from the Same-Day Delivery prototype switch, set to <strong>Bulk</strong>.</p>
+          <SameDayModeSwitcher
+            value="bulk"
+            onChange={(next) => {
+              // SDD's prototype mode is keyed by the signed-in Basic
+              // account's own id (`SameDayDeliveryPage.tsx` reads the same
+              // key) — NOT `uploadAccount.accountId`, which is the
+              // Business+ Main/Subaccount scope this page otherwise reads
+              // for everything else and would silently write to the wrong
+              // key for a Basic session.
+              setSameDayMode(user?.accountId ?? 'basic-guest', next);
+              if (next !== 'bulk') navigate('/dashboard/same-day-delivery');
+            }}
+            className="flex-shrink-0"
+          />
+        </div>
+      )}
 
       {/* Mode toggle */}
       <Card>

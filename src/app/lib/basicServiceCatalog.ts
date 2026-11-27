@@ -17,6 +17,7 @@ import {
 import type { BasicKycAnswers, BasicKycProfile, KycDailyOrders, KycDeliveryNeeds, KycMainUse, KycSellingChannel } from './basicKycProfile';
 import { hasCompletedKyc } from './basicKycProfile';
 import { getSameDayEnrollment } from './basicSameDayEnrollment';
+import { getSameDayMode } from './basicSameDayMode';
 
 // Reuses the legacy `/basic` module's own illustrated service icons (never
 // imported FROM that module's components — just the same static assets) so
@@ -177,12 +178,16 @@ export interface ServiceBadge {
 
 /**
  * The badge a catalog item should currently show. Static badges ("Free",
- * "New") come from the catalog; Same Day Delivery's depends on the account's
+ * "New") come from the catalog; Same Day Delivery's depends on the SDD
+ * prototype switch (`basicSameDayMode.ts`) — Single/Bulk simulate an already-
+ * approved account, so the badge is dropped entirely, same as a real
+ * approval would. Lead mode falls through to the real (pre-existing)
  * enrollment status (`basicSameDayEnrollment.ts`): not enrolled -> "Join",
- * pending -> "Pending", approved -> none, rejected -> "Join" (reapply allowed).
+ * pending -> "Pending", rejected -> "Join" (reapply allowed).
  */
 export function resolveServiceBadge(item: BasicServiceItem, accountId: string): ServiceBadge | null {
   if (item.id === 'same-day-delivery') {
+    if (getSameDayMode(accountId) !== 'lead') return null;
     const { status } = getSameDayEnrollment(accountId);
     if (status === 'approved') return null;
     return status === 'pending' ? { label: 'Pending', tone: 'warning' } : { label: 'Join', tone: 'info' };
@@ -196,10 +201,19 @@ export const SERVICE_BADGE_CLASS: Record<ServiceBadgeTone, string> = {
   warning: 'bg-amber-100 text-amber-800 ring-1 ring-amber-300',
 };
 
-/** Where a shortcut should send the user — approved Same Day Delivery goes straight to booking. */
+/**
+ * Where a shortcut should send the user. Same Day Delivery branches on the
+ * prototype switch: Bulk mode skips the SDD page entirely and goes straight
+ * to the Bulk Uploader with Same-Day pre-selected (`BulkUploader.tsx` reads
+ * `serviceMode`); Lead and Single both land on the SDD page itself, which
+ * renders the right content for the current mode
+ * (`SameDayDeliveryPage.tsx`). A real approved enrollment (outside the
+ * prototype) also goes to the SDD page now, not straight to Standard
+ * booking — Single mode is SDD's own dedicated flow.
+ */
 export function resolveServiceHref(item: BasicServiceItem, accountId: string): string {
-  if (item.id === 'same-day-delivery' && getSameDayEnrollment(accountId).status === 'approved') {
-    return '/dashboard/book-delivery';
+  if (item.id === 'same-day-delivery' && getSameDayMode(accountId) === 'bulk') {
+    return '/dashboard/bulk-uploader?serviceMode=same-day';
   }
   return item.href;
 }

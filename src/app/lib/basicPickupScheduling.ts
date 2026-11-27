@@ -33,6 +33,18 @@ function toIsoDate(date: Date): string {
   return `${y}-${m}-${d}`;
 }
 
+/** Default Standard pickup cutoff — unchanged, see `getEligiblePickupDates`'s own doc. */
+export const STANDARD_PICKUP_CUTOFF_HOUR = 15;
+
+/**
+ * Same-Day Delivery's booking cutoff — sourced from GGX's own published SDD
+ * SLA (gogoxpress.com/same-day-delivery: "Booking Cutoff Time 12:00 MN - 1:00
+ * PM", "Order creation Cutoff time 12:00 AM - 1:00 PM"), not an invented
+ * value. Past this hour, same-day pickup is no longer offered for today —
+ * same mechanism as Standard's own cutoff, just an earlier hour.
+ */
+export const SAME_DAY_PICKUP_CUTOFF_HOUR = 13;
+
 /** False for Sundays and any date in the mock PH holiday list; true otherwise. */
 export function isEligiblePickupDay(date: Date): boolean {
   if (date.getDay() === 0) return false;
@@ -86,7 +98,10 @@ export function isPickupDateSelectable(isoDate: string, cutoffHour = 15, now: Da
 /**
  * Estimated delivery date range for a chosen pickup date. Day-counts for
  * 'standard' come from `checkoutEstimates.ts`'s shared `STANDARD_DAY_RANGE`
- * (not duplicated here). 'on_demand' is immediate/same-day. Does not skip
+ * (not duplicated here). 'on_demand' is immediate/same-day. 'same_day'
+ * fulfills within the SAME day as the chosen pickup date (today or an
+ * advance-scheduled date — see `SAME_DAY_PICKUP_CUTOFF_HOUR`), never a
+ * multi-day range, per GGX's published SDD SLA. Does not skip
  * Sundays/holidays when walking forward — that constraint applies to
  * scheduling a pickup, not to the resulting delivery window estimate.
  */
@@ -97,6 +112,15 @@ export function estimateDeliveryDateRange(
 ): { from: Date; to: Date; label: string } {
   if (serviceType === 'on_demand') {
     return { from: pickupDate, to: pickupDate, label: 'Within 40 minutes of pickup' };
+  }
+
+  if (serviceType === 'same_day') {
+    const today = new Date();
+    const isToday = pickupDate.toDateString() === today.toDateString();
+    const label = isToday
+      ? 'Estimated delivery today'
+      : `Estimated delivery ${pickupDate.toLocaleDateString('en-PH', { month: 'short', day: 'numeric' })} (same day as pickup)`;
+    return { from: pickupDate, to: pickupDate, label };
   }
 
   const [minDays, maxDays] = STANDARD_DAY_RANGE[region];

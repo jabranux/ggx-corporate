@@ -67,7 +67,10 @@ import { BookingAddressPickerDrawer } from './BookingAddressPickerDrawer';
 import { labelColors, getDisplayLabel } from './AddressDisplayCard';
 import { getDefaultBookingAddresses } from '../services/basicBookingPreferencesService';
 import { recordBookingConfirmation } from '../lib/basicBookingHistory';
-import { isPickupDateSelectable, estimateDeliveryDateRange } from '../lib/basicPickupScheduling';
+import {
+  isPickupDateSelectable, estimateDeliveryDateRange,
+  STANDARD_PICKUP_CUTOFF_HOUR, SAME_DAY_PICKUP_CUTOFF_HOUR,
+} from '../lib/basicPickupScheduling';
 import { classifyRegion } from '../lib/checkoutEstimates';
 import { computeBookingTotals } from '../lib/basicBookingTotals';
 import { getBasicPouchSize, type BasicPouchSizeKey } from '../lib/basicPouchSizes';
@@ -248,9 +251,11 @@ export interface BookingAccordionFlowProps {
   onDirty: () => void;
   /** Called once a booking is successfully confirmed, so the page-level exit guard stops treating the (now-submitted) data as unsaved work. */
   onConfirmed: () => void;
+  /** Set by `BookDelivery.tsx` when rendering SDD's locked single-booking flow — see `BookingDeliverySection.tsx`'s own prop doc. Also hides the Wizard/Accordion prototype switcher, which doesn't apply to the SDD flow. */
+  lockedServiceType?: DeliveryServiceType;
 }
 
-export function BookingAccordionFlow({ accountId, uxVariant, onUxVariantChange, onBack, onDirty, onConfirmed }: BookingAccordionFlowProps) {
+export function BookingAccordionFlow({ accountId, uxVariant, onUxVariantChange, onBack, onDirty, onConfirmed, lockedServiceType }: BookingAccordionFlowProps) {
   const navigate = useNavigate();
   const [openSection, setOpenSection] = useState<0 | 1 | 2>(0);
   // Brief, self-dismissing hint shown when a restricted section header is
@@ -265,8 +270,9 @@ export function BookingAccordionFlow({ accountId, uxVariant, onUxVariantChange, 
 
   const [pickupAddress, setPickupAddress] = useState<Address | null>(null);
   const [firstMile, setFirstMile] = useState<FirstMile>('pickup');
-  const [serviceType, setServiceType] = useState<DeliveryServiceType>('standard');
+  const [serviceType, setServiceType] = useState<DeliveryServiceType>(lockedServiceType ?? 'standard');
   const [pickupDate, setPickupDate] = useState<string | null>(null);
+  const [serviceable, setServiceable] = useState(true);
 
   const [recipients, setRecipients] = useState<RecipientEntry[]>([{ id: newRecipientId(), address: null, itemOverride: null }]);
   const [sharedItemDetails, setSharedItemDetails] = useState<ItemFields>(EMPTY_ITEM_FIELDS);
@@ -359,11 +365,13 @@ export function BookingAccordionFlow({ accountId, uxVariant, onUxVariantChange, 
   // ---- Validation (mirrors BookDelivery.tsx's logic, generalized to N recipients) ----
   const pickupComplete = isCompleteAddress(pickupAddress);
   const recipientsAddressComplete = recipients.every((r) => isCompleteAddress(r.address));
-  const pickupDateRequired = firstMile === 'pickup' && serviceType === 'standard';
+  const pickupDateRequired = firstMile === 'pickup' && (serviceType === 'standard' || serviceType === 'same_day');
+  const pickupCutoffHour = serviceType === 'same_day' ? SAME_DAY_PICKUP_CUTOFF_HOUR : STANDARD_PICKUP_CUTOFF_HOUR;
   const pickupDateSet = Boolean(pickupDate);
-  const pickupDateStale = pickupDateRequired && pickupDateSet && !isPickupDateSelectable(pickupDate!);
+  const pickupDateStale = pickupDateRequired && pickupDateSet && !isPickupDateSelectable(pickupDate!, pickupCutoffHour);
   const pickupDateComplete = !pickupDateRequired || (pickupDateSet && !pickupDateStale);
-  const section0Valid = pickupComplete && recipientsAddressComplete && pickupDateComplete && !addressFormOpen;
+  const section0Valid = pickupComplete && recipientsAddressComplete && pickupDateComplete && !addressFormOpen
+    && (!lockedServiceType || serviceable);
 
   const section1Valid = recipients.every((r) => itemFieldsValid(effectiveItemFor(r)));
 
@@ -419,6 +427,8 @@ export function BookingAccordionFlow({ accountId, uxVariant, onUxVariantChange, 
     ? (multi ? 'Every recipient needs a complete address.' : 'Choose a complete recipient address to continue.')
     : addressFormOpen
     ? 'Save the address you’re editing to continue.'
+    : (lockedServiceType && !serviceable)
+    ? 'Same-Day Delivery isn’t available for this recipient’s address.'
     : pickupDateStale
     ? 'Your selected pickup date is no longer available — choose another.'
     : !pickupDateComplete
@@ -430,7 +440,7 @@ export function BookingAccordionFlow({ accountId, uxVariant, onUxVariantChange, 
   const deliveryEstimateLabelFor = (recipientAddress: Address | null): string | undefined => {
     if (firstMile === 'dropoff') return undefined;
     if (serviceType === 'on_demand') return 'Within 40 minutes of pickup';
-    if (serviceType !== 'standard' || !pickupDate) return undefined;
+    if ((serviceType !== 'standard' && serviceType !== 'same_day') || !pickupDate) return undefined;
     const region = recipientAddress?.province ? classifyRegion(recipientAddress.province) : 'unknown';
     const [y, m, d] = pickupDate.split('-').map(Number);
     return estimateDeliveryDateRange(new Date(y, m - 1, d), serviceType, region).label;
@@ -569,9 +579,12 @@ export function BookingAccordionFlow({ accountId, uxVariant, onUxVariantChange, 
           >
             <IconChevronLeft className="h-5 w-5" />
           </button>
-          <h1 className="truncate text-lg font-semibold text-gray-900 lg:text-2xl lg:font-bold">Book a delivery</h1>
+          <h1 className="truncate text-lg font-semibold text-gray-900 lg:text-2xl lg:font-bold">
+            {lockedServiceType === 'same_day' ? 'Book a Same-Day Delivery' : 'Book a delivery'}
+          </h1>
         </div>
-        <BookingUxSwitcher value={uxVariant} onChange={onUxVariantChange} className="flex-shrink-0" />
+        {/* Wizard/Accordion is Standard Delivery's own prototype switcher — not applicable to the SDD flow, which is Accordion-only (see BookDelivery.tsx). */}
+        {!lockedServiceType && <BookingUxSwitcher value={uxVariant} onChange={onUxVariantChange} className="flex-shrink-0" />}
       </div>
 
       <div className="space-y-3">
@@ -671,6 +684,8 @@ export function BookingAccordionFlow({ accountId, uxVariant, onUxVariantChange, 
               onServiceTypeChange={(v) => { setServiceType(v); markDirty(); }}
               pickupDate={pickupDate}
               onPickupDateChange={(v) => { setPickupDate(v); markDirty(); }}
+              lockedServiceType={lockedServiceType}
+              onServiceabilityChange={setServiceable}
             />
 
             <Button variant="outline" className="w-full text-gray-900" disabled={!section0Valid} onClick={() => requestOpenSection(1)}>
