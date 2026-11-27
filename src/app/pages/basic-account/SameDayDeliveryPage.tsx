@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router';
 import {
-  IconClockHour4, IconCoin, IconTrendingUp, IconMapPin,
+  IconClockHour4, IconCoin, IconTrendingUp, IconMapPin, IconChevronLeft,
 } from '@tabler/icons-react';
 import { useAuth } from '../../contexts/AuthContext';
 import { PageHeader } from '../../components/ui/PageHeader';
@@ -307,23 +307,54 @@ export function SameDayDeliveryPage() {
 
   if (mode === 'single') {
     return (
-      <div className="space-y-3 p-4 lg:p-6">
-        <div className="flex justify-end">
-          <SameDayModeSwitcher value={mode} onChange={handleModeChange} />
+      <div className="p-4 lg:p-6">
+        {/* Same 1280px-max, centered container as Lead mode below, so the
+            switcher row and `BookDelivery`'s own desktop content share one
+            left/right edge — `BookDelivery`'s inner desktop wrapper is the
+            same max-width, so nesting them is a no-op once this outer one
+            is already the narrower of the two. Single mode's back button is
+            `BookingAccordionFlow`'s own existing mobile header row — not
+            duplicated here. */}
+        <div className="mx-auto w-full max-w-[1280px] space-y-3">
+          <div className="flex justify-end">
+            <SameDayModeSwitcher value={mode} onChange={handleModeChange} />
+          </div>
+          <BookDelivery serviceTypeLock="same_day" embedded />
         </div>
-        <BookDelivery serviceTypeLock="same_day" embedded />
       </div>
     );
   }
 
   return (
-    <div className="p-6 space-y-6">
-      <PageHeader
-        title="Same Day Delivery"
-        subtitle="Urgent, same-day delivery for time-sensitive orders."
-        action={<SameDayModeSwitcher value={mode} onChange={handleModeChange} />}
-      />
-      <SameDayLeadContent accountId={accountId} />
+    <div className="p-4 lg:p-6">
+      <div className="mx-auto w-full max-w-[1280px] space-y-4 lg:space-y-6">
+        {/* Mobile-only compact header — back button + title + switcher,
+            consistent with Single mode's own back button
+            (`BookingAccordionFlow`'s header row). Desktop never shows a
+            back button (per spec) and gets the full `PageHeader` instead. */}
+        <div className="flex items-center justify-between gap-2 lg:hidden">
+          <div className="flex min-w-0 items-center gap-2">
+            <button
+              type="button"
+              onClick={() => navigate('/dashboard')}
+              aria-label="Back"
+              className="flex-shrink-0 -ml-1.5 flex h-8 w-8 items-center justify-center rounded-md text-gray-500 hover:bg-gray-100 hover:text-gray-700"
+            >
+              <IconChevronLeft className="h-5 w-5" />
+            </button>
+            <h1 className="truncate text-lg font-semibold text-gray-900">Same Day Delivery</h1>
+          </div>
+          <SameDayModeSwitcher value={mode} onChange={handleModeChange} className="flex-shrink-0" />
+        </div>
+        <div className="hidden lg:block">
+          <PageHeader
+            title="Same Day Delivery"
+            subtitle="Urgent, same-day delivery for time-sensitive orders."
+            action={<SameDayModeSwitcher value={mode} onChange={handleModeChange} />}
+          />
+        </div>
+        <SameDayLeadContent accountId={accountId} />
+      </div>
     </div>
   );
 }

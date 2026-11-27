@@ -3,6 +3,67 @@
 > Lightweight resume/checkpoint file. Detailed June 2026 history was archived to
 > `docs/archive/session_log_2026-06.md`.
 
+## SDD page layout/navigation refinement — 1280px max-width, mobile bottom-nav/back (2026-11-27)
+
+Follow-up polish pass on the SDD prototype work directly below, focused on
+layout and mobile chrome, no new product behavior.
+
+- **Desktop 1280px max-width**: `SameDayDeliveryPage.tsx`'s Lead and Single
+  branches both wrap their header/switcher row and body content in one
+  shared `mx-auto w-full max-w-[1280px]` container, so both edges align and
+  recenter together at any viewport width (verified via exact
+  `getBoundingClientRect` math at 1920px: 192px margins on both sides, not
+  just eyeballed). `BookDelivery.tsx`'s own existing desktop wrapper (same
+  max-width) nests harmlessly inside it for Single mode. Lead's two-column
+  layout and global header/sidebar are untouched.
+- **Mobile bottom nav + header hidden for all 3 SDD modes**:
+  `BasicCorporateLayout.tsx`'s `isBookingFlow` flag (previously only
+  `/dashboard/book-delivery*`) now also matches `/dashboard/same-day-delivery*`
+  (covers Lead + Single, same route) and a new `isSddBulkRedirect` check
+  (`/dashboard/bulk-uploader` + `?serviceMode=same-day`, covers Bulk mode's
+  redirect target) — same mechanism Standard Delivery's booking flow already
+  used, just extended, so bottom nav/global header hide and the reserved
+  `pb-16` spacing drops automatically, and restoring on exit needs no extra
+  code (purely route-driven). A plain, non-SDD visit to Bulk Upload is
+  unaffected (verified). This also fixes a real visual bug: Single mode's
+  sticky "Total / Confirm Booking" bar is `fixed bottom-0` and was
+  previously colliding with the bottom nav (both pinned to the viewport
+  bottom) — now flush against the true viewport edge with nothing overlapping
+  (confirmed via `getBoundingClientRect`: bar bottom === `window.innerHeight`).
+- **Mobile back buttons for Lead and Bulk**: Lead gained a compact mobile-only
+  header (chevron-left + "Same Day Delivery" + the switcher, `lg:hidden`) —
+  desktop keeps the full `PageHeader` with no back button, in a separate
+  `hidden lg:block` block (matches `BookDelivery.tsx`'s own established
+  pattern of two breakpoint-isolated header blocks rather than one shared,
+  conditionally-styled one). Bulk mode's back button lives on
+  `BulkUploader.tsx` itself (mobile-only, shown only when arrived via
+  `?serviceMode=same-day` — a plain Bulk Upload visit never shows it),
+  navigating to `/dashboard`. Single mode's existing back button
+  (`BookingAccordionFlow`'s own header row) was left untouched — its
+  dirty-draft exit-confirmation behavior is unaffected, reused as-is.
+- `npm run typecheck` and `npm run build` clean (same pre-existing chunk-size
+  warning). Full suite run; no regressions expected (no business-logic
+  files touched, only layout/routing).
+- **Verified live in the browser** (1920px, 1024px, and 375px mobile, same
+  `ggx.auth` session-swap workaround, port 18020): exact centering math at
+  1920px; all three modes' mobile headers/back buttons/switcher placement;
+  confirmed zero `fixed bottom-*` elements and zero horizontal overflow on
+  every SDD mobile screen; Single mode's sticky footer flush at the true
+  viewport bottom; back-button navigation from all three modes back to
+  `/dashboard` with the bottom nav correctly restored; Standard Delivery
+  (mobile + desktop) and a plain Bulk Upload visit (mobile) both pixel-for-
+  pixel unchanged.
+- **Real bug noticed, pre-existing, out of this pass's scope**: the Basic
+  home's "Join" badge on the Same-Day Delivery shortcut can show briefly
+  stale after switching SDD prototype mode via client-side navigation back
+  to `/dashboard` (resolves correctly on a hard reload/fresh navigation) —
+  tied to how `BasicHome`/`BasicServiceShortcuts` re-render on SPA back-nav,
+  unrelated to anything touched in either this pass or the SDD feature pass
+  before it. Not fixed here (out of scope); worth a follow-up if it matters
+  for the prototype demo.
+- Not committed yet — see this session's final report for the commit
+  decision.
+
 ## Same-Day Delivery prototype switch + enhanced SDD experience, Basic account (2026-11-27)
 
 Implemented the full SDD (Same-Day Delivery) feature request: a stakeholder

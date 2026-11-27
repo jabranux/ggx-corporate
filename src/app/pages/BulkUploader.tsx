@@ -3,7 +3,7 @@ import { useNavigate, useSearchParams } from 'react-router';
 import {
   IconUpload, IconDownload, IconFileSpreadsheet, IconMapPin, IconClock,
   IconLink, IconX, IconTruckDelivery, IconBuildingStore,
-  IconPhone, IconArrowUp, IconBolt,
+  IconPhone, IconArrowUp, IconBolt, IconChevronLeft,
 } from '@tabler/icons-react';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '../components/ui/Card';
 import { Button } from '../components/ui/Button';
@@ -328,6 +328,24 @@ export function BulkUploader() {
 
   return (
     <div className="p-6 space-y-6">
+      {/* Mobile-only back button — only when opened via the SDD prototype's
+          Bulk mode (the global mobile header is hidden for this route in
+          that case too, `BasicCorporateLayout.tsx`'s `isBookingFlow`, same
+          pattern as the Standard Delivery booking flow replacing it with
+          its own compact header). Standalone Bulk Upload access is
+          unaffected — no back button, global header untouched. */}
+      {fromSddPrototype && (
+        <button
+          type="button"
+          onClick={() => navigate('/dashboard')}
+          className="-ml-1.5 flex items-center gap-2 lg:hidden"
+        >
+          <span className="flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-md text-gray-500 hover:bg-gray-100 hover:text-gray-700">
+            <IconChevronLeft className="h-5 w-5" />
+          </span>
+          <span className="text-sm font-medium text-gray-500">Same Day Delivery</span>
+        </button>
+      )}
       <div className="flex flex-col md:flex-row md:items-start md:justify-between gap-4">
         <div>
           <h1 className="text-3xl font-bold text-gray-900">Bulk Upload</h1>

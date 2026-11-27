@@ -76,7 +76,18 @@ export function BasicCorporateLayout() {
   // `BookingHeader` — a dedicated, focused layout for a multi-step flow,
   // per the product spec. The desktop sidebar is left in place (not asked
   // for, and it sits beside the content rather than competing with it).
-  const isBookingFlow = location.pathname.startsWith('/dashboard/book-delivery');
+  //
+  // The SDD prototype experience (`SameDayDeliveryPage.tsx`) gets the exact
+  // same treatment across all three of its modes — Lead and Single both
+  // render at `/dashboard/same-day-delivery`; Bulk mode immediately
+  // redirects to `/dashboard/bulk-uploader?serviceMode=same-day`, which is
+  // why that one needs its own query-param check rather than a path match.
+  // A plain, non-SDD visit to Bulk Upload is unaffected either way.
+  const isSddBulkRedirect = location.pathname === '/dashboard/bulk-uploader'
+    && new URLSearchParams(location.search).get('serviceMode') === 'same-day';
+  const isBookingFlow = location.pathname.startsWith('/dashboard/book-delivery')
+    || location.pathname.startsWith('/dashboard/same-day-delivery')
+    || isSddBulkRedirect;
 
   // The mobile home (`BasicHome.tsx`) integrates the notification bell into
   // its own greeting row and drops this header's logo entirely on mobile —
