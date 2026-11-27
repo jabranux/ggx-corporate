@@ -61,6 +61,57 @@ layout and mobile chrome, no new product behavior.
   unrelated to anything touched in either this pass or the SDD feature pass
   before it. Not fixed here (out of scope); worth a follow-up if it matters
   for the prototype demo.
+- Committed (`3868507`) and pushed to both `origin` and `james` remotes.
+
+## SDD Bulk Uploader correction + in-memory-only prototype state (2026-11-27)
+
+Follow-up correction pass: the Bulk Uploader's own header/chrome when reached
+through SDD, plus a full rework of how the Lead | Single | Bulk prototype
+mode is held — no longer persisted at all.
+
+- **Bulk Uploader header, when reached via SDD** (`BulkUploader.tsx`):
+  removed the separate "Same Day Delivery" labeled header row and the orange
+  prototype-advisory banner entirely. "Bulk Upload" is now the only page
+  title, unconditionally. Mobile gets a compact header (back chevron + "Bulk
+  Upload" title + the switcher, `lg:hidden`) matching the same pattern used
+  by the other SDD modes' own mobile headers; desktop keeps the normal full
+  header with the switcher placed beside the title (same spot as the other
+  modes' `PageHeader` `action` slot), ahead of the existing Template CSV/XLS
+  buttons. A plain (non-SDD) Bulk Upload visit renders neither the back
+  button nor the switcher — fully unchanged.
+- **Prototype mode is no longer persisted anywhere.** Replaced
+  `lib/basicSameDayMode.ts` (localStorage, keyed by account id) with
+  `contexts/SameDayPrototypeContext.tsx` — an in-memory-only
+  `SameDayPrototypeProvider`/`useSameDayPrototypeMode()` mounted once in
+  `BasicCorporateLayout.tsx` (wraps the whole dashboard shell, so both
+  `SameDayDeliveryPage` and `BulkUploader` — separate routes — share one live
+  value). The provider watches the route via `useLocation`: switching Lead
+  <-> Single <-> Bulk while still inside the SDD experience (including the
+  Bulk Uploader's own SDD entry) never resets anything, but the instant the
+  route leaves the SDD experience — back button, sidebar/bottom-nav link, a
+  hard reload — mode snaps back to `'lead'`. The dashboard itself is always a
+  non-SDD route, so by construction it only ever sees Lead.
+- **`basicServiceCatalog.ts` simplified accordingly**: `resolveServiceBadge`
+  and `resolveServiceHref` no longer branch on the prototype mode at all —
+  there's nothing left to branch on, since the dashboard only ever sees
+  Lead now. The Same Day Delivery shortcut's badge is just the real
+  enrollment status (`basicSameDayEnrollment.ts`), and its href is just its
+  own page, like every other catalog item.
+- **Side effect — fixes a previously-flagged real bug**: the "Join" badge
+  going briefly stale after switching SDD mode and returning to the
+  dashboard via client-side navigation (flagged in the entry below, not
+  fixed there) no longer reproduces, since the badge computation no longer
+  reads the prototype mode at all. Verified live: Bulk -> sidebar
+  "Dashboard" link (SPA nav, no reload) -> badge shows "Join" immediately.
+- `npm run typecheck` and `npm run build` clean (same pre-existing
+  chunk-size warning, unrelated). Full suite run (276 pass / 0 fail / 27
+  pre-existing Docker-dependent cancellations — unchanged).
+- **Verified live in the browser** (375px mobile and desktop, same account):
+  all 6 spec validation scenarios — Dashboard -> SDD -> Lead; SDD -> Bulk ->
+  Same-Day auto-selected; SDD -> Bulk -> switch to Standard Upload -> header
+  unchanged; SDD -> Bulk -> exit -> reopen SDD -> Lead; SDD -> Single -> exit
+  -> reopen SDD -> Lead; SDD -> Bulk -> exit -> standalone Bulk Uploader ->
+  no inherited state/switcher/back-button. All passed on both breakpoints.
 - Not committed yet — see this session's final report for the commit
   decision.
 

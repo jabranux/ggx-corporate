@@ -17,7 +17,6 @@ import {
 import type { BasicKycAnswers, BasicKycProfile, KycDailyOrders, KycDeliveryNeeds, KycMainUse, KycSellingChannel } from './basicKycProfile';
 import { hasCompletedKyc } from './basicKycProfile';
 import { getSameDayEnrollment } from './basicSameDayEnrollment';
-import { getSameDayMode } from './basicSameDayMode';
 
 // Reuses the legacy `/basic` module's own illustrated service icons (never
 // imported FROM that module's components — just the same static assets) so
@@ -178,16 +177,17 @@ export interface ServiceBadge {
 
 /**
  * The badge a catalog item should currently show. Static badges ("Free",
- * "New") come from the catalog; Same Day Delivery's depends on the SDD
- * prototype switch (`basicSameDayMode.ts`) — Single/Bulk simulate an already-
- * approved account, so the badge is dropped entirely, same as a real
- * approval would. Lead mode falls through to the real (pre-existing)
- * enrollment status (`basicSameDayEnrollment.ts`): not enrolled -> "Join",
- * pending -> "Pending", rejected -> "Join" (reapply allowed).
+ * "New") come from the catalog; Same Day Delivery's comes from the real
+ * (pre-existing) enrollment status (`basicSameDayEnrollment.ts`): not
+ * enrolled -> "Join", pending -> "Pending", rejected -> "Join" (reapply
+ * allowed), approved -> none. The SDD prototype switch
+ * (`SameDayPrototypeContext.tsx`) never affects this: it's in-memory and
+ * always reset to Lead by the time the dashboard (where this renders) is on
+ * screen, so the dashboard shortcut always reflects the account's real
+ * enrollment state.
  */
 export function resolveServiceBadge(item: BasicServiceItem, accountId: string): ServiceBadge | null {
   if (item.id === 'same-day-delivery') {
-    if (getSameDayMode(accountId) !== 'lead') return null;
     const { status } = getSameDayEnrollment(accountId);
     if (status === 'approved') return null;
     return status === 'pending' ? { label: 'Pending', tone: 'warning' } : { label: 'Join', tone: 'info' };
@@ -202,19 +202,15 @@ export const SERVICE_BADGE_CLASS: Record<ServiceBadgeTone, string> = {
 };
 
 /**
- * Where a shortcut should send the user. Same Day Delivery branches on the
- * prototype switch: Bulk mode skips the SDD page entirely and goes straight
- * to the Bulk Uploader with Same-Day pre-selected (`BulkUploader.tsx` reads
- * `serviceMode`); Lead and Single both land on the SDD page itself, which
- * renders the right content for the current mode
- * (`SameDayDeliveryPage.tsx`). A real approved enrollment (outside the
- * prototype) also goes to the SDD page now, not straight to Standard
- * booking — Single mode is SDD's own dedicated flow.
+ * Where a shortcut should send the user. The dashboard always enters the SDD
+ * experience at Lead (`SameDayPrototypeContext.tsx`) — Bulk/Single are only
+ * reachable by switching modes from inside the SDD experience itself, never
+ * as a dashboard entry point — so Same Day Delivery's href is just its own
+ * page like any other catalog item; `accountId` is accepted for signature
+ * symmetry with `resolveServiceBadge` but unused here.
  */
 export function resolveServiceHref(item: BasicServiceItem, accountId: string): string {
-  if (item.id === 'same-day-delivery' && getSameDayMode(accountId) === 'bulk') {
-    return '/dashboard/bulk-uploader?serviceMode=same-day';
-  }
+  void accountId;
   return item.href;
 }
 

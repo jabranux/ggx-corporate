@@ -13,7 +13,7 @@ import { Select } from '../../components/ui/Select';
 import { SameDayModeSwitcher } from '../../components/SameDayModeSwitcher';
 import { InAppBrowserDrawer } from '../../components/InAppBrowserDrawer';
 import { BookDelivery } from './BookDelivery';
-import { getSameDayMode, setSameDayMode, type SameDayPrototypeMode } from '../../lib/basicSameDayMode';
+import { useSameDayPrototypeMode } from '../../contexts/SameDayPrototypeContext';
 import {
   getSameDayEnrollment,
   submitSameDayApplication,
@@ -279,27 +279,23 @@ function SameDayLeadContent({ accountId }: { accountId: string }) {
 
 /**
  * Same Day Delivery entry point for Basic accounts — now routed through the
- * SDD prototype switch (`basicSameDayMode.ts`): Lead (not enrolled, default),
- * Single (simulates an approved account's own dedicated single-booking
- * flow), and Bulk (simulates an approved account, redirects straight to the
- * Bulk Uploader with Same-Day pre-selected). See `basicSameDayMode.ts`'s own
- * docblock for why this is persisted rather than reset-on-visit like the
- * Wizard/Accordion switcher.
+ * SDD prototype switch: Lead (not enrolled, default), Single (simulates an
+ * approved account's own dedicated single-booking flow), and Bulk (simulates
+ * an approved account, redirects straight to the Bulk Uploader with
+ * Same-Day pre-selected). See `SameDayPrototypeContext.tsx`'s own docblock
+ * for why the mode is in-memory/session-scoped rather than persisted.
  */
 export function SameDayDeliveryPage() {
   const { user } = useAuth();
   const accountId = user?.accountId ?? 'basic-guest';
   const navigate = useNavigate();
-  const [mode, setMode] = useState<SameDayPrototypeMode>(() => getSameDayMode(accountId));
+  const { mode, setMode } = useSameDayPrototypeMode();
 
   useEffect(() => {
     if (mode === 'bulk') navigate('/dashboard/bulk-uploader?serviceMode=same-day', { replace: true });
   }, [mode, navigate]);
 
-  const handleModeChange = (next: SameDayPrototypeMode) => {
-    setSameDayMode(accountId, next);
-    setMode(next);
-  };
+  const handleModeChange = setMode;
 
   // Mid-redirect to the Bulk Uploader — render nothing rather than a flash
   // of Lead/Single content for the instant before navigation commits.

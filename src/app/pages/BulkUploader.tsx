@@ -31,7 +31,7 @@ import { useJourney } from '../contexts/JourneyContext';
 import { useModuleAccessContext } from '../hooks/useModuleAccess';
 import { getFeatureStateSync } from '../services/featureEnablementService';
 import { SameDayModeSwitcher } from '../components/SameDayModeSwitcher';
-import { setSameDayMode } from '../lib/basicSameDayMode';
+import { useSameDayPrototypeMode, type SameDayPrototypeMode } from '../contexts/SameDayPrototypeContext';
 
 /** Page-level service mode (chosen for the whole batch, not per row). */
 const MODE_LABELS: Record<'standard' | 'same-day' | 'on-demand', string> = {
@@ -137,6 +137,17 @@ export function BulkUploader() {
     if (fromSddPrototype) setUploadMode('same-day');
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [fromSddPrototype]);
+
+  // Lead | Single | Bulk switcher, shown only when reached via the SDD
+  // prototype. Switching away from Bulk returns to the SDD page itself;
+  // the mode lives in the shared, in-memory-only `SameDayPrototypeContext`
+  // (never localStorage — see its own docblock), so no explicit reset is
+  // needed here on exit.
+  const { setMode: setSddMode } = useSameDayPrototypeMode();
+  const handleSddModeChange = (next: SameDayPrototypeMode) => {
+    setSddMode(next);
+    if (next !== 'bulk') navigate('/dashboard/same-day-delivery');
+  };
 
   const [selectedFile, setSelectedFile] = useState<{ name: string; size: string } | null>(null);
   const [pendingUploadId, setPendingUploadId] = useState<string | null>(null);
@@ -328,25 +339,29 @@ export function BulkUploader() {
 
   return (
     <div className="p-6 space-y-6">
-      {/* Mobile-only back button — only when opened via the SDD prototype's
-          Bulk mode (the global mobile header is hidden for this route in
-          that case too, `BasicCorporateLayout.tsx`'s `isBookingFlow`, same
-          pattern as the Standard Delivery booking flow replacing it with
-          its own compact header). Standalone Bulk Upload access is
-          unaffected — no back button, global header untouched. */}
+      {/* Mobile-only compact header — back button beside the "Bulk Upload"
+          title, consistent with the established mobile back-nav pattern,
+          with the Lead | Single | Bulk switcher at the end of the row (same
+          placement as the other SDD modes' own mobile headers). Only when
+          opened via the SDD prototype's Bulk mode; standalone Bulk Upload
+          access renders the normal header below instead, unaffected. */}
       {fromSddPrototype && (
-        <button
-          type="button"
-          onClick={() => navigate('/dashboard')}
-          className="-ml-1.5 flex items-center gap-2 lg:hidden"
-        >
-          <span className="flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-md text-gray-500 hover:bg-gray-100 hover:text-gray-700">
-            <IconChevronLeft className="h-5 w-5" />
-          </span>
-          <span className="text-sm font-medium text-gray-500">Same Day Delivery</span>
-        </button>
+        <div className="flex items-center justify-between gap-2 lg:hidden">
+          <div className="flex min-w-0 items-center gap-2">
+            <button
+              type="button"
+              onClick={() => navigate('/dashboard')}
+              aria-label="Back"
+              className="flex-shrink-0 -ml-1.5 flex h-8 w-8 items-center justify-center rounded-md text-gray-500 hover:bg-gray-100 hover:text-gray-700"
+            >
+              <IconChevronLeft className="h-5 w-5" />
+            </button>
+            <h1 className="truncate text-lg font-semibold text-gray-900">Bulk Upload</h1>
+          </div>
+          <SameDayModeSwitcher value="bulk" onChange={handleSddModeChange} className="flex-shrink-0" />
+        </div>
       )}
-      <div className="flex flex-col md:flex-row md:items-start md:justify-between gap-4">
+      <div className={`flex flex-col md:flex-row md:items-start md:justify-between gap-4 ${fromSddPrototype ? 'hidden lg:flex' : ''}`}>
         <div>
           <h1 className="text-3xl font-bold text-gray-900">Bulk Upload</h1>
           <p className="text-gray-600 mt-1 max-w-2xl">
@@ -354,6 +369,9 @@ export function BulkUploader() {
           </p>
         </div>
         <div className="flex flex-shrink-0 items-center gap-2">
+          {/* Same placement as the other SDD modes' desktop header (their
+              `PageHeader`'s own `action` slot, beside the title). */}
+          {fromSddPrototype && <SameDayModeSwitcher value="bulk" onChange={handleSddModeChange} />}
           <Button variant="outline" onClick={downloadBulkTemplate}>
             <IconDownload className="w-4 h-4 mr-2" />
             Template (CSV)
@@ -364,30 +382,6 @@ export function BulkUploader() {
           </Button>
         </div>
       </div>
-
-      {/* Reachable only when opened via the SDD prototype's Bulk mode — the
-          switch otherwise lives on `SameDayDeliveryPage.tsx`; this is just a
-          way back to Lead/Single without losing the prototype control
-          entirely once Bulk redirects here. */}
-      {fromSddPrototype && (
-        <div className="flex items-center justify-between gap-3 rounded-lg border border-orange-200 bg-orange-50 px-4 py-2.5">
-          <p className="text-sm text-orange-800">Opened from the Same-Day Delivery prototype switch, set to <strong>Bulk</strong>.</p>
-          <SameDayModeSwitcher
-            value="bulk"
-            onChange={(next) => {
-              // SDD's prototype mode is keyed by the signed-in Basic
-              // account's own id (`SameDayDeliveryPage.tsx` reads the same
-              // key) — NOT `uploadAccount.accountId`, which is the
-              // Business+ Main/Subaccount scope this page otherwise reads
-              // for everything else and would silently write to the wrong
-              // key for a Basic session.
-              setSameDayMode(user?.accountId ?? 'basic-guest', next);
-              if (next !== 'bulk') navigate('/dashboard/same-day-delivery');
-            }}
-            className="flex-shrink-0"
-          />
-        </div>
-      )}
 
       {/* Mode toggle */}
       <Card>
