@@ -112,8 +112,15 @@ mode is held — no longer persisted at all.
   unchanged; SDD -> Bulk -> exit -> reopen SDD -> Lead; SDD -> Single -> exit
   -> reopen SDD -> Lead; SDD -> Bulk -> exit -> standalone Bulk Uploader ->
   no inherited state/switcher/back-button. All passed on both breakpoints.
-- Not committed yet — see this session's final report for the commit
-  decision.
+- **Regression caught and fixed before commit**: `useSameDayPrototypeMode()`
+  is called unconditionally in `BulkUploader.tsx`, but that route is shared
+  with Business+/Admin/Manager sessions (`RootLayout`, not
+  `BasicCorporateLayout`) — mounting the provider only in
+  `BasicCorporateLayout` crashed the page for Business+ users. Fixed by
+  mounting `SameDayPrototypeProvider` in `DashboardShell.tsx` instead, above
+  both layout branches. Caught by `tests/bulk-upload-lifecycle.test.mjs`
+  (reproduced in isolation, re-verified green after the fix).
+- Committed (`63569db`) and pushed to both `origin` and `james` remotes.
 
 ## Same-Day Delivery prototype switch + enhanced SDD experience, Basic account (2026-11-27)
 
