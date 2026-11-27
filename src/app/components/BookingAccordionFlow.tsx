@@ -230,7 +230,7 @@ function SectionCard({
         )}
       </button>
       {open && (
-        <CardContent className="rounded-b-xl bg-white px-4 pb-4 pt-0">
+        <CardContent className="rounded-b-xl bg-white px-4 pb-4 pt-4">
           {children}
         </CardContent>
       )}
