@@ -3,6 +3,80 @@
 > Lightweight resume/checkpoint file. Detailed June 2026 history was archived to
 > `docs/archive/session_log_2026-06.md`.
 
+## Basic Account — Transactions, Earnings, Payout Settings implemented (2026-11-28)
+
+Implemented the four requested pages for the Basic Account, reusing the
+Corporate implementation per the task's own instruction, rather than building
+new UI from scratch.
+
+- **Transactions / Transaction Details** (`pages/Transactions.tsx`,
+  `pages/TransactionDetails.tsx`) were already shared routes between Corporate
+  and Basic (`useScopedAccountId` already special-cased `accountSegment ===
+  'basic'` to always resolve to its own account id) — they just had zero
+  Basic-segment mock data, so Basic saw an empty Transactions list. Added
+  `data/basicTransactions.ts` (18 rows for demo account `basic-jamie-cruz` /
+  "Jamie's Store" — see `api/_lib/demoUsers.ts`): all 7 statuses, COD and
+  prepaid (GCash/Card), Standard and Same-Day, one bulk-upload batch (2 rows)
+  so the existing "By Batch" view also has real content. Registered the
+  account in `data/accounts.ts`'s id↔name bridge so the existing
+  `txAccountId`/subaccount-matching logic scopes it correctly with no changes
+  to that logic itself.
+- **Earnings / Payout Settings** (`pages/basic-account/BasicEarningsPage.tsx`,
+  `PayoutSettingsPage.tsx`) were "coming soon" stubs — rewrote both, reusing
+  Corporate's `Earnings.tsx` (summary cards + settlement-history table) and
+  `PaymentSettings.tsx` (OTP-gated payout-bank-account cards: add/edit/
+  remove/set-primary) patterns, trimmed of Corporate/Business+-only pieces
+  (no subaccount filter/column, no Payment Methods section — Basic has no
+  Billing page to pay against). New `data/earnings.ts` Basic settlement rows
+  (`BASIC_SETTLEMENTS`, 4 weekly buckets: pending → scheduled → deposited ×2)
+  reference the exact same tracking numbers/COD amounts as
+  `basicTransactions.ts`, per the task's "mock data must be consistent across
+  related pages" requirement. `services/payoutBankService.ts` seeded one
+  verified BPI payout account for the Basic demo account (its
+  `getPayoutOwnerAccountId` previously always resolved to Main Account — a
+  Business+-only hierarchy concept — now a Basic account id resolves to
+  itself, since Basic has no Main/Subaccount hierarchy to settle through).
+- **Real bug found and fixed before committing**: the first data-wiring pass
+  spliced `basicTransactions` directly into `transactionService.ts`'s shared
+  `allTransactions()`/`allSummaries()` pools (and `BASIC_SETTLEMENTS` into the
+  flat `SETTLEMENTS` array) — this made Basic's own rows resolve correctly,
+  but also leaked them into the Business+ Main Account's *unscoped*
+  consolidated views (`getTransactions()` with no filter, and
+  `getTransactionsBySubaccountId('main')`/`getTransactionBatches(undefined)`),
+  since those paths return every row with no segment check. A Basic account
+  is a separate tenant, not a Business+ subaccount, so this was real
+  cross-tenant data exposure, not just a cosmetic issue. Fixed by keeping the
+  Business+ pools Basic-free by construction and adding an explicit
+  `isBasicAccountId` allow-list check in `getTransactionsBySubaccountId`,
+  `getTransactionBatches`, and `earningsService.ts`'s `getSettlements` — Basic
+  rows are now reachable ONLY when the caller scopes explicitly to the Basic
+  account's own id. Confirmed live via direct service calls from both account
+  sessions: zero leakage either direction, Basic still sees its 18
+  transactions / 1 batch / 4 settlements.
+- Extracted `lib/csv.ts` (`csvCell`/`downloadCsv`) out of `Transactions.tsx`
+  (was defined inline there) so `BasicEarningsPage.tsx`'s own CSV export
+  reuses it instead of duplicating the same ~15 lines.
+- `npm run typecheck` and `npm run build` clean (same pre-existing
+  chunk-size warning only). Full suite **276/276** passing (`npm test`); 27
+  pre-existing Docker-dependent cancellations (same cause as prior sessions).
+- **Verified live in the browser** (desktop 1024px + mobile 375px, demo Basic
+  quick-login account, `ggx.auth` localStorage session-swap, port 18030):
+  Transactions list/filters/search, Transaction Details (claims/report-issue/
+  timeline all render correctly off the new mock data), "By Batch" view,
+  Earnings summary cards + settlement history + payout-account card, and
+  Payout Settings' full Add Payout Account → OTP (`123456`) → verified flow;
+  separately confirmed as the Business+ Main Account that Transactions/
+  Earnings/batches are pixel-for-pixel unchanged and show zero Basic rows.
+- **Not done / deferred**: no separate Earnings Settlement Detail page for
+  Basic (not in the task's explicit page list; Settlement IDs render as plain
+  text, matching the task's narrower scope). "Order Source & Attribution"
+  on Transaction Details still shows "Account scope: Main Account" for a
+  Basic transaction — a pre-existing, shared-component label that doesn't
+  quite fit Basic's no-hierarchy model; left as-is (cosmetic, not a Corporate-
+  exclusive control, and changing the shared component's wording was out of
+  this task's scope). Committed (`fa493f1`) — not pushed, per this repo's
+  standing rule.
+
 ## SDD page layout/navigation refinement — 1280px max-width, mobile bottom-nav/back (2026-11-27)
 
 Follow-up polish pass on the SDD prototype work directly below, focused on
