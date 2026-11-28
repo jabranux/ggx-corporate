@@ -79,6 +79,7 @@ import {
   type Party,
 } from '../data/transactions';
 import { getAccountIdByName } from '../data/accounts';
+import { basicTransactions } from '../data/basicTransactions';
 import { getSettlement } from '../data/earnings';
 import type { SettlementTransaction } from '../data/earnings';
 import {
@@ -267,6 +268,18 @@ function allSummaries(): TransactionSummary[] {
   return [...synthesizedTransactions().map(toSummary), ...synthesizedBulkBatchTransactions().map(toSummary), ...deliveries];
 }
 
+/**
+ * A Basic account is a separate tenant, not a Business+ subaccount — its rows
+ * must never appear in the Business+ Main Account's consolidated view (the
+ * `allTransactions()`/`allSummaries()` pools above deliberately exclude
+ * `basicTransactions`). They're only reachable by scoping explicitly to a
+ * Basic account id, which `getTransactionsBySubaccountId`/`getTransactionBatches`
+ * check for below.
+ */
+function isBasicAccountId(id: string | undefined): boolean {
+  return !!id && id.startsWith('basic-');
+}
+
 /** Attribution display helpers + label maps (re-exported for UI consumers). */
 export { sourceTypeLabel, bookingMethodGroup, SOURCE_TYPE_LABEL, BOOKING_METHOD_LABEL };
 
@@ -361,6 +374,9 @@ export async function getTransactionById(
 ): Promise<Transaction | null> {
   const seed = getTransactionByTracking(trackingNumber);
   if (seed) return seed;
+  // Basic-segment seed rows live in a separate module (see data/basicTransactions.ts).
+  const basicSeed = basicTransactions.find((t) => t.trackingNumber === trackingNumber);
+  if (basicSeed) return basicSeed;
   // Fall back to a synthesized delivery from an accepted storefront order.
   const order = getOrderByTracking(trackingNumber);
   if (order) return buildTransactionFromOrder(order) ?? null;
@@ -392,6 +408,8 @@ export async function getTransactionById(
 export async function getTransactionsBySubaccountId(
   subaccountId: string
 ): Promise<TransactionSummary[]> {
+  // Basic accounts are a separate tenant pool entirely — see isBasicAccountId.
+  if (isBasicAccountId(subaccountId)) return basicTransactions.map(toSummary);
   if (subaccountId === 'main') return allSummaries();
 
   // Match via batch origin OR the subaccount-name→id bridge, so batch, manual,
@@ -624,10 +642,14 @@ export async function getTransactionBatches(
   subaccountId?: string
 ): Promise<TransactionBatchGroup[]> {
   const map = new Map<string, { batch: TransactionBatch; items: Transaction[] }>();
+  // Basic accounts are a separate tenant pool — never mixed into the
+  // Business+ `allTransactions()` pool (see isBasicAccountId).
+  const basicScope = isBasicAccountId(subaccountId);
+  const pool = basicScope ? basicTransactions : allTransactions();
 
-  for (const tx of allTransactions()) {
+  for (const tx of pool) {
     if (!tx.batch) continue;
-    if (subaccountId && subaccountId !== 'main' && tx.batch.accountId !== subaccountId) continue;
+    if (!basicScope && subaccountId && subaccountId !== 'main' && tx.batch.accountId !== subaccountId) continue;
     const key = tx.batch.batchId;
     if (!map.has(key)) map.set(key, { batch: tx.batch, items: [] });
     map.get(key)!.items.push(tx);
@@ -637,18 +659,21 @@ export async function getTransactionBatches(
   // rows produces zero synthesized transactions (`buildTransactionsFromBulkBatch`)
   // and so would otherwise never appear above — indistinguishable from a
   // nonexistent batch id. It's still a real, existing (empty) batch, so seed an
-  // entry for it directly from the upload record.
-  for (const record of getSessionUploads()) {
-    if (record.status !== 'awaiting-payment' && record.status !== 'completed') continue;
-    if (map.has(record.id)) continue;
-    if (subaccountId && subaccountId !== 'main' && record.accountId !== subaccountId) continue;
-    map.set(record.id, {
-      batch: { batchId: record.id, fileName: record.fileName, uploadedVia: 'bulk_upload', accountId: record.accountId, accountName: record.accountName },
-      items: [],
-    });
+  // entry for it directly from the upload record. (Basic scope has no session
+  // uploads of its own in this pool — skip entirely.)
+  if (!basicScope) {
+    for (const record of getSessionUploads()) {
+      if (record.status !== 'awaiting-payment' && record.status !== 'completed') continue;
+      if (map.has(record.id)) continue;
+      if (subaccountId && subaccountId !== 'main' && record.accountId !== subaccountId) continue;
+      map.set(record.id, {
+        batch: { batchId: record.id, fileName: record.fileName, uploadedVia: 'bulk_upload', accountId: record.accountId, accountName: record.accountName },
+        items: [],
+      });
+    }
   }
 
-  const summaryIndex = allSummaries();
+  const summaryIndex = basicScope ? basicTransactions.map(toSummary) : allSummaries();
   const groups: TransactionBatchGroup[] = Array.from(map.values()).map(({ batch, items }) => {
     const summaries = items
       .map((t) => summaryIndex.find((d) => d.tracking === t.trackingNumber))

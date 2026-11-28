@@ -131,3 +131,80 @@ export const SETTLEMENTS: Settlement[] = [
 export function getSettlement(id: string): Settlement | undefined {
   return SETTLEMENTS.find((s) => s.id === id);
 }
+
+// ── Basic-segment settlements ────────────────────────────────────────────────
+// Built from the same COD tracking numbers/amounts as `data/basicTransactions.ts`
+// (demo Basic account 'basic-jamie-cruz' / "Jamie's Store" — see
+// api/_lib/demoUsers.ts) so Earnings/Payout history stays consistent with the
+// Transactions/Transaction Details pages. Filtered in via `getSettlements`'s
+// existing `subaccountId` filter — no new service code needed.
+export const BASIC_SETTLEMENTS: Settlement[] = [
+  {
+    id: 'SET-BASIC-2026-11-W4',
+    source: 'COD',
+    period: 'Nov 22–28, 2026',
+    grossAmount: 4960,
+    fees: 148.80,
+    netAmount: 4811.20,
+    status: 'pending',
+    expectedDate: '2026-12-02',
+    subaccount: "Jamie's Store",
+    subaccountId: 'basic-jamie-cruz',
+    transactions: [
+      { trackingNumber: 'GGXB-2026-10017', recipient: 'Patricia Mendoza', destination: 'Quezon City', codAmount: 3400, fees: 102.00, net: 3298.00, status: 'delivered' },
+      { trackingNumber: 'GGXB-2026-10018', recipient: 'Enrico Salazar',   destination: 'Pasig City',   codAmount: 1560, fees: 46.80,  net: 1513.20, status: 'delivered' },
+    ],
+  },
+  {
+    id: 'SET-BASIC-2026-11-W3',
+    source: 'COD',
+    period: 'Nov 15–21, 2026',
+    grossAmount: 2675,
+    fees: 80.25,
+    netAmount: 2594.75,
+    status: 'scheduled',
+    expectedDate: '2026-11-24',
+    subaccount: "Jamie's Store",
+    subaccountId: 'basic-jamie-cruz',
+    transactions: [
+      { trackingNumber: 'GGXB-2026-10016', recipient: 'Joshua Bautista', destination: 'Muntinlupa City', codAmount: 2675, fees: 80.25, net: 2594.75, status: 'delivered' },
+      { trackingNumber: 'GGXB-2026-10009', recipient: 'Michelle Ong',    destination: 'Cebu City',       codAmount: 1700, fees: 51.00, net: 1649.00, status: 'failed' },
+    ],
+  },
+  {
+    id: 'SET-BASIC-2026-11-W2',
+    source: 'COD',
+    period: 'Nov 8–14, 2026',
+    grossAmount: 1890,
+    fees: 56.70,
+    netAmount: 1833.30,
+    status: 'deposited',
+    expectedDate: '2026-11-17',
+    subaccount: "Jamie's Store",
+    subaccountId: 'basic-jamie-cruz',
+    transactions: [
+      { trackingNumber: 'GGXB-2026-10015', recipient: 'Samantha Yu', destination: 'Las Piñas City', codAmount: 1890, fees: 56.70, net: 1833.30, status: 'delivered' },
+      { trackingNumber: 'GGXB-2026-10010', recipient: 'Rafael Cruz', destination: 'Davao City',      codAmount: 2050, fees: 61.50, net: 1988.50, status: 'returned' },
+    ],
+  },
+  {
+    id: 'SET-BASIC-2026-11-W1',
+    source: 'COD',
+    period: 'Nov 1–7, 2026',
+    grossAmount: 7520,
+    fees: 225.60,
+    netAmount: 7294.40,
+    status: 'deposited',
+    expectedDate: '2026-11-10',
+    subaccount: "Jamie's Store",
+    subaccountId: 'basic-jamie-cruz',
+    transactions: [
+      { trackingNumber: 'GGXB-2026-10012', recipient: 'Victor Aquino',   destination: 'San Juan City',  codAmount: 4300, fees: 129.00, net: 4171.00, status: 'delivered' },
+      { trackingNumber: 'GGXB-2026-10013', recipient: 'Grace Lim',       destination: 'Antipolo City',  codAmount: 1120, fees: 33.60,  net: 1086.40, status: 'delivered' },
+      { trackingNumber: 'GGXB-2026-10001', recipient: 'Liza Fernandez',  destination: 'Quezon City',    codAmount: 1250, fees: 37.50,  net: 1212.50, status: 'delivered' },
+      { trackingNumber: 'GGXB-2026-10002', recipient: 'Mark Villanueva', destination: 'Makati City',    codAmount: 850,  fees: 25.50,  net: 824.50,  status: 'delivered' },
+    ],
+  },
+];
+
+SETTLEMENTS.push(...BASIC_SETTLEMENTS);

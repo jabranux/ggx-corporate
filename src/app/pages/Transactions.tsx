@@ -19,6 +19,7 @@ import { getFeatureStateSync } from '../services/featureEnablementService';
 import { useModuleAccessContext } from '../hooks/useModuleAccess';
 import { StoreOrdersPanel } from '../components/StoreOrdersPanel';
 import { ServiceTypeBadge } from '../components/ServiceTypeBadge';
+import { csvCell, downloadCsv } from '../lib/csv';
 // Data access goes through the transactionService facade (not the data module
 // directly). The service shapes data the UI needs; in production it is fronted
 // by the GGX Corporate BFF over OMS/fulfillment/FTX. See transactionService.ts.
@@ -41,20 +42,6 @@ import {
 const SOURCE_FILTER_OPTIONS: SourceType[] = [
   'ggx_dashboard', 'bulk_upload', 'api', 'shopify', 'gobenta', 'product_checkout',
 ];
-
-function csvCell(value: string): string {
-  return /[",\n]/.test(value) ? `"${value.replace(/"/g, '""')}"` : value;
-}
-
-function downloadCsv(filename: string, content: string): void {
-  const blob = new Blob([content], { type: 'text/csv;charset=utf-8;' });
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement('a');
-  a.href = url;
-  a.download = filename;
-  a.click();
-  URL.revokeObjectURL(url);
-}
 
 // ─── component ──────────────────────────────────────────────────────────────
 

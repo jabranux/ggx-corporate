@@ -36,9 +36,22 @@ export interface SettlementFilters {
   subaccountId?: string;
 }
 
+/**
+ * A Basic account is a separate tenant, not a Business+ subaccount — its
+ * settlements must never appear in the Business+ Corporate Earnings page's
+ * unscoped list (same tenant-isolation rule as transactionService's
+ * `isBasicAccountId`). Only reachable by scoping explicitly to the Basic
+ * account's own id.
+ */
+function isBasicAccountId(id: string | undefined): boolean {
+  return !!id && id.startsWith('basic-');
+}
+
 /** Return settlements, with optional status/source/subaccount filters. */
 export async function getSettlements(filters?: SettlementFilters): Promise<Settlement[]> {
-  let result = [...SETTLEMENTS];
+  let result = filters?.subaccountId
+    ? [...SETTLEMENTS]
+    : SETTLEMENTS.filter((s) => !isBasicAccountId(s.subaccountId));
   if (filters?.status && filters.status !== 'all') {
     result = result.filter((s) => s.status === filters.status);
   }

@@ -23,6 +23,11 @@ export const ACCOUNTS: AccountRef[] = [
   { id: 'acme-corporation', name: 'Acme Corporation' },
   { id: 'acme-luzon',       name: 'Acme Luzon' },
   { id: 'acme-visayas',     name: 'Acme Visayas' },
+  // Basic accounts are standalone (no Main/Subaccount hierarchy) but still
+  // resolve through this same id<->name bridge so the shared Transactions /
+  // Earnings scoping logic (txAccountId, getSettlements' subaccountId filter)
+  // works for them unchanged. See api/_lib/demoUsers.ts for the demo user.
+  { id: 'basic-jamie-cruz', name: "Jamie's Store" },
 ];
 
 const idByName = new Map(ACCOUNTS.map((a) => [a.name, a.id]));

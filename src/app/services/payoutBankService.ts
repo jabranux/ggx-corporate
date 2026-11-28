@@ -34,14 +34,21 @@ const BANKS_BY_MAIN_ACCOUNT: Record<string, PayoutBankAccount[]> = {
     { id: 'ba1', bank: 'BDO Unibank', accountMasked: '•••• •••• ••34 5678', accountName: 'Acme Corporation', isPrimary: true, status: 'verified' },
     { id: 'ba2', bank: 'BPI', accountMasked: '•••• •••• ••12 3456', accountName: 'Acme Corporation', isPrimary: false, status: 'pending' },
   ],
+  // Basic accounts have no Main/Subaccount hierarchy — they own their payout
+  // bank directly (see getPayoutOwnerAccountId below).
+  'basic-jamie-cruz': [
+    { id: 'ba-basic-1', bank: 'BPI', accountMasked: '•••• •••• ••90 2214', accountName: 'Jamie Cruz', isPrimary: true, status: 'verified' },
+  ],
 };
 
 const clone = (accounts: PayoutBankAccount[]) => accounts.map((account) => ({ ...account }));
 
-/** Resolve any batch/account scope to its Main Account finance owner. */
-export async function getPayoutOwnerAccountId(_accountId: string): Promise<string> {
-  // The mock data has one Main Account hierarchy. The future BFF resolves this
-  // relationship from the batch owner's account id.
+/** Resolve any batch/account scope to its payout-owning account. */
+export async function getPayoutOwnerAccountId(accountId: string): Promise<string> {
+  // A Basic account is standalone — it owns its payout bank directly, never
+  // through a Main Account. Every Business+ scope (Main or any subaccount)
+  // still resolves to the shared Main Account owner.
+  if (accountId.startsWith('basic-')) return accountId;
   return MAIN_ACCOUNT_ID;
 }
 
